@@ -9,7 +9,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { ServerMessage, UiExtensionInfo, UiSettingsState, UiSkillInfo, UiVisionBridgeModel } from "./protocol.js";
+import type { ServerMessage, UiExtensionInfo, UiSettingsState, UiSkillInfo } from "./protocol.js";
 import {
 	extensionKey,
 	normalizeRetryMaxAttempts,
@@ -18,17 +18,9 @@ import {
 	type ClientSettings,
 	type PromptMode,
 } from "./client-state.js";
-import { findVisionModels, SYSTEM_PROMPT } from "./vision-bridge.js";
-import { DEFAULT_TEMPLATES, type SubagentTemplatesStore } from "./subagent-templates.js";
 import { deriveLegacy, foldLegacyIntoDisabled, normalizeDisabledAgentTools } from "./tool-manager.js";
 
-/** ClientSession 提供给本服务的宿主能力（窄接口，便于独立测试）。 */
-export interface MarkerStateForSettings {
-	markersEnabled: boolean;
-	disabledMarkers: string[];
-	markers: import("./protocol.js").UiMarkerInfo[];
-}
-
+/** Host capabilities ClientSession provides (narrow, so the service is testable alone). */
 export interface SettingsHost {
 	clientId: string;
 	stateStore: ClientStateStore;
@@ -55,8 +47,6 @@ export interface SettingsHost {
 	 *  texts = 各来源 token 当前的默认（自动）内容（未覆盖时 {{token}} 展开值）；
 	 *  toolsSchema = 发给模型的 function-calling 工具定义（name/description/parameters）只读文本。 */
 	promptSnapshot: () => { full: string; texts: Record<string, string>; toolsSchema: string };
-	/** 可选：内置标记状态（设置面板展示用）。 */
-	getMarkerState?: () => MarkerStateForSettings;
 }
 
 export class SettingsService {
@@ -69,8 +59,6 @@ export class SettingsService {
 
 	constructor(
 		private readonly host: SettingsHost,
-		/** 全局子代理模板库（所有客户端共享；模板改动无需 reload runtime）。 */
-		private readonly templates: SubagentTemplatesStore,
 	) {
 		this.settings = host.stateStore.getSettings(host.clientId);
 		this.presets = host.stateStore.getPresets(host.clientId);
@@ -78,13 +66,6 @@ export class SettingsService {
 
 	get current(): ClientSettings {
 		return this.settings;
-	}
-
-	get reviewPrefs(): Pick<ClientSettings, "reviewPrompt" | "reviewDisabledSkills"> {
-		return {
-			reviewPrompt: this.settings.reviewPrompt,
-			reviewDisabledSkills: this.settings.reviewDisabledSkills,
-		};
 	}
 
 	hasPendingReload(): boolean {
@@ -136,7 +117,6 @@ export class SettingsService {
 
 	push(): void {
 		const disabledSkills = new Set(this.settings.disabledSkills);
-		const reviewDisabledSkills = new Set(this.settings.reviewDisabledSkills);
 		const disabledExts = new Set(this.settings.disabledExtensions);
 		let loadedSkillNames: Set<string> | null = null;
 		try {
@@ -187,19 +167,16 @@ export class SettingsService {
 			const stale = [
 				...new Set([
 					...this.settings.disabledSkills,
-					...this.settings.reviewDisabledSkills,
 					...normalizeSkillList(this.settings.skillsFullText),
 				]),
 			].filter((name) => !loadedSkillNames!.has(name) && !this.skillStillOnDisk(name));
 			if (stale.length > 0) {
 				this.settings.disabledSkills = this.settings.disabledSkills.filter((n) => !stale.includes(n));
-				this.settings.reviewDisabledSkills = this.settings.reviewDisabledSkills.filter((n) => !stale.includes(n));
 				this.settings.skillsFullText = normalizeSkillList(this.settings.skillsFullText).filter(
 					(n) => !stale.includes(n),
 				);
 				this.host.stateStore.saveSettings(this.host.clientId, {
 					disabledSkills: this.settings.disabledSkills,
-					reviewDisabledSkills: this.settings.reviewDisabledSkills,
 					skillsFullText: this.settings.skillsFullText,
 				});
 			}
@@ -225,9 +202,6 @@ export class SettingsService {
 		const skills = [...this.knownSkills.values()]
 			.map((s) => ({ ...s, enabled: !disabledSkills.has(s.name) }))
 			.sort((a, b) => a.name.localeCompare(b.name));
-		const reviewSkills = [...this.knownSkills.values()]
-			.map((s) => ({ ...s, enabled: !reviewDisabledSkills.has(s.name) }))
-			.sort((a, b) => a.name.localeCompare(b.name));
 		const extensions = [...this.knownExtensions.values()]
 			.map((e) => ({ ...e, enabled: !disabledExts.has(e.id) }))
 			.sort((a, b) => a.name.localeCompare(b.name));
@@ -246,18 +220,9 @@ export class SettingsService {
 				terminalToolsEnabled: legacyTools.terminalToolsEnabled,
 				terminalBash: this.settings.terminalBash,
 				terminalBashIdleMs: this.settings.terminalBashIdleMs,
-				editSoftEnabled: legacyTools.editSoftEnabled,
 				questionnaireEnabled: legacyTools.questionnaireEnabled,
-				goalModeEnabled: this.settings.goalModeEnabled,
 				thinkingWrap: this.settings.thinkingWrap,
 				toolsWrap: this.settings.toolsWrap,
-				visionBridgeEnabled: this.settings.visionBridgeEnabled,
-				visionBridgeModel: this.settings.visionBridgeModel,
-				visionBridgePromptMode: this.settings.visionBridgePromptMode,
-				visionBridgePrompt: this.settings.visionBridgePrompt,
-				reviewPrompt: this.settings.reviewPrompt,
-				reviewDisabledSkills: [...this.settings.reviewDisabledSkills],
-				disabledPlugins: [...(this.settings.disabledPlugins ?? [])],
 				skillsFullText: [...normalizeSkillList(this.settings.skillsFullText)],
 				// The composed system prompt actually in effect (read-only view).
 				effectiveSystemPrompt: promptSnap.full,
@@ -265,70 +230,14 @@ export class SettingsService {
 				promptSourceDefaults: promptSnap.texts,
 				// 发给模型的工具 schema（name/description/parameters）—— 只读预览。
 				toolsSchema: promptSnap.toolsSchema,
-				visionBridgeDefaultPrompt: SYSTEM_PROMPT,
-				visionModels: this.collectVisionModels(),
 				disabledSkills: [...this.settings.disabledSkills],
 				disabledExtensions: [...this.settings.disabledExtensions],
 				skills,
-				reviewSkills,
 				extensions,
 				presets: this.presets.map((p) => ({ ...p })),
-				...(this.host.getMarkerState
-					? this.host.getMarkerState()
-					: {
-							markersEnabled: true,
-							disabledMarkers: [] as string[],
-							markers: [] as import("./protocol.js").UiMarkerInfo[],
-						}),
-				subagentTemplates: this.templates.list(),
-				subagentDefaultTemplates: DEFAULT_TEMPLATES.map((t) => t.name),
-				subagentDefaultModel: this.settings.subagentDefaultModel ?? null,
 				retryMaxAttempts: this.settings.retryMaxAttempts,
-				subagentModels: this.collectSubagentModels(),
-				quickPhrases: [...this.settings.quickPhrases],
-				quickPhrasesEnabled: this.settings.quickPhrasesEnabled,
-				quickPhrasesSeeded: this.host.stateStore.getQuickPhrasesSeeded(),
 			} satisfies UiSettingsState,
 		});
-	}
-
-	/** Vision-capable configured models, for the settings-panel picker. */
-	private collectVisionModels(): UiVisionBridgeModel[] {
-		try {
-			return findVisionModels(this.host.getSession().modelRuntime).map((m) => ({
-				provider: m.provider,
-				id: m.id,
-				label: m.label,
-			}));
-		} catch {
-			// Session not ready yet — the picker stays empty until next push.
-			return [];
-		}
-	}
-
-	/** 已配置鉴权的全部模型（子代理模型选择器用；跟随视觉桥的收集方式但不限视觉）。 */
-	private collectSubagentModels(): UiVisionBridgeModel[] {
-		try {
-			const runtime = this.host.getSession().modelRuntime;
-			const out: UiVisionBridgeModel[] = [];
-			for (const p of runtime.getProviders()) {
-				if (!runtime.hasConfiguredAuth(p.id)) continue;
-				for (const m of runtime.getModels(p.id)) {
-					out.push({
-						provider: p.id,
-						id: m.id,
-						label: `${m.name ?? m.id} (${p.id})`,
-					});
-				}
-			}
-			// 稳定排序：provider 名 → 模型名。
-			return out.sort((a, b) =>
-				a.provider === b.provider ? a.label.localeCompare(b.label) : a.provider.localeCompare(b.provider),
-			);
-		} catch {
-			// Session not ready yet — the picker stays empty until next push.
-			return [];
-		}
 	}
 
 	/** Persist + apply a partial settings update (compose template / per-source
@@ -345,25 +254,11 @@ export class SettingsService {
 		terminalToolsEnabled?: boolean;
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
-		editSoftEnabled?: boolean;
 		questionnaireEnabled?: boolean;
-		goalModeEnabled?: boolean;
 		thinkingWrap?: boolean;
 		toolsWrap?: boolean;
 		skillsFullText?: string[];
-		visionBridgeEnabled?: boolean;
-		visionBridgeModel?: string | null;
-		visionBridgePromptMode?: PromptMode;
-		visionBridgePrompt?: string;
-		reviewPrompt?: string;
-		reviewDisabledSkills?: string[];
-		disabledPlugins?: string[];
-		subagentDefaultModel?: string | null;
 		retryMaxAttempts?: number;
-		markersEnabled?: boolean;
-		disabledMarkers?: string[];
-		quickPhrases?: string[];
-		quickPhrasesEnabled?: boolean;
 	}): Promise<void> {
 		const needsReload =
 			partial.promptMode !== undefined ||
@@ -376,7 +271,6 @@ export class SettingsService {
 		const toolGatingChanged =
 			partial.disabledAgentTools !== undefined ||
 			partial.terminalToolsEnabled !== undefined ||
-			partial.editSoftEnabled !== undefined ||
 			partial.questionnaireEnabled !== undefined;
 		if (partial.promptMode !== undefined) this.settings.promptMode = partial.promptMode;
 		if (partial.customSystemPrompt !== undefined) {
@@ -400,30 +294,20 @@ export class SettingsService {
 		if (partial.disabledExtensions !== undefined) {
 			this.settings.disabledExtensions = partial.disabledExtensions;
 		}
-		// 插件开关是纯 UI 隐藏（不进 needsReload——运行时无需重载）。
-		if (partial.disabledPlugins !== undefined) {
-			this.settings.disabledPlugins = partial.disabledPlugins;
-		}
 		// 统一工具开关：新字段优先；只给遗留单开关时折回新字段。两边写完再由
 		// deriveLegacy 回填遗留别名，保证内存/推送/落盘三处一致。
 		if (partial.disabledAgentTools !== undefined) {
 			this.settings.disabledAgentTools = normalizeDisabledAgentTools(partial.disabledAgentTools);
 		}
-		if (
-			partial.terminalToolsEnabled !== undefined ||
-			partial.editSoftEnabled !== undefined ||
-			partial.questionnaireEnabled !== undefined
-		) {
+		if (partial.terminalToolsEnabled !== undefined || partial.questionnaireEnabled !== undefined) {
 			this.settings.disabledAgentTools = foldLegacyIntoDisabled(this.settings.disabledAgentTools ?? [], {
 				terminalToolsEnabled: partial.terminalToolsEnabled,
-				editSoftEnabled: partial.editSoftEnabled,
 				questionnaireEnabled: partial.questionnaireEnabled,
 			});
 		}
 		{
 			const legacy = deriveLegacy(this.settings.disabledAgentTools ?? []);
 			this.settings.terminalToolsEnabled = legacy.terminalToolsEnabled;
-			this.settings.editSoftEnabled = legacy.editSoftEnabled;
 			this.settings.questionnaireEnabled = legacy.questionnaireEnabled;
 		}
 		if (partial.terminalBash !== undefined) {
@@ -431,10 +315,6 @@ export class SettingsService {
 		}
 		if (partial.terminalBashIdleMs !== undefined) {
 			this.settings.terminalBashIdleMs = Math.max(0, Math.floor(partial.terminalBashIdleMs) || 0);
-		}
-		// 目标模式总开关：运行时无需重载（goal bar / 服务端入口实时读取）。
-		if (partial.goalModeEnabled !== undefined) {
-			this.settings.goalModeEnabled = partial.goalModeEnabled;
 		}
 		if (partial.thinkingWrap !== undefined) {
 			this.settings.thinkingWrap = partial.thinkingWrap;
@@ -447,45 +327,11 @@ export class SettingsService {
 		if (partial.skillsFullText !== undefined) {
 			this.settings.skillsFullText = normalizeSkillList(partial.skillsFullText);
 		}
-		if (partial.visionBridgeEnabled !== undefined) {
-			this.settings.visionBridgeEnabled = partial.visionBridgeEnabled;
-		}
-		if (partial.visionBridgeModel !== undefined) {
-			this.settings.visionBridgeModel = partial.visionBridgeModel ?? null;
-		}
-		if (partial.visionBridgePromptMode !== undefined) {
-			this.settings.visionBridgePromptMode = partial.visionBridgePromptMode;
-		}
-		if (partial.visionBridgePrompt !== undefined) {
-			this.settings.visionBridgePrompt = partial.visionBridgePrompt;
-		}
-		if (partial.reviewPrompt !== undefined) {
-			this.settings.reviewPrompt = partial.reviewPrompt;
-		}
-		if (partial.reviewDisabledSkills !== undefined) {
-			this.settings.reviewDisabledSkills = partial.reviewDisabledSkills;
-		}
-		if (partial.subagentDefaultModel !== undefined) {
-			// 空串归一为 null（跟随主对话）；其余剥空白后存格式 provider/id。
-			const m = partial.subagentDefaultModel?.trim() ?? "";
-			this.settings.subagentDefaultModel = m ? m : null;
-		}
 		if (partial.retryMaxAttempts !== undefined) {
 			// 出错重试次数：持久化 + 即时注入各会话（SDK 在每次退避前都重读
 			// getRetrySettings，无需 reload runtime；见宿主 applyRetryOverrides）。
 			this.settings.retryMaxAttempts = normalizeRetryMaxAttempts(partial.retryMaxAttempts);
 			this.host.applyRetryOverrides();
-		}
-		if (partial.quickPhrases !== undefined) {
-			// 归一化：去空白/空项/重名，单条 ≤200 字，最多 30 条。纯 UI 偏好，不 reload。
-			const seen = new Set<string>();
-			this.settings.quickPhrases = (Array.isArray(partial.quickPhrases) ? partial.quickPhrases : [])
-				.map((p) => String(p).trim().slice(0, 200))
-				.filter((p) => p && !seen.has(p) && (seen.add(p), true))
-				.slice(0, 30);
-		}
-		if (partial.quickPhrasesEnabled !== undefined) {
-			this.settings.quickPhrasesEnabled = partial.quickPhrasesEnabled;
 		}
 		this.host.stateStore.saveSettings(this.host.clientId, this.settings);
 		this.push();
@@ -501,8 +347,7 @@ export class SettingsService {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: "预设名称不能为空",
-				textEn: "Preset name cannot be empty",
+				text: "Preset name cannot be empty",
 			});
 			return;
 		}
@@ -518,10 +363,7 @@ export class SettingsService {
 			terminalToolsEnabled: this.settings.terminalToolsEnabled,
 			terminalBash: this.settings.terminalBash,
 			terminalBashIdleMs: this.settings.terminalBashIdleMs,
-			editSoftEnabled: this.settings.editSoftEnabled,
 			retryMaxAttempts: this.settings.retryMaxAttempts,
-			reviewPrompt: this.settings.reviewPrompt,
-			reviewDisabledSkills: [...this.settings.reviewDisabledSkills],
 			skillsFullText: [...normalizeSkillList(this.settings.skillsFullText)],
 		};
 		const existing = this.presets.findIndex((p) => p.name === n);
@@ -538,8 +380,7 @@ export class SettingsService {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: `预设不存在：${name}`,
-				textEn: `Preset does not exist: ${name}`,
+				text: `Preset does not exist: ${name}`,
 			});
 			return;
 		}
@@ -549,7 +390,6 @@ export class SettingsService {
 			(p as { disabledAgentTools?: unknown }).disabledAgentTools ??
 				foldLegacyIntoDisabled(this.settings.disabledAgentTools ?? [], {
 					terminalToolsEnabled: p.terminalToolsEnabled,
-					editSoftEnabled: p.editSoftEnabled,
 				}),
 		);
 		const presetLegacy = deriveLegacy(presetDisabled);
@@ -565,30 +405,15 @@ export class SettingsService {
 			// 终端接管偏好随预设走；旧预设缺字段时保留当前值。
 			terminalBash: p.terminalBash ?? this.settings.terminalBash,
 			terminalBashIdleMs: p.terminalBashIdleMs ?? this.settings.terminalBashIdleMs,
-			editSoftEnabled: presetLegacy.editSoftEnabled,
 			// 重试次数随预设走；旧预设缺字段时保留当前值，应用后即时注入各会话。
 			retryMaxAttempts: p.retryMaxAttempts ?? this.settings.retryMaxAttempts,
 			// 问卷开关不进预设——保留当前值。
 			questionnaireEnabled: this.settings.questionnaireEnabled,
-			// 目标模式总开关不进预设——保留当前值。
-			goalModeEnabled: this.settings.goalModeEnabled,
-			reviewPrompt: p.reviewPrompt ?? this.settings.reviewPrompt,
-			reviewDisabledSkills: [...(p.reviewDisabledSkills ?? this.settings.reviewDisabledSkills)],
 			// 全文注入名单随预设走；旧预设缺字段时保留当前值。
 			skillsFullText: normalizeSkillList(p.skillsFullText ?? this.settings.skillsFullText),
 			// 纯 UI 偏好不进预设——保留当前值。
 			thinkingWrap: this.settings.thinkingWrap,
 			toolsWrap: this.settings.toolsWrap,
-			// Presets don't capture vision-bridge prefs — keep the current ones.
-			visionBridgeEnabled: this.settings.visionBridgeEnabled,
-			visionBridgeModel: this.settings.visionBridgeModel,
-			visionBridgePromptMode: this.settings.visionBridgePromptMode,
-			visionBridgePrompt: this.settings.visionBridgePrompt,
-			// 子代理默认模型也不进预设——保留当前值。
-			subagentDefaultModel: this.settings.subagentDefaultModel,
-			// 快捷短语是纯 UI 偏好，不进预设——保留当前值。
-			quickPhrases: [...this.settings.quickPhrases],
-			quickPhrasesEnabled: this.settings.quickPhrasesEnabled,
 		};
 		this.host.stateStore.saveSettings(this.host.clientId, this.settings);
 		// 预设可能改了重试次数：即时注入（流式中延迟的 reload 之后还会由调用方重放）。
@@ -606,40 +431,6 @@ export class SettingsService {
 		this.push();
 	}
 
-	/** Upsert 一个子代理模板（全局共享）。模板只影响未来派生的子代理，
-	 *  不需要 reload runtime —— 直接推送新设置状态即可。 */
-	async saveTemplate(template: Parameters<SubagentTemplatesStore["upsert"]>[0]): Promise<void> {
-		const err = this.templates.upsert(template);
-		if (err) {
-			this.host.emit({
-				type: "notice",
-				level: "error",
-				text: `子代理模板保存失败：${err}`,
-				textEn: `Failed to save subagent template: ${err}`,
-			});
-			return;
-		}
-		this.push();
-		const n = (template as { name?: string })?.name?.trim() ?? "";
-		this.host.emit({
-			type: "notice",
-			level: "info",
-			text: `子代理模板已保存：${n}`,
-			textEn: `Subagent template saved: ${n}`,
-		});
-	}
-
-	/** 删除一个子代理模板。 */
-	async deleteTemplate(name: string): Promise<void> {
-		this.templates.remove(name);
-		this.push();
-		this.host.emit({
-			type: "notice",
-			level: "info",
-			text: `子代理模板已删除：${name}`,
-			textEn: `Subagent template deleted: ${name}`,
-		});
-	}
 
 	/**
 	 * Make settings changes effective in the running runtime. The resource-loader
@@ -653,8 +444,7 @@ export class SettingsService {
 			this.host.emit({
 				type: "notice",
 				level: "info",
-				text: "当前回复进行中，设置将在回复结束后自动应用",
-				textEn: "A reply is in progress; settings will apply when it finishes",
+				text: "A reply is in progress; settings will apply when it finishes",
 			});
 			return;
 		}
@@ -667,13 +457,12 @@ export class SettingsService {
 			await this.host.reloadSession();
 			this.push();
 			this.host.flushSnapshot();
-			this.host.emit({ type: "notice", level: "info", text: "设置已应用", textEn: "Settings applied" });
+			this.host.emit({ type: "notice", level: "info", text: "Settings applied",});
 		} catch (err) {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: `设置应用失败：${(err as Error).message}`,
-				textEn: `Failed to apply settings: ${(err as Error).message}`,
+				text: `Failed to apply settings: ${(err as Error).message}`,
 			});
 		}
 	}

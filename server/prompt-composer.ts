@@ -9,7 +9,7 @@
  * token 列表及默认顺序镜像 buildSystemPrompt（SDK dist/core/system-prompt.js）
  * 默认分支的拼装顺序：
  *     soul → tools → guidelines → pi_docs → append → persona → terminal →
- *     markers → context → skills → cwd
+ *     context → skills → cwd
  *
  * （bash 管道限制不需要独立段：它属于 bash 工具的用法说明，已写进工具自身
  *  description，随工具走；compose 里不再单设 {{pipe}} 来源。）
@@ -18,7 +18,7 @@
  * DEFAULT_PROMPT_TEMPLATE 与 token 元数据）。
  */
 
-import { getServerBlock, pick, type ServerLang } from "./i18n.js";
+import type { ServerLang } from "./i18n.js";
 
 /** 全部来源 token。默认模板顺序即此数组顺序。 */
 export const PROMPT_TOKENS = [
@@ -29,7 +29,6 @@ export const PROMPT_TOKENS = [
 	"append", // 追加段（APPEND_SYSTEM.md 内容；覆盖 = 自定义追加文字）
 	"persona", // Windows persona（仅 win32）
 	"terminal", // 终端工具使用引导（「终端工具」开关开时）
-	"markers", // 内置标记工具引导（markers 开启时）
 	"context", // 项目上下文 <project_context>（AGENTS.md 等）
 	"skills", // 技能段 <available_skills>
 	"cwd", // Current working directory 行
@@ -45,7 +44,6 @@ export const READONLY_PROMPT_SOURCES = [
 	"pi_docs", // Pi 文档指引（指向已安装 pi 包路径，由安装位置决定）
 	"persona", // Windows persona（仅 win32，平台固定）
 	"terminal", // 终端工具使用引导（随「终端工具」开关）
-	"markers", // 内置标记工具引导（随 markers 开关）
 	"context", // 项目上下文（AGENTS.md / CLAUDE.md 收集结果）
 	"skills", // 技能段（来自环境/技能文件）
 	"cwd", // 当前工作目录
@@ -113,8 +111,6 @@ export interface PromptComposerInputs {
 	windowsPersona: string;
 	/** 终端工具使用引导（「终端工具」关时传空串）。 */
 	terminalGuidance: string;
-	/** 标记工具引导（markers 关时为空串）。 */
-	markersGuidance: string;
 	/** 项目上下文文件（AGENTS.md 等，path + content）。 */
 	contextFiles: { path: string; content: string }[];
 	/** 可见技能（已按禁用集过滤、disableModelInvocation=false）。
@@ -184,31 +180,16 @@ function buildGuidelinesText(inputs: PromptComposerInputs): string {
 	if ((has("bash") || has("powershell")) && !has("grep") && !has("find") && !has("ls")) {
 		add(
 			has("bash") && has("powershell")
-				? pick(
-						lang,
-						"涉及列出、搜索、查找文件等文件操作时，使用 bash 或 PowerShell",
-						"Use bash or PowerShell for file operations like listing, searching, and finding files",
-						"prompt.guidelines.bash.powershell",
-					)
-				: pick(
-						lang,
-						"涉及 ls、rg、find 等文件操作时，使用 bash",
-						"Use bash for file operations like ls, rg, find",
-						"prompt.guidelines.bash.basic",
-					),
+				? "Use bash or PowerShell for file operations like listing, searching, and finding files"
+				: "Use bash for file operations like ls, rg, find",
 		);
 	}
 	for (const g of inputs.toolGuidelines) add(g);
-	add(pick(lang, "回答要简洁", "Be concise in your responses", "prompt.guidelines.be.concise"));
+	add("Be concise in your responses");
 	add(
-		pick(
-			lang,
-			"处理文件时清楚地给出文件路径",
-			"Show file paths clearly when working with files",
-			"prompt.guidelines.show.paths",
-		),
+		"Show file paths clearly when working with files",
 	);
-	return `${pick(lang, "指导原则：", "Guidelines:", "prompt.guidelines.title")}\n${lines.map((l) => `- ${l}`).join("\n")}`;
+	return `${"Guidelines:"}\n${lines.map((l) => `- ${l}`).join("\n")}`;
 }
 
 function escapeXml(s: string): string {
@@ -231,24 +212,9 @@ export function buildSkillsText(
 	const visible = skills.filter((s) => !(s as { disableModelInvocation?: boolean }).disableModelInvocation);
 	if (visible.length === 0) return "";
 	const lines = [
-		pick(
-			lang,
-			"以下技能为特定任务提供专门的指令。",
-			"The following skills provide specialized instructions for specific tasks.",
-			"prompt.skills.intro.specialized",
-		),
-		pick(
-			lang,
-			"当任务与某技能的描述相符时，用 read 工具加载该技能文件。",
-			"Use the read tool to load a skill's file when the task matches its description.",
-			"prompt.skills.intro.use.read",
-		),
-		pick(
-			lang,
-			"当技能文件引用相对路径时，以技能目录（SKILL.md 的父目录 / 该路径的 dirname）为基准解析，并在工具命令中使用解析后的绝对路径。",
-			"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-			"prompt.skills.intro.resolve.path",
-		),
+		"The following skills provide specialized instructions for specific tasks.",
+		"Use the read tool to load a skill's file when the task matches its description.",
+		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",
 	];
@@ -277,7 +243,7 @@ function buildContextText(files: PromptComposerInputs["contextFiles"], lang: Ser
 	return [
 		"<project_context>",
 		"",
-		pick(lang, "项目专属指令与规范：", "Project-specific instructions and guidelines:", "prompt.context.title"),
+		"Project-specific instructions and guidelines:",
 		"",
 		...files.map((f) => `<project_instructions path="${f.path}">\n${f.content}\n</project_instructions>`),
 		"",
@@ -324,7 +290,7 @@ export function resolveSectionTexts(inputs: PromptComposerInputs): Record<Prompt
 	let soul = inputs.systemPromptFile?.trim() ? inputs.systemPromptFile : inputs.builtinSoul;
 	if (lang === "zh" && soul === BUILTIN_SOUL) soul = BUILTIN_SOUL_ZH;
 	else if (soul === BUILTIN_SOUL)
-		soul = getServerBlock(lang, "prompt.soul", BUILTIN_SOUL_ZH.split("\n"), BUILTIN_SOUL.split("\n")).join("\n");
+		soul = BUILTIN_SOUL.split("\n").join("\n");
 	return {
 		soul,
 		tools: buildToolsText(inputs),
@@ -333,7 +299,6 @@ export function resolveSectionTexts(inputs: PromptComposerInputs): Record<Prompt
 		append: inputs.appendFiles.join("\n\n"),
 		persona: inputs.windowsPersona,
 		terminal: inputs.terminalGuidance,
-		markers: inputs.markersGuidance,
 		context: buildContextText(inputs.contextFiles, lang),
 		skills: buildSkillsText(inputs.skills, lang, inputs.skillsFullText ?? false),
 		cwd: `Current working directory: ${cwd}`,

@@ -8,7 +8,7 @@
 import { mkdirSync, statSync, writeFileSync, watch } from "node:fs";
 import { resolve, relative, sep } from "node:path";
 import type { ServerMessage, FileEntry, FileSearchResult } from "./protocol.js";
-import { pick, type ServerLang } from "./i18n.js";
+import type { ServerLang } from "./i18n.js";
 import { previewKind, looksLikeText, decodeText, hexDump, countLines } from "./text-sniff.js";
 import { gitDirOf, isNotRepoError, scmStatus, scmHistory, scmFileDiff, scmCommitDetail } from "./scm.js";
 
@@ -244,8 +244,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "warning",
-				text: `目录不存在：${path}`,
-				textEn: `Directory not found: ${path}`,
+				text: `Directory not found: ${path}`,
 			});
 			return;
 		}
@@ -253,16 +252,14 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "warning",
-				text: `不是目录：${path}`,
-				textEn: `Not a directory: ${path}`,
+				text: `Not a directory: ${path}`,
 			});
 			return;
 		}
 		this.host.emit({
 			type: "notice",
 			level: IS_WIN32 ? "warning" : "error",
-			text: `目录不可读：${error}`,
-			textEn: `Directory is not readable: ${error}`,
+			text: `Directory is not readable: ${error}`,
 		});
 	}
 
@@ -310,8 +307,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "warning",
-				text: `路径超出工作区：${relPath ?? ""}`,
-				textEn: `Path is outside the workspace: ${relPath ?? ""}`,
+				text: `Path is outside the workspace: ${relPath ?? ""}`,
 			});
 			return;
 		}
@@ -439,7 +435,7 @@ export class FilesService {
 				const rel = relative(resolve(cwd), resolve(cwd, arg.path));
 				if (rel.startsWith("..") || rel === "")
 					throw new Error(
-						pick(this.lang(), "路径超出工作区", "Path is outside the workspace", "files.path.outside.workspace"),
+						"Path is outside the workspace",
 					);
 				const { staged, worktree } = await scmFileDiff(cwd, arg.path, () => this.lang());
 				this.host.emit({
@@ -458,7 +454,7 @@ export class FilesService {
 				return;
 			}
 			throw new Error(
-				pick(this.lang(), "无效的 scm 查询参数", "Invalid scm query arguments", "files.scm.invalid.args"),
+				"Invalid scm query arguments",
 			);
 		} catch (err) {
 			if (isNotRepoError(err)) {
@@ -632,9 +628,7 @@ export class FilesService {
 		this.host.emit({
 			type: "notice",
 			level: "info",
-			text: "此目录不支持实时文件监听（网络盘/受限目录），文件面板已改为每 10 秒自动刷新。",
-			textEn:
-				"Live file watching is not supported for this directory (network/restricted); the file panel now refreshes every 10s",
+			text: "Live file watching is not supported for this directory (network/restricted); the file panel now refreshes every 10s",
 		});
 	}
 
@@ -674,8 +668,7 @@ export class FilesService {
 					this.host.emit({
 						type: "notice",
 						level: "warning",
-						text: `路径超出工作区：${relPath}`,
-						textEn: `Path is outside the workspace: ${relPath}`,
+						text: `Path is outside the workspace: ${relPath}`,
 					});
 					return;
 				}
@@ -687,8 +680,7 @@ export class FilesService {
 				this.host.emit({
 					type: "notice",
 					level: "warning",
-					text: `不是文件：${relPath}`,
-					textEn: `Not a file: ${relPath}`,
+					text: `Not a file: ${relPath}`,
 				});
 				return;
 			}
@@ -751,8 +743,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: `读取文件失败：${(err as Error).message}`,
-				textEn: `Failed to read file: ${(err as Error).message}`,
+				text: `Failed to read file: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -773,8 +764,7 @@ export class FilesService {
 					this.host.emit({
 						type: "notice",
 						level: "warning",
-						text: `路径超出工作区：${relPath}`,
-						textEn: `Path is outside the workspace: ${relPath}`,
+						text: `Path is outside the workspace: ${relPath}`,
 					});
 					return;
 				}
@@ -785,8 +775,7 @@ export class FilesService {
 				this.host.emit({
 					type: "notice",
 					level: "warning",
-					text: "文件内容过大，无法保存（上限 2MB）",
-					textEn: "File too large to save (2MB max)",
+					text: "File too large to save (2MB max)",
 				});
 				return;
 			}
@@ -795,8 +784,7 @@ export class FilesService {
 				this.host.emit({
 					type: "notice",
 					level: "warning",
-					text: `不是文件：${relPath}`,
-					textEn: `Not a file: ${relPath}`,
+					text: `Not a file: ${relPath}`,
 				});
 				return;
 			}
@@ -804,8 +792,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "info",
-				text: `已保存：${rel}`,
-				textEn: `Saved: ${rel}`,
+				text: `Saved: ${rel}`,
 			});
 			// Re-read through the same path as the preview request so the client
 			// gets the canonical content, line count and file size after saving.
@@ -814,8 +801,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: `保存文件失败：${(err as Error).message}`,
-				textEn: `Failed to save file: ${(err as Error).message}`,
+				text: `Failed to save file: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -828,7 +814,7 @@ export class FilesService {
 	 * for the target dir (the recursive watcher may not cover it on posix).
 	 */
 	async uploadFile(relDir: string, name: string, data: string): Promise<void> {
-		const emitErr = (text: string, textEn?: string) => this.host.emit({ type: "notice", level: "error", text, textEn });
+		const emitErr = (text: string) => this.host.emit({ type: "notice", level: "error", text });
 		try {
 			const root = this.host.getCwd();
 			const absDir = relDir ? isAbsoluteWirePath(relDir) : false;
@@ -836,7 +822,7 @@ export class FilesService {
 			if (relDir && !absDir) {
 				wp = workspacePath(resolve(root), relDir);
 				if (!wp) {
-					emitErr(`路径超出工作区：${relDir}`, `Path outside workspace: ${relDir}`);
+					emitErr(`Path outside workspace: ${relDir}`);
 					return;
 				}
 			} else if (relDir) {
@@ -857,19 +843,18 @@ export class FilesService {
 			} else {
 				const rawRel = relative(root, abs);
 				if (rawRel.startsWith("..") || rawRel.includes(`${sep}..`)) {
-					emitErr(`文件名不合法：${name}`, `Invalid file name: ${name}`);
+					emitErr(`Invalid file name: ${name}`);
 					return;
 				}
 				uploadRel = rawRel.split(sep).join("/");
 			}
 			const buf = Buffer.from(data, "base64");
 			if (buf.length === 0) {
-				emitErr(`空文件：${name}`, `Empty file: ${name}`);
+				emitErr(`Empty file: ${name}`);
 				return;
 			}
 			if (buf.length > MAX_UPLOAD_BYTES) {
 				emitErr(
-					`文件过大：${name}（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`,
 					`File too large: ${name} (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB)`,
 				);
 				return;
@@ -879,8 +864,7 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "info",
-				text: `已上传：${uploadRel}`,
-				textEn: `Uploaded: ${uploadRel}`,
+				text: `Uploaded: ${uploadRel}`,
 			});
 			// Emit for the target directory itself so the panel refreshes even
 			// when the active listing/preview isn't that dir (posix watcher only
@@ -890,7 +874,7 @@ export class FilesService {
 				path: wp.rel,
 			});
 		} catch (err) {
-			emitErr(`上传文件失败：${(err as Error).message}`, `Upload failed: ${(err as Error).message}`);
+			emitErr(`Upload failed: ${(err as Error).message}`);
 		}
 	}
 
@@ -907,7 +891,7 @@ export class FilesService {
 			const { homedir } = await import("node:os");
 			const home = homedir();
 			let expanded = input.trim();
-			if (!expanded) throw new Error(pick(this.lang(), "路径为空", "Empty path", "files.path.empty"));
+			if (!expanded) throw new Error("Empty path");
 			if (expanded === "~" || expanded === "~\\") {
 				expanded = home;
 			} else if (expanded.startsWith("~/") || expanded.startsWith("~\\")) {
@@ -920,15 +904,13 @@ export class FilesService {
 			this.host.emit({
 				type: "notice",
 				level: "info",
-				text: `已创建文件夹：${abs}`,
-				textEn: `Folder created: ${abs}`,
+				text: `Folder created: ${abs}`,
 			});
 		} catch (err) {
 			this.host.emit({
 				type: "notice",
 				level: "error",
-				text: `创建文件夹失败：${(err as Error).message}`,
-				textEn: `Failed to create folder: ${(err as Error).message}`,
+				text: `Failed to create folder: ${(err as Error).message}`,
 			});
 		}
 	}

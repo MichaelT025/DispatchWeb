@@ -237,13 +237,11 @@ export interface SlashCommandInfo {
 	 *  names are suffixed by the SDK ("new:2"), like the CLI. */
 	name: string;
 	description?: string;
-	descriptionEn?: string;
 	/** Argument placeholder shown in the picker (e.g. "<路径>", "[说明]"). */
 	argumentHint?: string;
-	argumentHintEn?: string;
 	/** Where the command comes from: web-native builtin / SDK extension /
 	 *  prompt template / skill / UI plugin（registerCommand）。 */
-	source: "builtin" | "extension" | "prompt" | "skill" | "plugin";
+	source: "builtin" | "extension" | "prompt" | "skill";
 }
 
 /** Attachment spec shared by "prompt" and "edit_message" client messages:
@@ -286,12 +284,7 @@ export interface PromptAttachment {
 }
 
 export type ClientMessage =
-	| { type: "hello"; clientId: string; protocolVersion?: number; locale?: string }
-	/** Browser UI language changed (or first report after hello) — server
-	 *  persists it per client and uses it for tool return values / AI-facing
-	 *  prompts. "zh" (zh-CN/…) → Chinese; anything else → English
-	 *  (English default, issue #91). */
-	| { type: "set_locale"; locale: string }
+	| { type: "hello"; clientId: string; protocolVersion?: number }
 	/** Re-request the slash-command catalog (also pushed on attach / cwd change). */
 	| { type: "get_commands" }
 	| {
@@ -322,8 +315,6 @@ export type ClientMessage =
 			type: "terminal_create";
 			terminalId: string;
 			title?: string;
-			/** UI locale ("zh" | "en") — server picks the exit-banner language. */
-			locale?: string;
 			cwd: string;
 			cols: number;
 			rows: number;
@@ -361,7 +352,7 @@ export type ClientMessage =
 	| { type: "retry_last" }
 	// -- background tasks (AI-started servers) ------------------------------
 	/** Kill ONE background server the agent started (by listening port). */
-	| { type: "kill_background_server"; port?: number; taskId?: string }
+	| { type: "kill_background_server"; port?: number }
 	/** Kill EVERY background server the agent started (frees all ports). */
 	| { type: "kill_background_servers" }
 	/** Re-push the current background-server list (the server also refreshes it
@@ -439,10 +430,6 @@ export type ClientMessage =
 	 *  refreshes its own listing afterwards. */
 	| { type: "make_dir"; path: string }
 	| { type: "dialog_response"; id: number; value: string | boolean | null }
-	// -- self-update ----------------------------------------------------------
-	/** Check the npm registry for a newer pi-web-ui version. */
-	| { type: "check_update" }
-	| { type: "check_updates_all"; force?: true } // webui + direct pi extensions (manifest)
 	/** Restart the supervised service (same effect as `pi-web-ui server restart`:
 	 *  this process exits and its supervisor brings it back). The server refuses
 	 *  when no supervisor manages this instance (foreground / dev / Docker). */
@@ -511,32 +498,6 @@ export type ClientMessage =
 	 *  until save_model_config; the draft comes back in clone_provider_result
 	 *  with a fresh provider id and an EMPTY apiKey for the user to fill. */
 	| { type: "clone_provider"; provider: string; reqId: number }
-	// -- goal / review -------------------------------------------------------
-	/** Set (or clear) the active goal. When set, each finished agent run is
-	 *  reviewed by an isolated reviewer agent; a failing review steers the main
-	 *  session to revise until `maxRounds` runs out. `locked: true` keeps the
-	 *  goal active across every subsequent turn; `false` clears it after the
-	 *  next turn (single-shot). `reviewModel` ("provider/id", optional) selects
-	 *  a different model for the reviewer. */
-	| { type: "set_goal"; goal: string; reviewModel?: string; maxRounds: number; locked: boolean }
-	| { type: "clear_goal" }
-	/** Start the collaborative target wizard: a user requirement goes into an
-	 *  ISOLATED wizard session which questions the user (multiple-choice + free
-	 *  text bridges) to scope details, then AUTO-SETS the refined goal. `text` is
-	 *  the user's raw requirement. `wizardModel` ("provider/id", optional) picks
-	 *  a different model for the wizard; default is the main conversation model.
-	 *  Mutually exclusive with an active review and with a running wizard. */
-	| { type: "start_goal_wizard"; text: string; wizardModel?: string; maxRounds?: number; locked?: boolean }
-	/** Persist the client's goal/review preference defaults (model choice, review
-	 *  rounds cap, locked) so they survive reload. maxRounds 0 = unlimited.
-	 *  Sent by the goal bar whenever a preference changes (model picker, rounds,
-	 *  lock toggle). */
-	| {
-			type: "set_goal_prefs";
-			reviewModel?: string;
-			maxRounds?: number;
-			locked?: boolean;
-	  }
 	// -- settings (system prompt / skills / extensions / presets) ------------
 	/** Request the current settings state (also pushed automatically on attach). */
 	| { type: "get_settings" }
@@ -555,9 +516,6 @@ export type ClientMessage =
 			disabledExtensions?: string[];
 			/** 统一 Agent 工具禁用名单（见 server/tool-manager.ts；live 生效无需 reload）。 */
 			disabledAgentTools?: string[];
-			/** Installed UI plugins hidden in the settings panel (UI-only toggle,
-			 *  never triggers a runtime reload). */
-			disabledPlugins?: string[];
 			/** Persistent-terminal tools on/off (default on). Off → terminal_* tools
 			 *  are removed from the active tool set and the built-in usage guidance
 			 *  disappears from the system prompt. */
@@ -565,82 +523,20 @@ export type ClientMessage =
 			/** 终端接管 bash 开关 + 静默解阻阈值毫秒（0 = 一直等到命令结束）。 */
 			terminalBash?: boolean;
 			terminalBashIdleMs?: number;
-			/** edit_soft 工具开关（默认关）。开 → AI 可用不严格要求缩进的 edit_soft 工具。 */
-			editSoftEnabled?: boolean;
 			/** 问卷提问（ask_user_question）开关（默认开）。关 → 模型不再弹问卷。 */
 			questionnaireEnabled?: boolean;
-			/** 目标模式（目标条 + 调研向导 + 审查循环）总开关（默认开）。关 → 目标条
-			 *  隐藏、无法设目标/启动调研/触发审查。纯运行开关，无需 reload。 */
-			goalModeEnabled?: boolean;
 			/** 思考文本是否换行（默认开）。纯 UI 偏好，不需要 reload runtime。 */
 			thinkingWrap?: boolean;
 			/** 工具调用是否默认展开（默认开）。纯 UI 偏好，不需要 reload runtime。 */
 			toolsWrap?: boolean;
 			/** skill 全文注入名单（默认空 = 名录模式）。名单里的技能 {{skills}} 展开正文。 */
 			skillsFullText?: string[];
-			/** 子代理默认模型（"provider/id"；null/未设 = 子代理跟随主对话当前模型）。
-			 * 不改主会话模型，只在派生子代理时生效。 */
-			subagentDefaultModel?: string | null;
-			/** Vision bridge on/off + preferred "provider/id" model (null = auto). */
-			visionBridgeEnabled?: boolean;
-			visionBridgeModel?: string | null;
-			/** Vision-bridge transcription prompt: mode (append/replace, same
-			 *  semantics as promptMode) + custom text (empty = built-in default). */
-			visionBridgePromptMode?: "append" | "replace";
-			visionBridgePrompt?: string;
-			/** Extra instructions and independently disabled skills for review. */
-			reviewPrompt?: string;
-			reviewDisabledSkills?: string[];
 			/** 大模型 API 出错自动重试次数（默认 6；0 = 失败即停）。即时生效，无需 reload。 */
 			retryMaxAttempts?: number;
-			/** 内置标记总开关 + 按 marker 禁用（markersEnabled=false 时全部停用）。 */
-			markersEnabled?: boolean;
-			disabledMarkers?: string[];
-			/** 输入框上方的快捷短语（点击即发送）。纯 UI 偏好，不需要 reload runtime。 */
-			quickPhrases?: string[];
-			quickPhrasesEnabled?: boolean;
-			/** 上报「已 seed 一次默认快捷短语」（首次见空列表时客户端按语言填一批默认并置位；
-			 *  服务端存全局标记，跨会话/跨浏览器生效，避免删除默认后又被填回）。 */
-			quickPhrasesSeeded?: boolean;
 	  }
-	// -- plugins (<dataDir>/plugins) -----------------------------------------
-	/** App-level message from a plugin's client bundle to its server side.
-	 *  Routed by pluginId; unknown/failed plugins are silently ignored. */
-	| { type: "plugin_message"; pluginId: string; payload: unknown }
-	/** Re-scan the plugin directory: deactivate removed entries, activate new
-	 *  ones, bump the epoch and re-push the catalog. Same spirit as
-	 *  extensions_reload but for pi-web-ui's own UI plugins. */
-	| { type: "plugins_reload" }
 	/** Save the CURRENT settings as a named preset (overwrites if it exists). */
 	| { type: "save_preset"; name: string }
-	/** Upsert 一个子代理模板（同名覆盖；全局共享，所有客户端一致）。停用标记
-	 *  enabled 一起保存 —— 关闭的模板设置面板可见、可重开，但 AI 工具查询不到。 */
-	| { type: "save_subagent_template"; template: UiSubagentTemplate }
-	/** 删除一个子代理模板。 */
-	| { type: "delete_subagent_template"; name: string }
-	/** Save a UI plugin's declarative settings (manifest "settings" schema).
-	 *  The host validates against the schema, persists to storage.json and
-	 *  notifies the plugin (host.onSettingsChanged). */
-	| { type: "plugin_settings"; pluginId: string; values: Record<string, unknown> }
-	/** Add a third-party plugin to the user's installable-plugin list
-	 *  (<dataDir>/plugin-catalog.json). `source` is required
-	 *  (owner/repo or owner/repo/subdir[#ref]); id/name/description/icon are
-	 *  optional — the server normalizes defaults (id falls back to the CLI's
-	 *  repo/subdir naming, name falls back to id). */
-	| {
-			type: "plugin_catalog_add";
-			entry: { source: string; id?: string; name?: string; description?: string; icon?: string };
-	  }
-	/** Remove a user-added plugin from the installable-plugin list (builtin
-	 *  entries from the shipped catalog can't be removed via the UI). */
-	| { type: "plugin_catalog_remove"; id: string }
-	// -- DSH engine user patches (<dataDir>/dsh-patches) ---------------------
-	/** List <dataDir>/dsh-patches/*.yml (DSH engine only; pi engine ignores). */
-	| { type: "dsh_patches_list" }
-	/** Re-scan <dataDir>/dsh-patches and restart the DSH runtime so new/edited
-	 *  patch files take effect (patches are only loaded at runtime boot). */
-	| { type: "dsh_patches_rescan" }
-	/** DSH engine: answer a model ask_user_question dialog (id echoes
+	/** Answer a model ask_user_question dialog (id echoes
 	 *  question_pending.id). `cancelled` (user ✗) rejects the pending ask. */
 	| {
 			type: "question_answer";
@@ -664,19 +560,9 @@ export type ClientMessage =
 	/** Dismiss a running conversation from the left-panel list (frees its runtime
 	 *  but keeps the persisted transcript in history). Only non-streaming
 	 *  conversations can be dismissed; streaming ones refuse with a notice.
-	 *  withFinishedSubagents = 连带关闭该对话下已结束的子代理（传递后代；运行
-	 *  中的子代理仍会阻止关闭，绝不连带 abort）。不传 + 存在已结束子代理后代
-	 *  时拒绝并提示（避免静默 orphan，由前端确认框先问用户）。
-	 *  force = 强行关闭：中止自身运行（如在跑）+ 中止全部子代理后代
-	 *  （运行中的也停）再整体移出；终端/审查/后台唤醒等保留态一并放行。
-	 *  active 对话也可关闭（后端自动切到其他对话或新建后再移）。 */
-	| { type: "dismiss_conversation"; id: string; withFinishedSubagents?: boolean; force?: boolean }
-	/** Bulk-dismiss FINISHED subagents from the running list (right-click menu).
-	 *  parentId omitted = all finished subagents; given = the transitive
-	 *  subagent descendants of that conversation (children, grandchildren, …),
-	 *  plus the parent itself when it is a finished subagent. Running
-	 *  (streaming/retained) subagents are never touched. */
-	| { type: "dismiss_finished_subagents"; parentId?: string };
+	 *  force = abort a running conversation before dismissing it. The active
+	 *  conversation may be dismissed too (the server switches away first). */
+	| { type: "dismiss_conversation"; id: string; force?: boolean };
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -762,15 +648,10 @@ export interface UiPendingQuestion {
  *  can be stopped individually or all at once, and the list persists even
  *  after the conversation that started them ends. */
 export interface BgServer {
-	/** Port the server listens on (the stable key for agent-started servers).
-	 *  Plugin-registered tasks have no port — they carry taskId/plugin instead. */
-	port?: number;
-	/** Process id of the listening process (agent-started servers). */
+	/** Port the server listens on (the stable key). */
+	port: number;
+	/** Process id of the listening process. */
 	pid?: number;
-	/** Plugin task id (host.registerBackgroundTask) — present for plugin tasks. */
-	taskId?: string;
-	/** Plugin id that registered this task (kill routing). */
-	plugin?: string;
 	/** When the server/task was first detected or registered (ms epoch). */
 	since: number;
 	/** Best-effort process name (tasklist / ps), undefined when unknown. */
@@ -841,58 +722,6 @@ export interface ModelInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Goal / review status (server -> client snapshot)
-// ---------------------------------------------------------------------------
-
-/** Current state of the goal-review loop, shown in the goal bar UI. */
-export interface GoalStatus {
-	/** Conversation that owns this goal; null when no goal is set. */
-	conversationId: string | null;
-	/** Active goal text; null when no goal is set. */
-	goal: string | null;
-	/** Reviewer model id ("provider/id"), or null to use the main model. */
-	reviewModel: string | null;
-	/** Maximum number of review rounds per goal run. */
-	maxRounds: number;
-	/** Whether the goal persists across turns (locked) or just the next one. */
-	locked: boolean;
-	/** True while a review is running right now. */
-	reviewing: boolean;
-	/** 1-based round counter for the current goal (review rounds). */
-	round: number;
-	/** Human-readable status line (e.g. "审查中", "已通过", "本轮不通过"). UI locale at emit time (zh default). */
-	status: string;
-	/** English status line (client shows it when locale is en). */
-	statusEn?: string;
-	/** Latest review verdict: "pending" | "pass" | "fail". */
-	verdict: "pending" | "pass" | "fail";
-	/** Latest review feedback text (reviewer's verdict reason, pass or fail). */
-	feedback?: string;
-	/** Collaborative target-wizard progress (null when no wizard is running).
-	 *  The wizard turns a raw user requirement into a refined goal by asking
-	 *  questions, then auto-sets the goal. */
-	wizard: WizardStatus;
-}
-
-/** Progress of the collaborative target wizard (see GoalStatus.wizard). */
-export interface WizardStatus {
-	/** True while the wizard session is asking the user questions. */
-	active: boolean;
-	/** The user's raw requirement being scoped. */
-	draft: string;
-	/** Wizard model id ("provider/id"), or null for the main model default. */
-	model: string | null;
-	/** Question count asked so far (UI shows the step). */
-	step: number;
-	/** Max questions the wizard may ask before forcing a conclusion. */
-	maxSteps: number;
-	/** Short status line for the goal bar (e.g. "调研中：请回答第 2 题"). UI locale at emit time (zh default). */
-	status: string;
-	/** English wizard status line (client shows it when locale is en). */
-	statusEn?: string;
-}
-
-// ---------------------------------------------------------------------------
 // Custom model configuration (agentDir/models.json) — browser-editable shape
 // ---------------------------------------------------------------------------
 
@@ -918,104 +747,6 @@ export interface UiProviderConfig {
 	/** headers are NOT returned to the browser — they can contain Authorization
 	 *  / API-key values; saveModelConfig preserves them server-side. */
 	models: UiModelConfigEntry[];
-}
-
-// ---------------------------------------------------------------------------
-// Plugins (optional UI components dropped into <dataDir>/plugins/<id>/)
-// ---------------------------------------------------------------------------
-
-/** One installed pi-web-ui plugin (see server/plugins.ts). A plugin is a
- *  directory under <dataDir>/plugins/<id>/ with a manifest.json and optional
- *  server entry (index.mjs) + client view bundle (client/entry.mjs). Not
- *  bundled with the app — users install by dropping the directory in and
- *  restarting (or reconnecting: the list is re-scanned on every attach). */
-
-/** 一个声明式设置字段（manifest "settings" 数组里的元素）。 */
-export interface UiPluginSettingField {
-	/** 字段 key（storage.json settings 对象里的键；同一插件内唯一）。 */
-	key: string;
-	/** 控件类型：文本 / 密码 / 数字 / 开关 / 下拉。 */
-	type: "text" | "password" | "number" | "boolean" | "select";
-	/** 表单里的显示名。 */
-	label: string;
-	/** 未保存过时的默认值。 */
-	default?: string | number | boolean;
-	/** number 用：范围。 */
-	min?: number;
-	max?: number;
-	/** select 用：候选值。 */
-	options?: string[];
-	/** 帮助文案（悬浮提示/小字）。 */
-	hint?: string;
-}
-
-export interface UiPluginInfo {
-	/** Directory name; must match ^[A-Za-z0-9_-]+$ (path-safety). */
-	id: string;
-	/** Display label from manifest.json (shown as the view tab). */
-	name: string;
-	version?: string;
-	description?: string;
-	/** A client/entry.mjs exists → the frontend should load its view bundle. */
-	hasClient: boolean;
-	/** Optional emoji/single-char icon from manifest.json — shown instead of
-	 *  the generic puzzle glyph on the view tab. */
-	icon?: string;
-	/** The plugin failed to activate (bad entry / thrown error) — UI shows it
-	 *  greyed out instead of a dead tab. */
-	error?: string;
-	/** Declared capabilities from manifest.json (e.g. "fs", "net", "tools") —
-	 *  informational for now: surfaced in the settings panel so users can see
-	 *  what a plugin claims to touch before trusting it. */
-	permissions?: string[];
-	/** Declarative settings schema from manifest.json "settings" — rendered as a
-	 *  form in the main ⚙ panel (type/label/default/min/max/options). */
-	settingsSchema?: UiPluginSettingField[];
-	/** Current stored values (storage.json "settings" key, defaults applied). */
-	settingsValues?: Record<string, unknown>;
-	/** Install source recorded by `pi-web-ui install` (<dir>/.pi-source.json):
-	 *  the original spec the user typed (owner/repo, URL or local path). The
-	 *  settings panel offers an Update button only when this exists. */
-	source?: string;
-	/** Fenced-code languages this plugin can render (manifest "renderers"). The
-	 *  frontend builds a language→plugin map and lazily loads the plugin's
-	 *  bundle the first time such a fence actually renders in a message. */
-	renderers?: string[];
-	/** Whether the plugin exposes a standalone view tab (manifest "view",
-	 *  default true). Renderer-only plugins set false so the frontend skips
-	 *  eagerly loading their bundle for the tab and only loads it on demand. */
-	view?: boolean;
-}
-
-/** One installable plugin in the "plugin list / marketplace" (see
- *  server/plugin-catalog.ts). Unlike {@link UiPluginInfo} (an INSTALLED
- *  plugin), a catalog entry is a one-click install candidate shown in the
- *  settings panel. Two sources are merged:
- *    - builtin : <pkgRoot>/plugins/catalog.json shipped with pi-web-ui (the
- *      maintained list — plugin authors contribute by adding an entry + PR)
- *    - custom  : <dataDir>/plugin-catalog.json, user-added entries (anyone
- *      can drop a third-party plugin into the list via the settings UI)
- *  Custom entries override a builtin entry of the same id (so users can
- *  adjust the maintained defaults). */
-export interface UiPluginCatalogEntry {
-	/** Install id — the plugin lands in <dataDir>/plugins/<id>. Must match
-	 *  ^[A-Za-z0-9_-]+$. Installing always runs `pi-web-ui install <source>
-	 *  --name <id>` so the on-disk dir name matches this id (this is what the
-	 *  settings panel uses to detect installed/not-installed state). */
-	id: string;
-	/** Display name (falls back to id). */
-	name: string;
-	description?: string;
-	descriptionEn?: string;
-	/** Optional emoji/single-char icon. */
-	icon?: string;
-	/** Install source for the CLI: owner/repo[/subdir][#ref]. */
-	source: string;
-	/** true = from the shipped catalog; false = user added in the UI
-	 *  (only custom entries can be removed). */
-	builtin: boolean;
-	/** Optional project/homepage URL. */
-	homepage?: string;
 }
 
 /** One of pi's built-in providers, with whether auth is configured. */
@@ -1052,14 +783,6 @@ export interface ConversationSummary {
 	cwd: string;
 	messageCount: number;
 	isStreaming: boolean;
-	/** 这是子代理对话（左栏带「子代理」徽标；可点开查看/补充/中止）。 */
-	isSubagent: boolean;
-	/** 子代理最近一次运行报错（左栏红点；普通对话不带）。 */
-	error?: string;
-	/** 子代理最近一次运行被中止。 */
-	canceled?: boolean;
-	/** 父对话 id（Running 面板嵌套展示用）。 */
-	parentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,51 +821,6 @@ export interface UiSettingsPreset {
 	promptOverrides: Record<string, string>;
 	disabledSkills: string[];
 	disabledExtensions: string[];
-	/** Extra instructions and skill toggles for the isolated goal-reviewer. */
-	reviewPrompt: string;
-	reviewDisabledSkills: string[];
-}
-
-/** 一个子代理模板（设置面板「子代理模板」区的 CRUD 实体，也是 AI 派生子代理
- *  时可选的预设）：角色系统提示词（replace/append）+ 技能/扩展白名单。白名单
- *  空 = 该维度跟随主会话设置。`enabled: false` 的模板停用 —— 设置面板仍可见
- *  可重新启用，但不出现在 AI 工具（subagent_templates / subagent_spawn）里。 */
-export interface UiSubagentTemplate {
-	/** 唯一标识（AI 在 subagent_spawn 的 template 参数里传这个名字）。 */
-	name: string;
-	/** 给 AI / 设置面板看的简介（选模板时判断适用场景）。 */
-	description: string;
-	/** English variant of description (missing/empty = fall back to description;
-	 *  server seeds both, panel edits the active UI language's field). */
-	descriptionEn?: string;
-	promptMode: "append" | "replace";
-	/** 模板系统提示词（replace 模式必填；append 模式可空 = 只用白名单限定）。 */
-	systemPrompt: string;
-	/** English variant of systemPrompt (missing/empty = fall back to
-	 *  systemPrompt; subagent_spawn picks by caller language). */
-	systemPromptEn?: string;
-	/** 技能白名单：非空 → 子代理只启用这些；空 → 跟随主会话技能开关。 */
-	enabledSkills: string[];
-	/** 扩展白名单（npm:<pkg> / 入口路径）：非空 → 只加载这些；空 → 跟随主会话。 */
-	enabledExtensions: string[];
-	/** 子代理模型 "provider/id"；空 = 跟随主对话当前模型。 */
-	model: string;
-	/** false = 停用（对 AI 不可见）。 */
-	enabled: boolean;
-}
-
-/** One vision-capable model the vision bridge can use (picker option). */
-export interface UiVisionBridgeModel {
-	provider: string;
-	id: string;
-	/** Human-readable label: "qwen3-vl-plus (dashscope)". */
-	label: string;
-}
-
-export interface UiMarkerInfo {
-	name: string;
-	enabled: boolean;
-	guidance: string[];
 }
 
 /** Full settings state pushed to the browser (settings_state). */
@@ -1164,35 +842,14 @@ export interface UiSettingsState {
 	terminalBash: boolean;
 	/** 接管模式下 bash 的静默解阻阈值毫秒数（0 = 一直等到命令结束）。 */
 	terminalBashIdleMs: number;
-	/** @deprecated 遗留别名（由 disabledAgentTools 推导）。开 → AI 可用不严格要求缩进的 edit_soft 工具。 */
-	editSoftEnabled: boolean;
 	/** 问卷提问开关（默认开）。关 → 模型不再弹问卷对话框。 */
 	questionnaireEnabled: boolean;
-	/** 目标模式（目标条 + 调研向导 + 审查循环）总开关（默认开）。关 → 目标条
-	 *  隐藏、无法设目标/启动调研/触发审查。纯运行开关，无需 reload。 */
-	goalModeEnabled: boolean;
 	/** 思考文本是否换行（默认开 = pre-wrap；关 = 长行横向滚动）。 */
 	thinkingWrap: boolean;
 	/** 工具调用是否默认展开（默认开 = 展开；关 = 折叠）。 */
 	toolsWrap: boolean;
 	/** skill 全文注入名单（默认空 = 名录模式）：名单里的技能 {{skills}} 展开正文。 */
 	skillsFullText: string[];
-	/** Vision bridge on/off (default on). Off → images are sent as-is. */
-	visionBridgeEnabled: boolean;
-	/** Preferred vision model as "provider/id", or null = auto-detect first. */
-	visionBridgeModel: string | null;
-	/** Vision-bridge transcription prompt mode: append to the built-in default
-	 *  prompt, or replace it entirely (empty text = built-in default). */
-	visionBridgePromptMode: "append" | "replace";
-	/** Custom vision-bridge transcription prompt text. */
-	visionBridgePrompt: string;
-	/** Extra instructions appended to the built-in goal-review prompt. */
-	reviewPrompt: string;
-	/** Skills disabled only for the isolated goal-reviewer. */
-	reviewDisabledSkills: string[];
-	/** Installed UI plugins the user hid in the settings panel (UI-only:
-	 *  hidden tabs/views; server-side handlers stay reachable). */
-	disabledPlugins: string[];
 	/** The FULL system prompt actually in effect for the active conversation
 	 *  (compose render: template + per-source overrides + project context +
 	 *  skills + tool guidance). Read-only view source for the settings panel;
@@ -1206,44 +863,17 @@ export interface UiSettingsState {
 	 *  JSON Schema）只读文本 —— 设置面板「查看当前完整提示词」里与系统提示词
 	 *  正文并排展示，方便看到完整初始上下文；会话未就绪时为空串。 */
 	toolsSchema: string;
-	/** The built-in default vision-bridge transcription prompt. */
-	visionBridgeDefaultPrompt: string;
-	/** Vision-capable configured models available on this machine. */
-	visionModels: UiVisionBridgeModel[];
 	skills: UiSkillInfo[];
-	/** Same skill catalog with enabled flags evaluated for the reviewer. */
-	reviewSkills: UiSkillInfo[];
 	extensions: UiExtensionInfo[];
 	presets: UiSettingsPreset[];
-	/** 内置标记工具开关（全局 + 按 marker）。 */
-	markersEnabled: boolean;
-	disabledMarkers: string[];
-	markers: UiMarkerInfo[];
-	/** 子代理模板（含停用的；面板据此渲染开关，AI 只在 enabled 的里选）。 */
-	subagentTemplates: UiSubagentTemplate[];
-	/** 子代理默认模型（"provider/id"；null = 跟随主对话当前模型）。 */
-	subagentDefaultModel: string | null;
 	/** 大模型 API 出错自动重试次数（默认 6；0 = 失败即停）。 */
 	retryMaxAttempts: number;
-	/** 输入框上方的快捷短语（点击即发送；空 = 不显示）。 */
-	quickPhrases: string[];
-	/** 快捷短语总开关（默认开；关 = 输入框上方不显示）。 */
-	quickPhrasesEnabled: boolean;
-	/** 是否已在服务端 seed 过一次默认快捷短语（跨会话/跨浏览器，用于避免删除后被填回默认）。 */
-	quickPhrasesSeeded: boolean;
-	/** 已配置鉴权的全部模型（子代理默认模型/模板模型选择器）。 */
-	subagentModels: UiVisionBridgeModel[];
-	/** 内置默认模板名（settings_state 里供面板标「默认」徽标；用户文件为准时可能
-	 *  已删除/改名，长度可与 subagentTemplates 不同）。 */
-	subagentDefaultTemplates: string[];
 }
 export type ServerMessage =
 	| {
 			type: "ready";
 			clientId: string;
 			serverVersion: string;
-			/** 引擎标识（pi | dsh）—— 前端据此显示引擎徽标（只读展示）。 */
-			engine?: string;
 			/** Wire-protocol version (server/protocol-version.ts). The client
 			 *  compares it against its own copy — a mismatch means the page was
 			 *  loaded before an app update and must be refreshed. */
@@ -1497,69 +1127,11 @@ export type ServerMessage =
 	  }
 	/** The server resolved (or abandoned) a dialog — the client must close it. */
 	| { type: "dialog_closed"; id: number }
-	// -- self-update ----------------------------------------------------------
-	/** Result of a check_update run (current/latest from the npm registry). */
-	| {
-			type: "update_status";
-			/** Version of the RUNNING process (from its own package.json). */
-			current: string;
-			latest: string | null;
-			/** Publish timestamp (ISO) of the latest version — lets the UI hint
-			 * when it was just published and registry caches may lag. */
-			latestPublishedAt: string | null;
-			upToDate: boolean;
-			error?: string;
-	  }
-	/** Result of a check_updates_all run — one item per checked component
-	 *  (webui, the pi core, direct pi extensions). Failed lookups degrade
-	 *  per-item. */
-	| {
-			type: "update_status_all";
-			items: {
-				name: string;
-				kind: "webui" | "pi-core" | "package";
-				current: string;
-				latest: string | null;
-				latestPublishedAt?: string | null;
-				upToDate: boolean;
-				error?: string;
-			}[];
-	  }
-	// -- goal / review -------------------------------------------------------
-	/** Goal status pushed whenever it changes (set / review start-end / verdict).
-	 *  Review result CARDS are inserted into the main conversation flow as real
-	 *  custom messages (rendered like an attachment card), so they persist across
-	 *  snapshots/reconnects — this only drives the goal bar status. */
-	| { type: "goal_status"; status: GoalStatus }
 	/** Current settings state (system prompt mode/text, enabled skills &
 	 *  extensions, saved presets). Pushed on attach and after every settings
 	 *  change. */
 	| { type: "settings_state"; settings: UiSettingsState }
-	// -- plugins (<dataDir>/plugins) -----------------------------------------
-	/** Installed-plugin catalog. Pushed on attach (the dir is re-scanned each
-	 *  time so freshly dropped plugins appear without a server restart) and
-	 *  after every plugins_reload. `epoch` increments on every server-side
-	 *  reload; the frontend uses it as an import-cache buster so changed
-	 *  bundles are actually re-fetched. */
-	| { type: "plugins"; plugins: UiPluginInfo[]; epoch: number }
-	/** Installable-plugin list (marketplace). Pushed on attach and after every
-	 *  plugin_catalog_add/remove. Merges the shipped catalog
-	 *  (<pkgRoot>/plugins/catalog.json) with user-added entries
-	 *  (<dataDir>/plugin-catalog.json). `epoch` increments on every add/remove
-	 *  so the frontend can re-render. */
-	| { type: "plugin_catalog"; entries: UiPluginCatalogEntry[]; epoch: number }
-	/** App-level message from a plugin's server side to its client bundles.
-	 *  Broadcast to every connected socket (plugins have no per-client state
-	 *  in v1); the frontend fans it out to the matching loaded view. */
-	| { type: "plugin_data"; pluginId: string; payload: unknown }
-	// -- DSH engine user patches --------------------------------------------
-	/** List of <dataDir>/dsh-patches/*.yml files (DSH engine only; pi engine
-	 *  never emits it). Pushed on request (dsh_patches_list) and after a
-	 *  rescan (dsh_patches_rescan). */
-	| { type: "dsh_patches"; patchDir: string; files: { name: string; path: string; size: number; mtimeMs: number }[] }
-	/** The model asked the user (ask_user_question tool) — both engines
-	 *  (DSH via goal-rpc userQuestions provider, standard pi via the
-	 *  pi-web-ui ask_user_question customTool) forward here. The frontend
+	/** The model asked the user (ask_user_question tool). The frontend
 	 *  shows a dialog and answers via question_answer. One pending
 	 *  question at a time per client (the runtime blocks the agent loop). */
 	| {

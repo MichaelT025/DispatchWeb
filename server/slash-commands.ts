@@ -14,7 +14,6 @@
  */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { ServerMessage, SlashCommandInfo } from "./protocol.js";
-import type { PluginCommandDef } from "./plugins.js";
 
 /** ClientSession 提供给本服务的宿主能力（窄接口，便于独立测试）。 */
 export interface SlashHost {
@@ -38,11 +37,6 @@ export interface SlashHost {
 	onQuit?: () => boolean;
 	/** session.reload() 之后的钩子（重放终端工具开关等设置门控）。 */
 	afterReload?: () => void;
-	/** 插件注册的斜杠命令（registerCommand）——目录展示 + exec 拦截执行。 */
-	pluginCommands?: () => PluginCommandDef[];
-	/** 执行一个插件命令：找到并调用 run，返回 true；没这个命令返回 false。
-	 *  放在宿主层而不是本服务里，因为 clientId/通知回显需要 ClientSession 环境。 */
-	execPluginCommand?: (name: string, args: string) => Promise<boolean> | boolean;
 }
 
 /** Slash commands implemented natively by the web server (the pi CLI's built-in
@@ -52,57 +46,43 @@ export interface SlashHost {
 export const NATIVE_COMMANDS: {
 	name: string;
 	description: string;
-	descriptionEn: string;
 	argumentHint?: string;
-	argumentHintEn?: string;
 }[] = [
 	{
 		name: "new",
-		description: "新建对话（可带首条提示：/new <提示>）",
-		descriptionEn: "New chat (optional first prompt: /new <prompt>)",
-		argumentHint: "[提示]",
-		argumentHintEn: "[prompt]",
+		description: "New chat (optional first prompt: /new <prompt>)",
+		argumentHint: "[prompt]",
 	},
 	{
 		name: "name",
-		description: "重命名当前会话",
-		descriptionEn: "Set session display name",
-		argumentHint: "<名称>",
-		argumentHintEn: "<name>",
+		description: "Set session display name",
+		argumentHint: "<name>",
 	},
 	{
 		name: "model",
-		description: "切换模型",
-		descriptionEn: "Switch model",
-		argumentHint: "[名称]",
-		argumentHintEn: "[name]",
+		description: "Switch model",
+		argumentHint: "[name]",
 	},
 	{
 		name: "compact",
-		description: "压缩上下文",
-		descriptionEn: "Compact context",
-		argumentHint: "[说明]",
-		argumentHintEn: "[instructions]",
+		description: "Compact context",
+		argumentHint: "[instructions]",
 	},
 	{
 		name: "cwd",
-		description: "切换工作目录",
-		descriptionEn: "Switch workspace",
-		argumentHint: "<路径>",
-		argumentHintEn: "<path>",
+		description: "Switch workspace",
+		argumentHint: "<path>",
 	},
 	{
 		name: "thinking",
-		description: "设置思考强度",
-		descriptionEn: "Set thinking level",
+		description: "Set thinking level",
 		argumentHint: "<off|low|medium|high|xhigh|max>",
-		argumentHintEn: "<off|low|medium|high|xhigh|max>",
 	},
-	{ name: "resume", description: "刷新会话列表", descriptionEn: "Refresh session list" },
-	{ name: "reload", description: "重新加载扩展、技能与模板", descriptionEn: "Reload extensions, skills & templates" },
-	{ name: "help", description: "显示全部命令", descriptionEn: "Show all commands" },
-	{ name: "copy", description: "复制上一条助手回复", descriptionEn: "Copy last assistant reply" },
-	{ name: "pi-web-ui:quit", description: "退出服务", descriptionEn: "Quit server (supervisor will restart)" },
+	{ name: "resume", description: "Refresh session list" },
+	{ name: "reload", description: "Reload extensions, skills & templates" },
+	{ name: "help", description: "Show all commands" },
+	{ name: "copy", description: "Copy last assistant reply" },
+	{ name: "pi-web-ui:quit", description: "Quit server (supervisor will restart)" },
 ];
 
 /** Parse a prompt into "/command args" — returns null when it isn't one. */
@@ -168,19 +148,6 @@ export class SlashCommandsService {
 		} catch {
 			// Session not ready yet — native-only catalog still serves the picker.
 		}
-		// UI 插件注册的命令（host.registerCommand）——全局，不依赖会话就绪。
-		for (const cmd of this.host.pluginCommands?.() ?? []) {
-			if (seen.has(cmd.name)) continue; // 与内置/扩展重名时先到先得（内置优先）
-			commands.push({
-				name: cmd.name,
-				description: cmd.description,
-				descriptionEn: cmd.descriptionEn,
-				argumentHint: cmd.argumentHint,
-				argumentHintEn: cmd.argumentHintEn,
-				source: "plugin",
-			});
-			seen.add(cmd.name);
-		}
 		this.host.emit({ type: "slash_commands", commands });
 	}
 
@@ -207,8 +174,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "info",
-						text: current ? `当前会话名称：${current}。用法：/name <名称>` : `用法：/name <名称>`,
-						textEn: current ? `Current session name: ${current}. Usage: /name <name>` : `Usage: /name <name>`,
+						text: current ? `Current session name: ${current}. Usage: /name <name>` : `Usage: /name <name>`,
 					});
 					return true;
 				}
@@ -220,8 +186,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "info",
-						text: `已重命名当前会话为「${trimmed}」`,
-						textEn: `Renamed current session to "${trimmed}"`,
+						text: `Renamed current session to "${trimmed}"`,
 					});
 				}
 				return true;
@@ -233,9 +198,6 @@ export class SlashCommandsService {
 						type: "notice",
 						level: "info",
 						text: current
-							? `当前模型：${current.name}（${current.provider}/${current.id}）。用法：/model <名称>`
-							: `用法：/model <名称>`,
-						textEn: current
 							? `Current model: ${current.name} (${current.provider}/${current.id}). Usage: /model <name>`
 							: `Usage: /model <name>`,
 					});
@@ -257,8 +219,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "error",
-						text: `没有匹配到模型：${args}（可用模型见顶栏模型列表）`,
-						textEn: `No matching model: ${args} (see the model list in the top bar)`,
+						text: `No matching model: ${args} (see the model list in the top bar)`,
 					});
 					return true;
 				}
@@ -267,8 +228,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "warning",
-						text: `找到 ${matches.length} 个匹配模型，已选用：${pick.name}（精确匹配请用 provider/id）`,
-						textEn: `Found ${matches.length} matching models, using: ${pick.name} (use provider/id for an exact match)`,
+						text: `Found ${matches.length} matching models, using: ${pick.name} (use provider/id for an exact match)`,
 					});
 				}
 				await this.host.setModel(`${pick.provider}/${pick.id}`);
@@ -288,8 +248,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "info",
-						text: `当前工作目录：${this.host.cwd()}。用法：/cwd <路径>`,
-						textEn: `Current directory: ${this.host.cwd()}. Usage: /cwd <path>`,
+						text: `Current directory: ${this.host.cwd()}. Usage: /cwd <path>`,
 					});
 				} else {
 					await this.host.setCwd(args);
@@ -317,8 +276,7 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "error",
-						text: `无效的思考强度：${args || "（空）"}。可用：off / minimal / low / medium / high / xhigh / max`,
-						textEn: `Invalid thinking level: ${args || "(empty)"}. Available: off / minimal / low / medium / high / xhigh / max`,
+						text: `Invalid thinking level: ${args || "(empty)"}. Available: off / minimal / low / medium / high / xhigh / max`,
 					});
 					return true;
 				}
@@ -330,8 +288,7 @@ export class SlashCommandsService {
 				this.host.emit({
 					type: "notice",
 					level: "info",
-					text: "会话列表已刷新，请在左侧「历史对话」中选择",
-					textEn: "Session list refreshed — pick one under History on the left",
+					text: "Session list refreshed — pick one under History on the left",
 				});
 				return true;
 			case "reload":
@@ -345,15 +302,13 @@ export class SlashCommandsService {
 					this.host.emit({
 						type: "notice",
 						level: "info",
-						text: "已重新加载扩展、技能与提示模板",
-						textEn: "Reloaded extensions, skills and prompt templates",
+						text: "Reloaded extensions, skills and prompt templates",
 					});
 				} catch (err) {
 					this.host.emit({
 						type: "notice",
 						level: "error",
-						text: `重新加载失败：${(err as Error).message}`,
-						textEn: `Reload failed: ${(err as Error).message}`,
+						text: `Reload failed: ${(err as Error).message}`,
 					});
 				}
 				return true;
@@ -361,8 +316,7 @@ export class SlashCommandsService {
 				this.host.emit({
 					type: "notice",
 					level: "info",
-					text: "正在退出 pi-web-ui… supervisor 将自动重启服务",
-					textEn: "Quitting pi-web-ui… the supervisor will restart the service",
+					text: "Quitting pi-web-ui… the supervisor will restart the service",
 				});
 				setTimeout(() => {
 					const didSchedule = this.host.onQuit?.() ?? false;
@@ -378,8 +332,7 @@ export class SlashCommandsService {
 				// swallow here so the SDK never sees them as plain prompt text.
 				return true;
 			default:
-				// 插件命令：拦截执行（纯配置动作，与内置命令同级，不到 SDK）。
-				return (await this.host.execPluginCommand?.(name, args)) ?? false;
+				return false;
 		}
 	}
 }

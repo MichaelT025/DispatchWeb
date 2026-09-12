@@ -1,0 +1,222 @@
+/* PiAstra workspace + terminal — Codex-style restyle. Loaded after styles.css;
+   equal-specificity selectors here win by source order, so no !important. */
+
+/* ---- right workspace pane: black, quiet tab strip, no colored chrome ---- */
+.astra-workspace {
+	background: var(--bg);
+	border-left: 1px solid var(--border-soft);
+}
+.astra-workspace-tabs {
+	min-height: 44px;
+	padding: 6px 8px;
+	gap: 4px;
+	border-bottom: 1px solid var(--border-soft);
+}
+.astra-workspace-tabs button {
+	height: 28px;
+	padding: 0 10px;
+	border-radius: 8px;
+	font-size: 13px;
+	color: var(--text-dim);
+}
+.astra-workspace-tabs button svg {
+	width: 15px;
+	height: 15px;
+}
+.astra-workspace-tabs button.active {
+	background: var(--bg-elev2);
+	color: var(--text);
+}
+.astra-workspace-back,
+.astra-workspace-close {
+	width: 28px;
+	padding: 0;
+	justify-content: center;
+}
+
+/* chooser (empty workspace): plain rows with right-aligned shortcut hints */
+.astra-workspace-chooser {
+	gap: 4px;
+}
+.astra-workspace-hint {
+	font-size: 12px;
+	color: var(--text-faint);
+}
+.astra-workspace-item {
+	height: 36px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 10px;
+	background: var(--bg-elev);
+	color: var(--text);
+	font-size: 13px;
+}
+.astra-workspace-item:hover,
+.astra-workspace-item.active {
+	background: var(--bg-elev2);
+}
+.astra-workspace-item kbd {
+	font-family: var(--sans);
+	font-size: 11px;
+	color: var(--text-dim);
+	background: transparent;
+	border: 0;
+	padding: 0;
+}
+
+/* ---- file preview: breadcrumb-like head, ghost controls ---- */
+.fp-head {
+	min-height: 40px;
+	padding: 6px 12px;
+	gap: 8px;
+	border-bottom: 1px solid var(--border-soft);
+	background: var(--bg);
+}
+.fp-name {
+	font-family: var(--sans);
+	font-size: 13px;
+	font-weight: 500;
+}
+.fp-path {
+	font-family: var(--sans);
+	font-size: 12px;
+}
+.fp-meta {
+	font-size: 11.5px;
+}
+.fp-head-actions {
+	gap: 2px;
+}
+.fp-attach,
+.fp-close {
+	width: 26px;
+	height: 26px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-dim);
+}
+.fp-attach:hover,
+.fp-close:hover,
+.fp-attach.inline:hover,
+.fp-attach.ref:hover {
+	background: var(--bg-elev2);
+	color: var(--text);
+	border-color: transparent;
+}
+.fp-zoom {
+	gap: 0;
+}
+.fp-zoom-val {
+	border: 0;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 11.5px;
+	min-width: 38px;
+}
+
+/* markdown preview: same prose rhythm as the conversation, no purple wash */
+.fp-markdown,
+.fp-inline .fp-markdown {
+	background: var(--bg);
+	padding: 20px clamp(16px, 3vw, 40px) 40px;
+	font-size: 14px;
+	line-height: 1.65;
+}
+.fp-markdown h1,
+.fp-markdown h2,
+.fp-markdown h3,
+.fp-markdown h4,
+.fp-markdown h5,
+.fp-markdown h6 {
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	margin: 1.4em 0 0.5em;
+}
+.fp-markdown h1 {
+	font-size: 22px;
+	border-bottom: 0;
+	padding-bottom: 0;
+}
+.fp-markdown h2 {
+	font-size: 18px;
+	border-bottom: 0;
+	padding-bottom: 0;
+}
+.fp-markdown h3 {
+	font-size: 15.5px;
+	color: var(--text);
+}
+.fp-markdown h4,
+.fp-markdown h5,
+.fp-markdown h6 {
+	font-size: 14px;
+}
+.fp-markdown p {
+	margin: 0.7em 0;
+	line-height: 1.65;
+}
+.fp-markdown blockquote {
+	border: 0;
+	border-left: 3px solid var(--border);
+	border-radius: 0;
+	background: transparent;
+	padding: 0.2em 1em;
+	color: var(--text-dim);
+}
+.fp-markdown-zoom > .md {
+	max-width: 780px;
+}
+.fp-html {
+	background: var(--bg);
+}
+.fp-html-bar {
+	background: var(--bg-elev);
+}
+.fp-html-js:hover {
+	border-color: var(--text-dim);
+}
+
+/* ---- bottom terminal: 36px strip, black canvas, quiet tabs ---- */
+.astra-bottom-terminal {
+	border-top: 1px solid var(--border-soft);
+	background: var(--bg);
+}
+.term-strip {
+	min-height: 36px;
+	padding: 4px 8px;
+	background: var(--bg);
+	border-bottom: 0;
+}
+.term-strip .term-tab {
+	height: 26px;
+	padding: 0 8px;
+	border-radius: 6px;
+	gap: 6px;
+	font-family: var(--mono);
+	font-size: 12px;
+}
+.term-strip .term-tab.active {
+	background: var(--bg-elev2);
+	border-color: transparent;
+}
+.term-strip-new,
+.term-strip-group-toggle {
+	border-radius: 6px;
+	color: var(--text-dim);
+}
+.term-empty-title {
+	font-size: 14px;
+	font-weight: 500;
+}
+.term-empty-sub {
+	font-size: 12.5px;
+	color: var(--text-faint);
+}
+.fp-markdown :not(pre) > code {
+	border: 0;
+	border-radius: 4px;
+	background: #1a1a1a;
+	color: var(--text);
+	font-size: 0.9em;
+}

@@ -6,6 +6,7 @@ import "./styles.css";
 import "./css/shell.css";
 import "./css/messages.css";
 import "./css/composer.css";
+import "./css/workspace.css";
 import "highlight.js/styles/github-dark.css";
 import { applyTheme, loadTheme } from "./theme";
 import { initAuthToken } from "./auth-token";

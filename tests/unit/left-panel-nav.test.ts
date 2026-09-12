@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import {
+	basename,
+	buildLeftNav,
+	flattenConversations,
+	type NavGroup,
+} from "../../web/src/components/left-panel-nav.js";
+import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
+
+function conv(id: string, cwd: string, parentId?: string): ConversationSummary {
+	return { id, title: id, cwd, messageCount: 1, isStreaming: false, isSubagent: false, parentId };
+}
+
+function project(path: string, lastUsed: number): ProjectSummary {
+	return { path, lastUsed };
+}
+
+function session(path: string, modified = 1000): SessionSummary {
+	return { path, firstMessage: "hi", messageCount: 1, modified, source: "web" };
+}
+
+describe("basename", () => {
+	it("剥离目录名（支持正反斜杠与尾部分隔符）", () => {
+		expect(basename("/a/b/c")).toBe("c");
+		expect(basename("C:\\Users\\x\\proj")).toBe("proj");
+		expect(basename("/a/b/")).toBe("b");
+		expect(basename("/")).toBe("/"); // 全分隔符原样返回，不抛错
+	});
+});
+
+describe("flattenConversations", () => {
+	it("父在前、子随后，深度递增", () => {
+		const rows = flattenConversations([conv("root", "/p"), conv("kid", "/p", "root"), conv("grand", "/p", "kid")]);
+		expect(rows.map((r) => [r.c.id, r.depth])).toEqual([
+			["root", 0],
+			["kid", 1],
+			["grand", 2],
+		]);
+	});
+
+	it("父不在本组时，子退化为根，不丢条目", () => {
+		const rows = flattenConversations([conv("kid", "/p", "missing")]);
+		expect(rows).toEqual([{ c: expect.objectContaining({ id: "kid" }), depth: 0 }]);
+	});
+});
+
+describe("buildLeftNav", () => {
+	it("空输入返回空数组", () => {
+		expect(buildLeftNav([], [], [], "/p")).toEqual([]);
+	});
+
+	it("项目目录成为顶层分组，运行中的对话按其 cwd 嵌套", () => {
+		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [conv("c1", "/a")], [], "/a");
+		expect(groups.map((g) => g.path)).toEqual(["/a", "/b"]);
+		expect(groups[0].isCurrent).toBe(true);
+		expect(groups[0].conversations.map((r) => r.c.id)).toEqual(["c1"]);
+		expect(groups[1].conversations).toEqual([]);
+	});
+
+	it("当前项目优先，其余按 lastUsed 降序", () => {
+		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], [], "/mid");
+		expect(groups.map((g) => g.path)).toEqual(["/mid", "/new", "/old"]);
+	});
+
+	it("子代理继承父对话的 cwd 归组", () => {
+		const groups = buildLeftNav([project("/a", 1)], [conv("root", "/a"), conv("kid", "/b", "root")], [], "/a");
+		expect(groups.map((g) => g.path)).toEqual(["/a"]);
+		expect(groups[0].conversations.map((r) => [r.c.id, r.depth])).toEqual([
+			["root", 0],
+			["kid", 1],
+		]);
+	});
+
+	it("未登记项目的运行对话保留为未分组（不静默丢弃）", () => {
+		const groups = buildLeftNav([project("/a", 1)], [conv("orphan", "/zzz")], [], "/a");
+		const ungrouped = groups.find((g) => !g.isProject) as NavGroup;
+		expect(ungrouped).toBeDefined();
+		expect(ungrouped.path).toBe("/zzz");
+		expect(ungrouped.label).toBe("zzz");
+		expect(ungrouped.conversations.map((r) => r.c.id)).toEqual(["orphan"]);
+		// 已知项目仍排在未分组之前
+		expect(groups[0].path).toBe("/a");
+	});
+
+	it("历史会话只挂到当前项目（协议 sessions 仅含当前 cwd）", () => {
+		const s = [session("/s/1")];
+		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [], s, "/a");
+		const a = groups.find((g) => g.path === "/a") as NavGroup;
+		const b = groups.find((g) => g.path === "/b") as NavGroup;
+		expect(a.sessions).toEqual(s);
+		expect(b.sessions).toEqual([]);
+	});
+
+	it("当前 cwd 不在项目列表时，会话挂到对应未分组目录", () => {
+		const s = [session("/s/1")];
+		const groups = buildLeftNav([project("/a", 1)], [conv("c", "/cur")], s, "/cur");
+		const cur = groups.find((g) => g.path === "/cur") as NavGroup;
+		expect(cur.isCurrent).toBe(true);
+		expect(cur.sessions).toEqual(s);
+	});
+});

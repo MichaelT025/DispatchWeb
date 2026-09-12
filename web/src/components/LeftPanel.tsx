@@ -13,6 +13,7 @@ import {
 } from "react-icons/fi";
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../types";
 import { useT } from "../i18n";
+import { Logo } from "./Logo";
 import { useAppField } from "../app-globals";
 import { buildLeftNav, pendingSessionCwds, type NavGroup } from "./left-panel-nav";
 
@@ -532,7 +533,10 @@ export const LeftPanel = memo(function LeftPanel({
 		<aside className="panel panel-left lp-panel">
 			{/* Astra 品牌 + 突出的「新对话」——替代旧顶栏的 new_chat 入口。 */}
 			<div className="lp-brand">
-				<span className="lp-brand-name">PiAstra</span>
+				<span className="lp-brand-title">
+					<Logo size={22} />
+					<span className="lp-brand-name">PiAstra</span>
+				</span>
 				{collapsible && onToggleCollapse && (
 					<button
 						type="button"

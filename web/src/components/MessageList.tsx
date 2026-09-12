@@ -23,6 +23,7 @@ import {
 	type WinRect,
 } from "../lazy-window";
 import { SearchBar } from "./SearchBar";
+import { Logo } from "./Logo";
 import { classifyScroll } from "./scroll-classify";
 import { useT } from "../i18n";
 
@@ -768,6 +769,7 @@ export function MessageList({
 			>
 				{state.messages.length === 0 && !state.streamingMessage && (
 					<div className="empty-state astra-empty">
+						<Logo size={44} className="astra-empty-logo" />
 						<div className="astra-empty-mark">PiAstra</div>
 						<div className="astra-empty-hint">{t("astraEmptyHint")}</div>
 					</div>

@@ -14,7 +14,7 @@ const STORAGE_KEY = "pi-web-ui:lang";
 
 export const zh = {
 	/* common */
-	docTitle: "pi-web-ui — pi 编码智能体",
+	docTitle: "PiAstra",
 	cancel: "取消",
 	ok: "确定",
 	save: "保存",
@@ -1099,7 +1099,7 @@ export const zh = {
 
 const en: Record<keyof typeof zh, string> = {
 	/* common */
-	docTitle: "pi-web-ui — pi coding agent",
+	docTitle: "PiAstra",
 	cancel: "Cancel",
 	ok: "OK",
 	save: "Save",

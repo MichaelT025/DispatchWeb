@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	resolveWindowsBashShell,
-	resolveWindowsUserShell,
-} from "../../server/terminals.js";
+import { resolveWindowsBashShell, resolveWindowsUserShell } from "../../server/terminals.js";
 
 /**
  * Windows shell-selection unit tests. Both resolvers are pure given an injected
@@ -24,8 +21,7 @@ function only(...present: string[]): (p: string) => boolean {
 
 const PWSh64 = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 const PWSh86 = "C:\\Program Files (x86)\\PowerShell\\7\\pwsh.exe";
-const PS51 =
-	"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+const PS51 = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 const GIT_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
 const GIT_BASH86 = "C:\\Program Files (x86)\\Git\\bin\\bash.exe";
 
@@ -41,10 +37,7 @@ describe("resolveWindowsUserShell", () => {
 	});
 
 	it("PI_WEB_SHELL 指向 bash 时带 -i", () => {
-		const r = resolveWindowsUserShell(
-			{ PI_WEB_SHELL: GIT_BASH },
-			only(GIT_BASH),
-		);
+		const r = resolveWindowsUserShell({ PI_WEB_SHELL: GIT_BASH }, only(GIT_BASH));
 		expect(r).toEqual({ shell: GIT_BASH, args: ["-i"] });
 	});
 
@@ -53,9 +46,7 @@ describe("resolveWindowsUserShell", () => {
 			ProgramFiles: "C:\\Program Files",
 			"ProgramFiles(x86)": "C:\\Program Files (x86)",
 		};
-		expect(
-			resolveWindowsUserShell(env, only(PWSh64, PWSh86)),
-		).toEqual({ shell: PWSh64, args: [] });
+		expect(resolveWindowsUserShell(env, only(PWSh64, PWSh86))).toEqual({ shell: PWSh64, args: [] });
 		expect(resolveWindowsUserShell(env, only(PWSh86))).toEqual({
 			shell: PWSh86,
 			args: [],
@@ -100,12 +91,10 @@ describe("resolveWindowsUserShell", () => {
 			shell: msys,
 			args: ["-i"],
 		});
-		expect(
-			resolveWindowsUserShell(
-				{ ProgramFiles: "C:\\Program Files" },
-				only(GIT_BASH),
-			),
-		).toEqual({ shell: GIT_BASH, args: ["-i"] });
+		expect(resolveWindowsUserShell({ ProgramFiles: "C:\\Program Files" }, only(GIT_BASH))).toEqual({
+			shell: GIT_BASH,
+			args: ["-i"],
+		});
 	});
 
 	it("最后兜底 $COMSPEC（cmd.exe）", () => {
@@ -161,18 +150,8 @@ describe("resolveWindowsBashShell (AI bash tool)", () => {
 			args: ["-i"],
 		});
 		// zsh (or a `bash.exe` path) as $SHELL must NOT be used for the bash tool.
-		expect(
-			resolveWindowsBashShell(
-				{ SHELL: "C:\\custom\\zsh.exe" },
-				only("C:\\custom\\zsh.exe"),
-			).shell,
-		).toBe("bash");
-		expect(
-			resolveWindowsBashShell(
-				{ SHELL: "C:\\custom\\bash.exe" },
-				only("C:\\custom\\bash.exe"),
-			).shell,
-		).toBe("bash");
+		expect(resolveWindowsBashShell({ SHELL: "C:\\custom\\zsh.exe" }, only("C:\\custom\\zsh.exe")).shell).toBe("bash");
+		expect(resolveWindowsBashShell({ SHELL: "C:\\custom\\bash.exe" }, only("C:\\custom\\bash.exe")).shell).toBe("bash");
 	});
 
 	it("全部缺失时回退裸 `bash`（靠 PATH）并仍是交互式", () => {

@@ -36,6 +36,9 @@ import { DshQuestionDialog } from "./components/DshQuestionDialog";
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
 import { PluginView } from "./components/PluginView";
+import { createPluginHostApi, installPluginHostApi } from "./plugin-host";
+import { registerAttachmentSink } from "./composer-bridge";
+import { appendDraftAttachments } from "./composer-draft";
 import { syncPluginViews, subscribeLoadedPluginViews, type LoadedPluginView } from "./plugin-loader";
 import { setFenceSend, syncFenceRenderers } from "./plugin-fence";
 import { PiSetupModal } from "./components/PiSetupModal";
@@ -364,6 +367,12 @@ export function App() {
 		document.title = name ? `${name} — PiAstra` : t("docTitle");
 	}, [cwd, projectTitle, t]);
 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+	// 宿主注入的待发附件（浏览器元素拾取扩展的截图 → window.__piWebUiHost.compose）：
+	// 只追加不覆盖，判重口径与下面的 attach() 一致（见 composer-draft.ts）。
+	useEffect(() => {
+		registerAttachmentSink((items) => setAttachments((prev) => appendDraftAttachments(prev, items)));
+		return () => registerAttachmentSink(null);
+	}, []);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	/** Inline preview inside the right workspace (no modal). */
 	const [workspaceFile, setWorkspaceFile] = useState<PreviewFile | null>(null);
@@ -399,6 +408,34 @@ export function App() {
 		syncFenceRenderers(enabledPlugins, chat.pluginsEpoch);
 		void syncPluginViews(enabledPlugins, chat.pluginsEpoch);
 	}, [enabledPlugins, chat.pluginsEpoch, send]);
+	// 插件宿主动作桥（window.__piWebUiHost）：插件 client bundle 拿不到 React 实例，
+	// 需要「切视图 / 新建对话 + 自动发一段话」这类动作时走它（见 plugin-host.ts）。
+	// deps 读的是 ref（挂载时装一次，不能把每次渲染的闭包困在里面）。
+	const chatRefForPlugins = useRef(chat);
+	chatRefForPlugins.current = chat;
+	useEffect(() => {
+		installPluginHostApi(
+			createPluginHostApi({
+				send,
+				isReady: () => Boolean(chatRefForPlugins.current.state),
+				setView: (view) => {
+					if (view === "chat") {
+						setWorkspaceOpen(false);
+						setBottomTerminalOpen(false);
+					} else if (view === "terminal") {
+						setBottomTerminalOpen(true);
+					} else if (view === "git" || view === "files" || view.startsWith("plugin:")) {
+						setWorkspaceTab(view as WorkspaceTab);
+						setWorkspaceOpen(true);
+					}
+				},
+				getCwd: () => chatRefForPlugins.current.state?.cwd ?? "",
+				getConversationId: () => chatRefForPlugins.current.state?.conversationId ?? null,
+				isConversationBlank: () => (chatRefForPlugins.current.state?.messages.length ?? 0) === 0,
+			}),
+		);
+		return () => installPluginHostApi(null);
+	}, [send]);
 	// 左右面板可拖拽宽度（桌面端）：localStorage 持久化，双击手柄复位。
 	const [leftWidth, setLeftWidth] = useState(() => readPanelWidth("left"));
 	const [rightWidth, setRightWidth] = useState(readWorkspaceWidth);

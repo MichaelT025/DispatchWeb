@@ -39,8 +39,20 @@ function seedSession(file, cwd, userText, id) {
 		join(SESSION_ROOT, file),
 		[
 			JSON.stringify({ type: "session", version: 3, id, timestamp: now, cwd }),
-			JSON.stringify({ type: "message", id: `${id}-u`, parentId: null, timestamp: now, message: { role: "user", content: userText } }),
-			JSON.stringify({ type: "message", id: `${id}-a`, parentId: `${id}-u`, timestamp: now, message: { role: "assistant", content: "ok" } }),
+			JSON.stringify({
+				type: "message",
+				id: `${id}-u`,
+				parentId: null,
+				timestamp: now,
+				message: { role: "user", content: userText },
+			}),
+			JSON.stringify({
+				type: "message",
+				id: `${id}-a`,
+				parentId: `${id}-u`,
+				timestamp: now,
+				message: { role: "assistant", content: "ok" },
+			}),
 			"",
 		].join("\n"),
 	);
@@ -114,15 +126,24 @@ bootConvId = snapshot.conversationId;
 
 // 1. Unscoped list_sessions = active project (A), backward-compatible.
 send({ type: "list_sessions" });
-check("list_sessions (no cwd) returns active project A's history", await waitFor(() => sessionsByCwd.get(A)?.length === 1));
+check(
+	"list_sessions (no cwd) returns active project A's history",
+	await waitFor(() => sessionsByCwd.get(A)?.length === 1),
+);
 const aList = sessionsByCwd.get(A) ?? [];
-check("A's history contains the alpha transcript only", aList.some((s) => s.firstMessage === "alpha saved chat") && !aList.some((s) => s.firstMessage === "beta saved chat"));
+check(
+	"A's history contains the alpha transcript only",
+	aList.some((s) => s.firstMessage === "alpha saved chat") && !aList.some((s) => s.firstMessage === "beta saved chat"),
+);
 
 // 2. Scoped query for B must NOT switch the active conversation / cwd.
 send({ type: "list_sessions", cwd: B });
 check("list_sessions {cwd: B} returns B's history", await waitFor(() => sessionsByCwd.get(B)?.length === 1));
 const bList = sessionsByCwd.get(B) ?? [];
-check("B's history contains the beta transcript only", bList.some((s) => s.firstMessage === "beta saved chat") && !bList.some((s) => s.firstMessage === "alpha saved chat"));
+check(
+	"B's history contains the beta transcript only",
+	bList.some((s) => s.firstMessage === "beta saved chat") && !bList.some((s) => s.firstMessage === "alpha saved chat"),
+);
 check("active cwd unchanged after scoped query", snapshot?.cwd === A, snapshot?.cwd);
 check("active conversation unchanged after scoped query", snapshot?.conversationId === bootConvId);
 
@@ -133,8 +154,14 @@ send({ type: "list_sessions", cwd: B });
 check("concurrent A + B replies both tagged", await waitFor(() => sessionsByCwd.has(A) && sessionsByCwd.has(B)));
 const concA = sessionsByCwd.get(A) ?? [];
 const concB = sessionsByCwd.get(B) ?? [];
-check("concurrent reply A has no beta session", concA.some((s) => s.firstMessage === "alpha saved chat") && !concA.some((s) => s.firstMessage === "beta saved chat"));
-check("concurrent reply B has no alpha session", concB.some((s) => s.firstMessage === "beta saved chat") && !concB.some((s) => s.firstMessage === "alpha saved chat"));
+check(
+	"concurrent reply A has no beta session",
+	concA.some((s) => s.firstMessage === "alpha saved chat") && !concA.some((s) => s.firstMessage === "beta saved chat"),
+);
+check(
+	"concurrent reply B has no alpha session",
+	concB.some((s) => s.firstMessage === "beta saved chat") && !concB.some((s) => s.firstMessage === "alpha saved chat"),
+);
 check("active cwd still A after concurrent queries", snapshot?.cwd === A);
 
 ws.close();

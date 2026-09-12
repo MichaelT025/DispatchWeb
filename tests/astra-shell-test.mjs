@@ -78,7 +78,10 @@ check("no permanent theme/language labels in header", headerSubs === 0, `chip-su
 check("header keeps search/bg/settings/terminal/workspace chips", directChips === 5, `direct chips=${directChips}`);
 await page.locator(".astra-header-right .dropdown .chip").first().click();
 await sleep(400);
-const menuText = await page.locator(".dd-menu").innerText().catch(() => "");
+const menuText = await page
+	.locator(".dd-menu")
+	.innerText()
+	.catch(() => "");
 check(
 	"overflow holds theme + language + sound",
 	/theme|主题/i.test(menuText) && /language|语言/i.test(menuText) && /sound|声音/i.test(menuText),
@@ -128,7 +131,11 @@ if (wsBox && chooserBox) {
 }
 if (wsBox) {
 	const frac = wsBox.width / 1600;
-	check("right pane ≈ half the main workspace", frac > 0.33 && frac < 0.5, `width=${Math.round(wsBox.width)} (${(frac * 100).toFixed(0)}%)`);
+	check(
+		"right pane ≈ half the main workspace",
+		frac > 0.33 && frac < 0.5,
+		`width=${Math.round(wsBox.width)} (${(frac * 100).toFixed(0)}%)`,
+	);
 } else {
 	check("right pane width", false, "no bounding box");
 }
@@ -141,9 +148,15 @@ const fileCount = await page.locator(".astra-workspace-content .file-item.file")
 check("workspace lists project files", fileCount > 0);
 await page.locator(".astra-workspace-content .file-item.file").first().locator("button.file-name").click();
 await sleep(1200);
-check("inline preview mounted in workspace (no modal)", (await page.locator(".astra-workspace .fp-inline").count()) === 1);
+check(
+	"inline preview mounted in workspace (no modal)",
+	(await page.locator(".astra-workspace .fp-inline").count()) === 1,
+);
 check("no modal overlay preview on top", (await page.locator(".fp-overlay").count()) === 0);
-const bodyText = await page.locator(".astra-workspace .fp-inline .fp").innerText().catch(() => "");
+const bodyText = await page
+	.locator(".astra-workspace .fp-inline .fp")
+	.innerText()
+	.catch(() => "");
 check("preview shows file content", bodyText.toLowerCase().includes("astra sample"));
 checkVisible(page, "inline preview has a back button", ".fp-inline .fp-attach.back");
 await shot("astra-03-files-inline.png");
@@ -162,7 +175,10 @@ check("chooser offers Files again", (await page.locator(".astra-workspace-item")
 // Re-enter Files to prove the chooser round-trip stays fully usable.
 await page.locator(".astra-workspace-item").filter({ hasText: "Files" }).click();
 await sleep(800);
-check("Files re-reachable after chooser round-trip", (await page.locator(".astra-workspace-content .file-item.file").count()) > 0);
+check(
+	"Files re-reachable after chooser round-trip",
+	(await page.locator(".astra-workspace-content .file-item.file").count()) > 0,
+);
 
 // ---------- 5) terminal: compact strip, no command sidebar ----------
 // Toggle from the always-available header button (not only the keyboard), and
@@ -181,7 +197,11 @@ check("old command-management sidebar gone", (await page.locator(".term-commands
 checkVisible(page, "compact tab strip", ".term-strip");
 check("strip holds a terminal tab", (await page.locator(".term-strip .term-tab").count()) >= 1);
 const termBox = await page.locator(".astra-bottom-terminal").boundingBox();
-const leftBox = await page.locator(".drawer-left .panel").first().boundingBox().catch(() => null);
+const leftBox = await page
+	.locator(".drawer-left .panel")
+	.first()
+	.boundingBox()
+	.catch(() => null);
 if (termBox && leftBox) {
 	check("terminal strip starts right of left nav", termBox.x >= leftBox.x + leftBox.width - 1);
 } else {
@@ -199,7 +219,13 @@ await shot("astra-04-terminal.png");
 // and reopening must NOT spawn a second PTY (no duplicate creation).
 await termToggle.click();
 await sleep(600);
-check("strip hidden after close", !(await page.locator(".astra-bottom-terminal .term-strip").isVisible().catch(() => false)));
+check(
+	"strip hidden after close",
+	!(await page
+		.locator(".astra-bottom-terminal .term-strip")
+		.isVisible()
+		.catch(() => false)),
+);
 check("terminal toggle reports closed", (await termToggle.getAttribute("aria-pressed")) === "false");
 await termToggle.click();
 await sleep(1000);

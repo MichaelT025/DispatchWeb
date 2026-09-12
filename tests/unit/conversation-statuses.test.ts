@@ -14,9 +14,7 @@ describe("ConversationStatuses per-conversation scoping", () => {
 		const store = new ConversationStatuses(() => active);
 
 		// Chat A active → review role is emitted.
-		expect(store.set("a", "piastra-agent", "Agent: review")).toEqual([
-			{ key: "piastra-agent", text: "Agent: review" },
-		]);
+		expect(store.set("a", "piastra-agent", "Agent: review")).toEqual([{ key: "piastra-agent", text: "Agent: review" }]);
 
 		// Chat B (background) → fast role is recorded but NOT emitted.
 		expect(store.set("b", "piastra-agent", "Agent: fast")).toBeNull();

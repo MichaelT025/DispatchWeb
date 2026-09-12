@@ -120,9 +120,11 @@ import type {
 	SessionSummary,
 	UiMessage,
 	UiQuestion,
+	UiServiceInfo,
 	UiState,
 	UiSubagentTemplate,
 } from "./protocol.js";
+import { launchOrigin, toServiceInfo } from "./launch-origin.js";
 import {
 	serializeMessage,
 	serializeStreamingMessage,
@@ -216,7 +218,12 @@ Many legacy Chinese text files (.html/.txt/.md/.log, exported documents) are GBK
  * terminal) plus head/tail (post-processed on the returned output) so the parameter
  * schema stays consistent with the terminal-backed tool.
  */
-export function makeKillableBashTool(cwd: string, kills: Set<AbortController>): ToolDefinition {
+export function makeKillableBashTool(
+	cwd: string,
+	kills: Set<AbortController>,
+	/** per-call 返回文本的服务端语言（默认英文）；工具 definition 走 bilingual 内联双语。 */
+	lang: () => ServerLang = () => "en",
+): ToolDefinition {
 	const base = createLocalBashOperations();
 	const tool = createBashTool(cwd, {
 		operations: {
@@ -276,7 +283,7 @@ export function makeKillableBashTool(cwd: string, kills: Set<AbortController>): 
 			// head/tail 后处理（native 无终端，直接截返回行即可）。
 			const p = params as { head?: number; tail?: number };
 			if ((p?.head || p?.tail) && result?.content?.[0]?.text != null) {
-				result.content![0].text = applyHeadTail(result.content![0].text!, p.head, p.tail);
+				result.content![0].text = applyHeadTail(result.content![0].text!, p.head, p.tail, lang());
 			}
 			return result as never;
 		},
@@ -1761,7 +1768,8 @@ export class ClientSession {
 				// 开 → 终端接管 bash（persist 决定一次性/持久，可静默自动转后台）。
 				customTools: [
 					makeAdaptiveBashTool(
-						makeKillableBashTool(effectiveCwd, this.bashKills),
+						// issue #91：bash 返回按客户端 UI 语言出中英（英文默认）。
+						makeKillableBashTool(effectiveCwd, this.bashKills, () => this.getLang()),
 						makeTerminalBashTool(terminals, {
 							cwd: effectiveCwd,
 							// 设置开 = 用终端；此分支里 persist 未显式给时默认一次性（false）。
@@ -3129,6 +3137,8 @@ export class ClientSession {
 		cwd: () => this.cwd,
 		getSession: () => this.session,
 		newChat: () => this.newChat(),
+		// /new <prompt>: deliver the text as the new session's first prompt.
+		prompt: (text) => this.prompt(text),
 		setModel: (id) => this.setModel(id),
 		setCwd: (path) => this.setCwd(path),
 		setThinking: (level) => this.setThinking(level),
@@ -4002,13 +4012,13 @@ export class ClientSession {
 		return join(this.stateStore.dataDir, "chats");
 	}
 
-	async newChat(cwd?: string | null): Promise<void> {
-		if (this.quiesceBlocked()) return;
+	async newChat(cwd?: string | null): Promise<boolean> {
+		if (this.quiesceBlocked()) return false;
 		if (cwd !== undefined) {
 			const target = cwd === null ? this.projectlessCwd : resolve(cwd);
 			if (cwd === null) mkdirSync(target, { recursive: true });
 			await this.setCwd(target);
-			if (this.cwd !== target) return;
+			if (this.cwd !== target) return false;
 		}
 		// Reuse an already-open blank conversation instead of piling up new ones
 		// on every click: if the active chat has no messages it IS the new chat
@@ -4026,14 +4036,14 @@ export class ClientSession {
 		const active = this.conv;
 		if (active && isBlank(active)) {
 			this.flushSnapshot();
-			return;
+			return true;
 		}
 		for (const conv of this.convs.values()) {
 			if (conv.id === this.activeId) continue;
 			if (conv.cwd === this.cwd && !conv.isSubagent && isBlank(conv)) {
 				await this.switchConversation(conv.id);
 				this.flushSnapshot();
-				return;
+				return true;
 			}
 		}
 		// Cap is per project — conversations of other projects keep their own
@@ -4047,7 +4057,7 @@ export class ClientSession {
 				text: `当前项目运行的对话已达上限（${MAX_OPEN_CONVERSATIONS} 个），请先打开某个对话并离开（不继续对话）以移出列表`,
 				textEn: `This project already has the max open conversations (${MAX_OPEN_CONVERSATIONS}). Open one and leave it (without continuing) to remove it from the list.`,
 			});
-			return;
+			return false;
 		}
 		// The outgoing conversation is left behind — apply the running-list
 		// lifecycle. Removal is deferred until the new chat exists so the active
@@ -4056,6 +4066,7 @@ export class ClientSession {
 		// Carry the model chosen in the active chat over to the new chat so it
 		// doesn't silently revert to the ModelRuntime default model.
 		const prevModel = this.conv.session.agent.state.model ?? null;
+		let ready = false;
 		try {
 			const conversationId = this.nextConversationId();
 			const terminals = this.makeTerminalManager(conversationId, this.cwd);
@@ -4092,6 +4103,7 @@ export class ClientSession {
 			void this.pushSlashCommands();
 			// 新对话即当前打开 → 插件重拉（轨迹视图跟随）。
 			this.notifyConversationChanged();
+			ready = true;
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4101,6 +4113,7 @@ export class ClientSession {
 			});
 		}
 		this.flushSnapshot();
+		return ready;
 	}
 
 	/**
@@ -5709,6 +5722,9 @@ export class AgentService {
 		connectedClients: number;
 		activeConversations: number;
 		pendingMessages: number;
+		/** 托管本实例的平台服务（null = 前台/dev/Docker）——CLI 的
+		 *  `server status` 据此显示启动方式，见 launch-origin.ts。 */
+		service: UiServiceInfo | null;
 	} {
 		return {
 			pid: process.pid,
@@ -5718,6 +5734,7 @@ export class AgentService {
 			connectedClients: this.socketCount,
 			activeConversations: this.activeConversations(),
 			pendingMessages: this.pendingMessages(),
+			service: toServiceInfo(launchOrigin()),
 		};
 	}
 

@@ -60,9 +60,7 @@ export function parseAgentRole(
  * named "agent"), and requiring the extension source rejects same-named
  * templates/plugins so the picker never sends `/agent <role>` as a plain prompt.
  */
-export function hasPiastraExtension(
-	slashCommands: { name: string; source?: string }[] | null | undefined,
-): boolean {
+export function hasPiastraExtension(slashCommands: { name: string; source?: string }[] | null | undefined): boolean {
 	if (!slashCommands || slashCommands.length === 0) return false;
 	const hasAgent = slashCommands.some((c) => c.name === "agent" && c.source === "extension");
 	const hasPiastra = slashCommands.some((c) => c.name === "piastra" && c.source === "extension");

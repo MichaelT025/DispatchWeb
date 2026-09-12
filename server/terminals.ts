@@ -496,10 +496,7 @@ export function resolveWindowsUserShell(
 	if (she && exists(she)) return { shell: she, args: bashArgs(she) };
 	const pf = env.ProgramFiles;
 	const pf86 = env["ProgramFiles(x86)"];
-	for (const cand of [
-		pf ? join(pf, "Git", "bin", "bash.exe") : "",
-		pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
-	]) {
+	for (const cand of [pf ? join(pf, "Git", "bin", "bash.exe") : "", pf86 ? join(pf86, "Git", "bin", "bash.exe") : ""]) {
 		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
 	}
 	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
@@ -519,10 +516,7 @@ export function resolveWindowsBashShell(
 ): { shell: string; args: string[] } {
 	const pf = env.ProgramFiles;
 	const pf86 = env["ProgramFiles(x86)"];
-	for (const cand of [
-		pf ? join(pf, "Git", "bin", "bash.exe") : "",
-		pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
-	]) {
+	for (const cand of [pf ? join(pf, "Git", "bin", "bash.exe") : "", pf86 ? join(pf86, "Git", "bin", "bash.exe") : ""]) {
 		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
 	}
 	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
@@ -1538,18 +1532,24 @@ let oneShotBashSeq = 0;
 /** 应用 head / tail 参数到输出顶层行（替代 `| head` / `| tail` 管道——管道会
  *  缓冲输出、让可见终端全程哑火，还容易白白触发静默解阻）。两者同时给时先
  *  截头再截尾。 */
-export function applyHeadTail(text: string, head?: number, tail?: number): string {
+export function applyHeadTail(text: string, head?: number, tail?: number, lang: ServerLang = "en"): string {
 	// 只对真实数据行切片；省略提示行单独存，最后再包回输出，避免提示行在
 	// head+tail 组合时被当成数据行参与第二次截取（导致尾部少截一行）。
 	let data = text.split("\n");
 	let headNote: string | null = null;
 	let tailNote: string | null = null;
 	if (head && head > 0 && data.length > head) {
-		headNote = `…（后 ${data.length - head} 行已省略）`;
+		const n = data.length - head;
+		headNote = pick(lang, `…（后 ${n} 行已省略）`, `…[${n} lines omitted below]…`, "terminals.headtail.omitted.below", {
+			n,
+		});
 		data = data.slice(0, head);
 	}
 	if (tail && tail > 0 && data.length > tail) {
-		tailNote = `…（前 ${data.length - tail} 行已省略）`;
+		const n = data.length - tail;
+		tailNote = pick(lang, `…（前 ${n} 行已省略）`, `…[${n} lines omitted above]…`, "terminals.headtail.omitted.above", {
+			n,
+		});
 		data = data.slice(-tail);
 	}
 	const parts: string[] = [];
@@ -1678,11 +1678,13 @@ export function makeTerminalBashTool(
 			const redirect = stripped && limiter!.kind === "tail" ? detectStdoutRedirect(runCommand) : null;
 			const tailFile = redirect ? { file: redirect.file, lines: limiter!.lines ?? 10 } : undefined;
 			// 复杂子表达式先 hoist 成干净 const（issue #91 v2：vars key 不写复杂表达式）。
-			const limiterSegment = limiter!.segment;
-			const limiterTailLines = limiter!.lines ?? 10;
-			const limiterTailZh = limiter!.kind === "tail" ? `本次返回末尾 ${limiterTailLines} 行。` : "本次返回全部输出。";
+			// 注意：limiter 对「没有尾部限输出管道」的命令是 null（issue #121）——
+			// 这些 const 一律走可选链，只在 stripped=true（limiterNote 才被取用）时才有意义。
+			const limiterSegment = limiter?.segment ?? "";
+			const limiterTailLines = limiter?.lines ?? 10;
+			const limiterTailZh = limiter?.kind === "tail" ? `本次返回末尾 ${limiterTailLines} 行。` : "本次返回全部输出。";
 			const limiterTailEn =
-				limiter!.kind === "tail"
+				limiter?.kind === "tail"
 					? `Returning the last ${limiterTailLines} lines this time.`
 					: "Returning the full output this time.";
 			const limiterNote = stripped
@@ -1721,7 +1723,7 @@ export function makeTerminalBashTool(
 					if (m) {
 						terminals.setSentinelPending(termId, false);
 						closeOneShot();
-						const text = applyHeadTail(cleanBashOutput(collected), p.head, effectiveTail);
+						const text = applyHeadTail(cleanBashOutput(collected), p.head, effectiveTail, lang);
 						return {
 							content: [
 								{
@@ -1753,7 +1755,7 @@ export function makeTerminalBashTool(
 							terminals,
 							opts,
 							runCommand,
-							applyHeadTail(cleanBashOutput(collected), p.head, effectiveTail),
+							applyHeadTail(cleanBashOutput(collected), p.head, effectiveTail, lang),
 							Math.round((Date.now() - lastDataAt) / 1000),
 							lang,
 						);

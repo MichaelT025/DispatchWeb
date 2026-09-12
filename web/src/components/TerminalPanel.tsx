@@ -303,7 +303,12 @@ export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 					<div className="term-pop-head">
 						<span className="panel-title">{t("commands")}</span>
 						<div className="panel-header-actions">
-							<button type="button" className="panel-refresh" title={t("rerun")} onClick={() => appSend({ type: "list_commands" })}>
+							<button
+								type="button"
+								className="panel-refresh"
+								title={t("rerun")}
+								onClick={() => appSend({ type: "list_commands" })}
+							>
 								<FiRefreshCw />
 							</button>
 							<button type="button" className="panel-new" title={t("newCommand")} onClick={startNew}>

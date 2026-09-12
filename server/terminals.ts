@@ -16,7 +16,7 @@ import { chmodSync, existsSync, readdirSync, realpathSync, statSync } from "node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 // MUST run before node-pty is required: rewrites the installed node-pty copies
 // so their worker/agent handlers tolerate Node `--watch`'s IPC traffic (see the
 // module itself for details).
@@ -447,16 +447,17 @@ function bashArgs(shell: string): string[] {
  * order: the 64-bit install dir, the 32-bit install dir, then each directory
  * on `PATH` (covers scoop/choco/portable installs that only prepend PATH).
  * Windows PATH entries are always `;`-separated regardless of the host the
- * server happens to run on, so split on the literal separator.
+ * server happens to run on, so split on the literal separator and construct
+ * candidates with win32 paths even when these resolvers are tested on POSIX.
  */
 function pwshCandidates(env: NodeJS.ProcessEnv): string[] {
 	const out: string[] = [];
 	const pf = env.ProgramFiles;
 	const pf86 = env["ProgramFiles(x86)"];
-	if (pf) out.push(join(pf, "PowerShell", "7", "pwsh.exe"));
-	if (pf86) out.push(join(pf86, "PowerShell", "7", "pwsh.exe"));
+	if (pf) out.push(win32.join(pf, "PowerShell", "7", "pwsh.exe"));
+	if (pf86) out.push(win32.join(pf86, "PowerShell", "7", "pwsh.exe"));
 	for (const dir of (env.PATH ?? "").split(";")) {
-		if (dir) out.push(join(dir, "pwsh.exe"));
+		if (dir) out.push(win32.join(dir, "pwsh.exe"));
 	}
 	return out;
 }
@@ -485,16 +486,19 @@ export function resolveWindowsUserShell(
 		if (exists(cand)) return { shell: cand, args: [] };
 	}
 	const sysRoot = env.SystemRoot ?? env.windir ?? "C:\\Windows";
-	const powershell = join(sysRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+	const powershell = win32.join(sysRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 	if (exists(powershell)) return { shell: powershell, args: [] };
 	const she = env.SHELL;
 	if (she && exists(she)) return { shell: she, args: bashArgs(she) };
 	const pf = env.ProgramFiles;
 	const pf86 = env["ProgramFiles(x86)"];
-	for (const cand of [pf ? join(pf, "Git", "bin", "bash.exe") : "", pf86 ? join(pf86, "Git", "bin", "bash.exe") : ""]) {
+	for (const cand of [
+		pf ? win32.join(pf, "Git", "bin", "bash.exe") : "",
+		pf86 ? win32.join(pf86, "Git", "bin", "bash.exe") : "",
+	]) {
 		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
 	}
-	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
+	const busybox = win32.join(homedir(), ".pi-web", "bin", "bash.exe");
 	if (exists(busybox)) return { shell: busybox, args: ["-i"] };
 	return { shell: env.COMSPEC || "powershell.exe", args: [] };
 }
@@ -511,10 +515,13 @@ export function resolveWindowsBashShell(
 ): { shell: string; args: string[] } {
 	const pf = env.ProgramFiles;
 	const pf86 = env["ProgramFiles(x86)"];
-	for (const cand of [pf ? join(pf, "Git", "bin", "bash.exe") : "", pf86 ? join(pf86, "Git", "bin", "bash.exe") : ""]) {
+	for (const cand of [
+		pf ? win32.join(pf, "Git", "bin", "bash.exe") : "",
+		pf86 ? win32.join(pf86, "Git", "bin", "bash.exe") : "",
+	]) {
 		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
 	}
-	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
+	const busybox = win32.join(homedir(), ".pi-web", "bin", "bash.exe");
 	if (exists(busybox)) return { shell: busybox, args: ["-i"] };
 	const she = env.SHELL;
 	if (she && she.endsWith("bash") && exists(she)) {

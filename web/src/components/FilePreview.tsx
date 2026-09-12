@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
+	FiArrowLeft,
 	FiCheck,
 	FiCode,
 	FiCornerDownLeft,
@@ -40,6 +41,9 @@ interface FilePreviewProps {
 	/** Attach the whole file (inline content / path reference) like the row buttons. */
 	onAttach: (path: string, name: string, mode: "inline" | "reference") => void;
 	onClose: () => void;
+	/** Inline mode: render as a fill-the-container workspace pane (no fixed
+	 *  overlay / backdrop dismiss) — used by the right workspace panel. */
+	inline?: boolean;
 }
 
 /** 1-based inclusive line range. */
@@ -48,7 +52,7 @@ interface Range {
 	end: number;
 }
 
-export function FilePreview({ file, content, onAddLines, onAttach, onClose }: FilePreviewProps) {
+export function FilePreview({ file, content, onAddLines, onAttach, onClose, inline = false }: FilePreviewProps) {
 	const t = useT();
 	const [loaded, setLoaded] = useState<FileContent | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -256,9 +260,9 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose }: Fi
 
 	return (
 		<div
-			className={`fp-overlay ${fullscreen ? "fullscreen" : ""}`}
+			className={`${inline ? "fp-inline" : "fp-overlay"} ${fullscreen ? "fullscreen" : ""}`}
 			onMouseDown={(e) => {
-				if (e.target === e.currentTarget) handleClose();
+				if (!inline && e.target === e.currentTarget) handleClose();
 			}}
 		>
 			<div className={`fp ${fullscreen ? "fullscreen" : ""}`} style={{ "--fp-zoom": zoom / 100 } as CSSProperties}>
@@ -272,6 +276,13 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose }: Fi
 						{loaded && ` · ${formatSize(loaded.size)}`}
 					</span>
 					<span className="fp-head-actions">
+						{/* 内嵌模式：第一个按钮 = 返回文件树（等同关闭预览），给窄栏一个
+						    明确的「回去」路径，而不是只靠右上角 ✕。 */}
+						{inline && (
+							<button type="button" className="fp-attach back" title={t("fpBack")} onClick={handleClose}>
+								<FiArrowLeft />
+							</button>
+						)}
 						{isMarkdown && kind === "text" && !isBinary && loaded && (
 							<button
 								type="button"

@@ -24,7 +24,6 @@ import {
 } from "../lazy-window";
 import { SearchBar } from "./SearchBar";
 import { classifyScroll } from "./scroll-classify";
-import { EmptyTemplateCards } from "./PromptTemplates";
 import { useT } from "../i18n";
 
 /** Stable shared empty map — passing this (instead of a fresh Map) lets
@@ -768,8 +767,9 @@ export function MessageList({
 				onScroll={onScroll}
 			>
 				{state.messages.length === 0 && !state.streamingMessage && (
-					<div className="empty-state">
-						<EmptyTemplateCards />
+					<div className="empty-state astra-empty">
+						<div className="astra-empty-mark">PiAstra</div>
+						<div className="astra-empty-hint">{t("astraEmptyHint")}</div>
 					</div>
 				)}
 				{state.messages.map((m, i) => {

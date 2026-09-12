@@ -43,6 +43,12 @@ export const zh = {
 
 	/* topbar */
 	viewSwitch: "视图切换",
+	astraWorkspace: "工作台",
+	astraFiles: "文件",
+	astraReview: "审查",
+	astraWorkspaceHint: "选择要打开的面板",
+	astraEmptyHint: "输入消息开始，或按 / 查看命令",
+	fpBack: "返回文件列表",
 	chat: "对话",
 	terminal: "终端",
 	selectModel: "选择模型",
@@ -1112,6 +1118,12 @@ const en: Record<keyof typeof zh, string> = {
 
 	/* topbar */
 	viewSwitch: "Switch view",
+	astraWorkspace: "Workspace",
+	astraFiles: "Files",
+	astraReview: "Review",
+	astraWorkspaceHint: "Pick a panel to open",
+	astraEmptyHint: "Type a message to start, or press / for commands",
+	fpBack: "Back to files",
 	chat: "Chat",
 	terminal: "Terminal",
 	selectModel: "Select model",

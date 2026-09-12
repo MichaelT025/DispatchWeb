@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { randomUuid } from "../uuid";
-import { FiEdit2, FiMenu, FiPlay, FiPlus, FiRefreshCw, FiTerminal, FiTrash2, FiX } from "react-icons/fi";
+import { FiChevronDown, FiEdit2, FiMenu, FiPlay, FiPlus, FiRefreshCw, FiTerminal, FiTrash2, FiX } from "react-icons/fi";
 import type { ChatState, TerminalMeta } from "../use-chat";
 import type { CommandDef } from "../types";
 import { TermXterm } from "./TermXterm";
@@ -39,8 +39,8 @@ const EMPTY_DRAFT: Draft = { name: "", command: "", cwd: "${pwd}" };
 export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 	const t = useT();
 	const [activeId, setActiveId] = useState<string | null>(null);
-	// Mobile: the left column (commands + tabs) slides in as a drawer.
-	const [sideOpen, setSideOpen] = useState(false);
+	// Astra 紧凑条：命令管理收进条右端的弹出面板（不再是常驻左栏）。
+	const [cmdOpen, setCmdOpen] = useState(false);
 	// Command list editing state.
 	const [isNew, setIsNew] = useState(false);
 	const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -67,7 +67,7 @@ export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 	useEffect(() => {
 		if (chat.terminalActiveId) {
 			setActiveId(chat.terminalActiveId);
-			setSideOpen(false);
+			setCmdOpen(false);
 		}
 	}, [chat.terminalActiveId]);
 
@@ -100,7 +100,7 @@ export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 			exitCode: null,
 		});
 		setActiveId(id);
-		setSideOpen(false);
+		setCmdOpen(false);
 	};
 
 	const openShell = () =>
@@ -151,7 +151,7 @@ export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 				onClick={() => {
 					if (renamingTab) return;
 					setActiveId(tab.id);
-					setSideOpen(false);
+					setCmdOpen(false);
 				}}
 			>
 				<span className={`term-tab-dot ${tab.running ? "run" : "exit"}`} />
@@ -260,145 +260,145 @@ export function TerminalPanel({ chat, terminal }: TerminalPanelProps) {
 
 	return (
 		<div className="terminal-view">
-			{/* ---------------- left: command list + terminal tabs ---------------- */}
-			<aside className={`term-side term-commands ${sideOpen ? "open" : ""}`}>
-				<div className="panel-header">
-					<span className="panel-title">{t("commands")}</span>
-					<div className="panel-header-actions">
-						<button
-							type="button"
-							className="panel-refresh"
-							title={t("rerun")}
-							onClick={() => appSend({ type: "list_commands" })}
-						>
-							<FiRefreshCw />
-						</button>
-						<button type="button" className="panel-new" title={t("newCommand")} onClick={startNew}>
-							<FiPlus />
-						</button>
-					</div>
+			{/* ------------ compact tab strip (replaces the old left column) -------- */}
+			<div className="term-strip">
+				<div className="term-strip-tabs">
+					{userTabs.map(renderTab)}
+					{agentTabs.length > 0 && (
+						<span className="term-strip-group">
+							<button
+								type="button"
+								className={`term-strip-group-toggle ${aiBashOpen ? "open" : ""}`}
+								title={t("aiBashGroup")}
+								onClick={() => setAiBashOpen((v) => !v)}
+							>
+								<FiChevronDown className="term-strip-caret" />
+								{t("aiBashGroup")}
+								<span className="term-strip-count">{agentTabs.length}</span>
+							</button>
+							{aiBashOpen && agentTabs.map(renderTab)}
+						</span>
+					)}
+					<button type="button" className="term-strip-new" title={t("newTerminal")} onClick={openShell}>
+						<FiPlus />
+					</button>
 				</div>
+				<div className="term-strip-actions">
+					<button
+						type="button"
+						className={`term-strip-cmds${cmdOpen ? " active" : ""}`}
+						title={t("commands")}
+						onClick={() => setCmdOpen((v) => !v)}
+					>
+						<FiMenu />
+						<span>{t("commands")}</span>
+					</button>
+				</div>
+			</div>
 
-				<div className="panel-body">
-					{editing ? (
-						<div className="cmd-form">
-							<label htmlFor="cmd-name">{t("name")}</label>
-							<input
-								id="cmd-name"
-								className="cmd-input"
-								value={draft.name}
-								placeholder={t("exampleName")}
-								autoFocus
-								onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-							/>
-							<label htmlFor="cmd-command">{t("command")}</label>
-							<input
-								id="cmd-command"
-								className="cmd-input"
-								value={draft.command}
-								placeholder={t("exampleCommand")}
-								onChange={(e) => setDraft({ ...draft, command: e.target.value })}
-								onKeyDown={(e) => {
-									if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-										saveDraft();
-									}
-								}}
-							/>
-							<label htmlFor="cmd-cwd">
-								{t("directory")} <span className="cmd-hint">{t("cwdHint")}</span>
-							</label>
-							<input
-								id="cmd-cwd"
-								className="cmd-input"
-								value={draft.cwd}
-								placeholder="${pwd}"
-								onChange={(e) => setDraft({ ...draft, cwd: e.target.value })}
-								onKeyDown={(e) => {
-									if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-										saveDraft();
-									}
-								}}
-							/>
-							<div className="cmd-form-actions">
-								<button type="button" className="btn" onClick={cancelEdit}>
-									{t("cancel")}
-								</button>
-								<button
-									type="button"
-									className="btn primary"
-									disabled={!draft.name.trim() || !draft.command.trim()}
-									onClick={saveDraft}
-								>
-									{t("save")}
-								</button>
-							</div>
+			{/* ------------ commands popover (run / edit / delete / new) ------------ */}
+			{cmdOpen && <div className="term-pop-backdrop" onClick={() => setCmdOpen(false)} />}
+			{cmdOpen && (
+				<div className="term-cmd-pop" role="menu">
+					<div className="term-pop-head">
+						<span className="panel-title">{t("commands")}</span>
+						<div className="panel-header-actions">
+							<button type="button" className="panel-refresh" title={t("rerun")} onClick={() => appSend({ type: "list_commands" })}>
+								<FiRefreshCw />
+							</button>
+							<button type="button" className="panel-new" title={t("newCommand")} onClick={startNew}>
+								<FiPlus />
+							</button>
 						</div>
-					) : (
-						<>
-							{chat.commands.length === 0 && <div className="panel-empty">{t("noCommands")}</div>}
-							{chat.commands.map((c, i) => (
-								<div key={i} className="cmd-item">
-									<button type="button" className="cmd-run" title={t("clickToRun")} onClick={() => runCommand(c)}>
-										<FiPlay />
-									</button>
-									<button type="button" className="cmd-main" title={t("clickToRun")} onClick={() => runCommand(c)}>
-										<span className="cmd-name">{c.name}</span>
-										<span className="cmd-command">{c.command}</span>
-										{c.cwd && <span className="cmd-cwd">{c.cwd}</span>}
-									</button>
-									<button type="button" className="cmd-act" title={t("edit")} onClick={() => startEdit(i)}>
-										<FiEdit2 />
+					</div>
+					<div className="term-pop-body">
+						{editing ? (
+							<div className="cmd-form">
+								<label htmlFor="cmd-name">{t("name")}</label>
+								<input
+									id="cmd-name"
+									className="cmd-input"
+									value={draft.name}
+									placeholder={t("exampleName")}
+									autoFocus
+									onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+								/>
+								<label htmlFor="cmd-command">{t("command")}</label>
+								<input
+									id="cmd-command"
+									className="cmd-input"
+									value={draft.command}
+									placeholder={t("exampleCommand")}
+									onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+											saveDraft();
+										}
+									}}
+								/>
+								<label htmlFor="cmd-cwd">
+									{t("directory")} <span className="cmd-hint">{t("cwdHint")}</span>
+								</label>
+								<input
+									id="cmd-cwd"
+									className="cmd-input"
+									value={draft.cwd}
+									placeholder="${pwd}"
+									onChange={(e) => setDraft({ ...draft, cwd: e.target.value })}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+											saveDraft();
+										}
+									}}
+								/>
+								<div className="cmd-form-actions">
+									<button type="button" className="btn" onClick={cancelEdit}>
+										{t("cancel")}
 									</button>
 									<button
 										type="button"
-										className={`cmd-act del ${confirmDel === i ? "confirm" : ""}`}
-										title={t("delete")}
-										onClick={() => requestDelete(i)}
+										className="btn primary"
+										disabled={!draft.name.trim() || !draft.command.trim()}
+										onClick={saveDraft}
 									>
-										{confirmDel === i ? t("confirmQ") : <FiTrash2 />}
+										{t("save")}
 									</button>
 								</div>
-							))}
-						</>
-					)}
-				</div>
-
-				{/* ---------------- tabs (below the command list) ---------------- */}
-				<div className="term-tabs-block">
-					<div className="panel-header">
-						<span className="panel-title">{t("terminal")}</span>
-						<button type="button" className="panel-new" title={t("newTerminal")} onClick={openShell}>
-							<FiPlus />
-						</button>
-					</div>
-					<div className="panel-body">
-						{chat.terminals.length === 0 && <div className="panel-empty">{t("noTerminal")}</div>}
-						{userTabs.map(renderTab)}
-						{agentTabs.length > 0 && (
-							<div className="term-folder">
-								<button
-									type="button"
-									className={`term-folder-header ${aiBashOpen ? "open" : ""}`}
-									title={t("aiBashGroup")}
-									onClick={() => setAiBashOpen((v) => !v)}
-								>
-									<span className="term-folder-caret">{aiBashOpen ? "▾" : "▸"}</span>
-									<span className="term-folder-title">{t("aiBashGroup")}</span>
-									<span className="term-folder-count">{agentTabs.length}</span>
-								</button>
-								{aiBashOpen && <div className="term-folder-body">{agentTabs.map(renderTab)}</div>}
 							</div>
+						) : (
+							<>
+								{chat.commands.length === 0 && <div className="panel-empty">{t("noCommands")}</div>}
+								{chat.commands.map((c, i) => (
+									<div key={i} className="cmd-item">
+										<button type="button" className="cmd-run" title={t("clickToRun")} onClick={() => runCommand(c)}>
+											<FiPlay />
+										</button>
+										<button type="button" className="cmd-main" title={t("clickToRun")} onClick={() => runCommand(c)}>
+											<span className="cmd-name">{c.name}</span>
+											<span className="cmd-command">{c.command}</span>
+											{c.cwd && <span className="cmd-cwd">{c.cwd}</span>}
+										</button>
+										<button type="button" className="cmd-act" title={t("edit")} onClick={() => startEdit(i)}>
+											<FiEdit2 />
+										</button>
+										<button
+											type="button"
+											className={`cmd-act del ${confirmDel === i ? "confirm" : ""}`}
+											title={t("delete")}
+											onClick={() => requestDelete(i)}
+										>
+											{confirmDel === i ? t("confirmQ") : <FiTrash2 />}
+										</button>
+									</div>
+								))}
+							</>
 						)}
 					</div>
 				</div>
-			</aside>
+			)}
 
-			{/* ---------------- right: terminals ---------------- */}
+			{/* ------------ terminals (one xterm per tab, kept mounted) ------------ */}
 			<div className="term-main">
-				{sideOpen && <div className="drawer-backdrop" onClick={() => setSideOpen(false)} />}
-				<button type="button" className="term-side-toggle" title={t("commands")} onClick={() => setSideOpen((v) => !v)}>
-					<FiMenu />
-				</button>
 				{chat.terminals.length === 0 ? (
 					<div className="term-empty">
 						<FiTerminal className="term-empty-icon" />

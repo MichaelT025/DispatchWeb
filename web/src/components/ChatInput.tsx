@@ -729,22 +729,6 @@ export const ChatInput = memo(function ChatInput({
 					</div>
 				</div>
 			)}
-			{quickPhrasesEnabled && quickPhrases.length > 0 && (
-				<div className="quick-row" aria-label={t("quickPhrases")}>
-					{quickPhrases.map((p) => (
-						<button
-							key={p}
-							type="button"
-							className="quick-chip"
-							title={t("quickPhrasesTip", { text: p })}
-							disabled={!connected}
-							onClick={() => sendPhrase(p)}
-						>
-							{p}
-						</button>
-					))}
-				</div>
-			)}
 			<div className="inputbox">
 				<input
 					ref={fileInputRef}

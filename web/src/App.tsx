@@ -9,13 +9,27 @@ import {
 	type CSSProperties,
 	type PointerEvent as ReactPointerEvent,
 } from "react";
-import { TopBar } from "./components/TopBar";
 import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
-import { GoalBar } from "./components/GoalBar";
-import { FooterBar } from "./components/FooterBar";
+import { Dropdown, DropdownItem } from "./components/Dropdown";
+import { SoundSettingsPanel } from "./components/SoundSettings";
+import { NotifyToggle } from "./components/NotifyToggle";
+import {
+	FiFolder,
+	FiGlobe,
+	FiGitBranch,
+	FiLayers,
+	FiMenu,
+	FiSearch,
+	FiSettings,
+	FiSun,
+	FiTerminal,
+	FiVolume2,
+	FiSidebar,
+	FiMoreHorizontal,
+} from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
 import { DshQuestionDialog } from "./components/DshQuestionDialog";
 // 终端视图懒加载：xterm.js 体积大且只在切到终端时才需要，拆出主包
@@ -34,9 +48,9 @@ import { TemplateProvider } from "./components/PromptTemplates";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
 import type { ClientMessage, CommandDef, PromptAttachment, UiMessage } from "./types";
-import { useT, useI18n } from "./i18n";
 import { QUICK_PHRASE_DEFAULTS } from "./quick-phrases";
-import { FiAlertCircle, FiAlertTriangle, FiChevronsLeft, FiChevronsRight, FiInfo, FiX } from "react-icons/fi";
+import { useI18n, localeShort, useT } from "./i18n";
+import { FiAlertCircle, FiAlertTriangle, FiArrowLeft, FiChevronsLeft, FiChevronsRight, FiInfo, FiX } from "react-icons/fi";
 import type { Notice } from "./use-chat";
 import { fileToProcessedImage, isRasterImage, type ProcessedImage } from "./image-paste";
 import { randomUuid } from "./uuid";
@@ -104,6 +118,17 @@ const EMPTY_MESSAGES: UiMessage[] = [];
 const PANEL_MIN = 180;
 const PANEL_MAX = 520;
 const PANEL_DEFAULT = 240;
+/** Astra 右侧工作台：首次打开默认占主区约一半（参考 Codex 右栏比例），可拖更宽。 */
+const RIGHT_MIN = 280;
+const RIGHT_MAX = 1100;
+function readWorkspaceWidth(): number {
+	try {
+		const v = Number(localStorage.getItem(panelWidthKey("right")));
+		if (Number.isFinite(v) && v >= RIGHT_MIN && v <= RIGHT_MAX) return v;
+	} catch {}
+	const half = Math.round(window.innerWidth * 0.42);
+	return Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, half));
+}
 type PanelSide = "left" | "right";
 const panelWidthKey = (side: PanelSide) => `pi-web-ui:${side}-panel-width`;
 function readPanelWidth(side: PanelSide): number {
@@ -116,7 +141,17 @@ function readPanelCollapsed(side: PanelSide): boolean {
 }
 
 /** 面板与主区之间的拖拽分隔条：拖动改宽度，双击复位。 */
-function ResizeHandle({ side, width, onResize }: { side: PanelSide; width: number; onResize: (w: number) => void }) {
+function ResizeHandle({
+	side,
+	width,
+	max = PANEL_MAX,
+	onResize,
+}: {
+	side: PanelSide;
+	width: number;
+	max?: number;
+	onResize: (w: number) => void;
+}) {
 	const t = useT();
 	const onPointerDown = useCallback(
 		(e: ReactPointerEvent<HTMLDivElement>) => {
@@ -127,7 +162,7 @@ function ResizeHandle({ side, width, onResize }: { side: PanelSide; width: numbe
 			const move = (ev: PointerEvent) => {
 				// 左侧手柄向右拖变宽，右侧相反
 				const delta = side === "left" ? ev.clientX - startX : startX - ev.clientX;
-				last = Math.min(PANEL_MAX, Math.max(PANEL_MIN, Math.round(startW + delta)));
+				last = Math.min(max, Math.max(PANEL_MIN, Math.round(startW + delta)));
 				onResize(last);
 			};
 			const up = () => {
@@ -163,8 +198,130 @@ function PanelRail({ side, onClick }: { side: PanelSide; onClick: () => void }) 
 	);
 }
 
-/** 顶栏视图：内置三个 + 每个已装插件一个 `plugin:<id>`。 */
-type ViewName = "chat" | "terminal" | "git" | `plugin:${string}`;
+/** 右侧工作台面板：文件 / Git 审查 / 已装插件视图。终端走底部条，不在此列。 */
+type WorkspaceTab = "files" | "git" | `plugin:${string}`;
+
+/** Astra 紧凑顶栏：项目名 + 连接态 + 右上角工作台开关。替代原 TopBar 的
+ *  常驻多标签/工具链，只保留搜索 / 声音 / 语言 / 主题 / 更新等必要入口。 */
+function AstraHeader({
+	chat,
+	onOpenPanel,
+	onOpenSettings,
+	onOpenBgTasks,
+	onOpenGlobalSearch,
+	workspaceOpen,
+	onToggleWorkspace,
+	bottomTerminalOpen,
+	onToggleBottomTerminal,
+	sound,
+	onSoundChange,
+	onSoundPreview,
+	themes,
+	theme,
+	onThemeChange,
+}: {
+	chat: { ready: boolean; status: string; state: { cwd: string } | null; bgServers: unknown[] };
+	onOpenPanel: (side: "left" | "right") => void;
+	onOpenSettings: () => void;
+	onOpenBgTasks: () => void;
+	onOpenGlobalSearch: () => void;
+	workspaceOpen: boolean;
+	onToggleWorkspace: () => void;
+	bottomTerminalOpen: boolean;
+	onToggleBottomTerminal: () => void;
+	sound: SoundSettings;
+	onSoundChange: (s: SoundSettings) => void;
+	onSoundPreview: (k: SoundKind) => void;
+	themes: { id: string; name: string; builtin: boolean; nameEn?: string }[];
+	theme: string | null;
+	onThemeChange: (id: string | null) => void;
+}) {
+	const { locale, setLocale, t, packs } = useI18n();
+	const [overflowOpen, setOverflowOpen] = useState(false);
+	const connLabel = chat.ready ? t("connected") : chat.status === "closed" ? t("reconnecting") : t("connecting");
+	const projectName = projectNameFromCwd(chat.state?.cwd ?? "");
+	const chatBgCount = chat.bgServers.length;
+	return (
+		<header className="astra-header">
+			<div className="astra-header-left">
+				<button type="button" className="panel-toggle" title={t("openHistory")} onClick={() => onOpenPanel("left")}>
+					<FiMenu />
+				</button>
+				{projectName && <span className="astra-project">{projectName}</span>}
+				<span className={`conn-dot ${chat.ready ? "ok" : "busy"}`} title={connLabel} />
+				<span className="conn-label">{connLabel}</span>
+			</div>
+			<div className="astra-header-right">
+				<button type="button" className="chip" title={t("searchGlobalTip")} onClick={onOpenGlobalSearch}>
+					<FiSearch />
+				</button>
+				<button type="button" className="chip bg-task-chip" data-tip={t("bgTasksTip")} onClick={onOpenBgTasks}>
+					<FiLayers />
+					{chatBgCount > 0 && <span className="bg-task-badge">{chatBgCount}</span>}
+				</button>
+				<button type="button" className="chip" title={t("settingsTitle")} onClick={onOpenSettings}>
+					<FiSettings />
+				</button>
+				<Dropdown trigger={<FiMoreHorizontal />} open={overflowOpen} onOpenChange={setOverflowOpen}>
+					<div className="dd-header">
+						<FiSun /> {t("theme")}
+					</div>
+					<DropdownItem
+						active={theme === null}
+						onClick={() => {
+							onThemeChange(null);
+						}}
+					>
+						{t("themeDefault")}
+					</DropdownItem>
+					{themes.map((th) => (
+						<DropdownItem
+							key={th.id}
+							active={theme === th.id}
+							onClick={() => {
+								onThemeChange(th.id);
+							}}
+						>
+							{locale === "zh" ? th.name : (th.nameEn ?? th.name)}
+						</DropdownItem>
+					))}
+					<div className="dd-header">
+						<FiGlobe /> {t("language")}
+					</div>
+					{packs.map((l) => (
+						<DropdownItem key={l.code} active={locale === l.code} onClick={() => setLocale(l.code)}>
+							{l.nativeName}
+						</DropdownItem>
+					))}
+					<div className="dd-header">
+						<FiVolume2 /> {t("sound")}
+					</div>
+					<SoundSettingsPanel settings={sound} onChange={onSoundChange} onPreview={onSoundPreview} />
+					<NotifyToggle />
+				</Dropdown>
+				<button
+					type="button"
+					className={`chip astra-terminal-toggle${bottomTerminalOpen ? " active" : ""}`}
+					title={t("terminal")}
+					aria-pressed={bottomTerminalOpen}
+					aria-expanded={bottomTerminalOpen}
+					onClick={onToggleBottomTerminal}
+				>
+					<FiTerminal />
+				</button>
+				<button
+					type="button"
+					className={`chip astra-workspace-toggle${workspaceOpen ? " active" : ""}`}
+					title={t("astraWorkspace")}
+					aria-pressed={workspaceOpen}
+					onClick={onToggleWorkspace}
+				>
+					<FiSidebar />
+				</button>
+			</div>
+		</header>
+	);
+}
 
 export function App() {
 	const t = useT();
@@ -197,19 +354,23 @@ export function App() {
 	}, [cwd, projectTitle, t]);
 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
+	/** Inline preview inside the right workspace (no modal). */
+	const [workspaceFile, setWorkspaceFile] = useState<PreviewFile | null>(null);
+	/** Right workspace pane (Astra shell): open/closed + which panel tab. */
+	const [workspaceOpen, setWorkspaceOpen] = useState(false);
+	const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab | null>(null);
+	/** Independent bottom terminal strip under the chat/right area. */
+	const [bottomTerminalOpen, setBottomTerminalOpen] = useState(false);
 	/** Full-window file drag in progress (issue #19) — shows the app-wide
 	 *  drop overlay; drop anywhere attaches, the input bar keeps priority via
 	 *  its own stopPropagation handlers. */
 	const [appDragOver, setAppDragOver] = useState(false);
-	const [viewChosen, setView] = useState<ViewName>("chat");
 	/* PI_WEB_TABS: a tab this instance does not offer cannot be shown, even if
 	   something else asks for it — a plugin firing pi-web-ui:plugin-run-command,
 	   or a panel's "open this in a terminal" button. The server refuses those
 	   messages anyway, so the pane would sit there empty. No list means every
 	   tab, which is the default. */
 	const tabOn = (tab: string) => !chat.tabs || tab === "chat" || chat.tabs.includes(tab);
-	const viewTab = viewChosen.startsWith("plugin:") ? "plugins" : viewChosen;
-	const view: ViewName = tabOn(viewTab) ? viewChosen : "chat";
 	// 已安装且未在设置面板禁用的插件（决定 tab 与视图加载）。
 	const enabledPlugins = useMemo(
 		() => chat.plugins.filter((p) => !chat.settings?.disabledPlugins?.includes(p.id)),
@@ -229,27 +390,23 @@ export function App() {
 	}, [enabledPlugins, chat.pluginsEpoch, send]);
 	// 左右面板可拖拽宽度（桌面端）：localStorage 持久化，双击手柄复位。
 	const [leftWidth, setLeftWidth] = useState(() => readPanelWidth("left"));
-	const [rightWidth, setRightWidth] = useState(() => readPanelWidth("right"));
+	const [rightWidth, setRightWidth] = useState(readWorkspaceWidth);
 	const resizeLeft = useCallback((w: number) => setLeftWidth(w), []);
 	const resizeRight = useCallback((w: number) => setRightWidth(w), []);
 	// 左右面板折叠状态（桌面端）：localStorage 持久化，点击面板内收起按钮折叠，
 	// 靠边缘的展开条恢复；移动端抽屉不受影响（始终由顶栏按钮开关）。
 	const [leftCollapsed, setLeftCollapsed] = useState(() => readPanelCollapsed("left"));
-	const [rightCollapsed, setRightCollapsed] = useState(() => readPanelCollapsed("right"));
 	const toggleLeft = useCallback(() => {
 		setLeftCollapsed((v) => {
 			localStorage.setItem(panelCollapsedKey("left"), v ? "0" : "1");
 			return !v;
 		});
 	}, []);
-	const toggleRight = useCallback(() => {
-		setRightCollapsed((v) => {
-			localStorage.setItem(panelCollapsedKey("right"), v ? "0" : "1");
-			return !v;
-		});
-	}, []);
-	// Mobile: which side panel is open as a drawer (null = both closed).
-	const [drawer, setDrawer] = useState<"left" | "right" | null>(null);
+	// Astra 右侧工作台开关（含顶部右上角按钮）。
+	const toggleWorkspace = useCallback(() => setWorkspaceOpen((v) => !v), []);
+	// Mobile: which side panel is open as a drawer (null = closed).
+	const [drawer, setDrawer] = useState<"left" | null>(null);
+	const [everBottom, setEverBottom] = useState(false);
 	// Viewport class: ≤768px turns the side panels into sliding drawers
 	// (matches the CSS breakpoint) — used to lazy-load panel data only when
 	// a drawer is actually open on mobile.
@@ -321,7 +478,8 @@ export function App() {
 					command: def,
 				});
 			}
-			setView("terminal");
+			setBottomTerminalOpen(true);
+			setEverBottom(true);
 		};
 		window.addEventListener("pi-web-ui:plugin-run-command", onPluginRunCommand);
 		// 派单卡片的「查看子代理」按钮：切到对应的子代理对话（与左栏点击同效果）。
@@ -602,6 +760,8 @@ export function App() {
 
 	// Narrow snapshot of the model/thinking fields for the memoized ChatInput →
 	// ModelThinking chain; identity is stable while tokens stream in.
+	const viewState = chat.state;
+
 	const model = chat.state?.model;
 	const thinkingLevel = chat.state?.thinkingLevel;
 	const availableThinkingLevels = chat.state?.availableThinkingLevels;
@@ -634,16 +794,70 @@ export function App() {
 		return true;
 	}, [chat.ready, chat.state?.cwd, chat.terminals.length, t, terminal]);
 
+	/** Open (not toggle) the bottom terminal strip — used by SCM/panel "go to
+	 *  terminal" flows; reuses the same shell-creation rule. */
+	const openBottomTerminal = useCallback(() => {
+		setEverBottom(true);
+		if (chat.terminals.length === 0 && !createShell()) {
+			terminalOpenRequested.current = true;
+		} else {
+			terminalOpenRequested.current = false;
+		}
+		setBottomTerminalOpen(true);
+	}, [chat.terminals.length, createShell]);
+
+	// Toggle the bottom terminal strip. The first shell is created on the user's
+	// terminal click, not on initial mount; if the session is still connecting,
+	// remember the request and complete it once ready. Shell creation is a side
+	// effect and must stay OUT of the state updater: React StrictMode can invoke
+	// updaters twice, which would spawn duplicate PTYs. The event handler path
+	// (openBottomTerminal) owns the once-only creation.
+	const toggleBottomTerminal = useCallback(() => {
+		if (bottomTerminalOpen) {
+			setBottomTerminalOpen(false);
+			return;
+		}
+		openBottomTerminal();
+	}, [bottomTerminalOpen, openBottomTerminal]);
+
+	/** Open (and focus) a workspace panel tab. */
+	const openWorkspace = useCallback((tab: WorkspaceTab) => {
+		setWorkspaceOpen(true);
+		setWorkspaceTab(tab);
+	}, []);
+
 	// If the user clicked Terminal while the initial connection was still
 	// loading, complete that request as soon as the session becomes ready.
 	useEffect(() => {
 		if (!terminalOpenRequested.current) return;
-		if (view !== "terminal" || chat.terminals.length !== 0) {
+		if (!bottomTerminalOpen || chat.terminals.length !== 0) {
 			terminalOpenRequested.current = false;
 			return;
 		}
 		if (createShell()) terminalOpenRequested.current = false;
-	}, [chat.terminals.length, createShell, view]);
+	}, [chat.terminals.length, createShell, bottomTerminalOpen]);
+
+	// Workspace / bottom-terminal keyboard shortcuts: Ctrl+P files,
+	// Ctrl+Shift+G git review, Ctrl+` bottom terminal.
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey)) return;
+			const key = e.key.toLowerCase();
+			const isShift = e.shiftKey;
+			if (key === "p" && !isShift) {
+				e.preventDefault();
+				openWorkspace("files");
+			} else if (key === "g" && isShift) {
+				e.preventDefault();
+				openWorkspace("git");
+			} else if (key === "`") {
+				e.preventDefault();
+				toggleBottomTerminal();
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [openWorkspace, toggleBottomTerminal]);
 
 	return (
 		// Whole window is a drop target (issue #19): dragover highlights + any
@@ -682,25 +896,18 @@ export function App() {
 					<span>📎 {t("dropHereToAttach")}</span>
 				</div>
 			)}
-			<TopBar
+			<AstraHeader
 				chat={chat}
-				terminal={terminal}
-				view={view}
-				plugins={enabledPlugins}
-				onViewChange={(v: ViewName) => {
-					// The terminal panel stays mounted while hidden. Create the first
-					// shell on the user's terminal-view click, not on initial mount.
-					terminalOpenRequested.current = v === "terminal" && chat.terminals.length === 0;
-					if (terminalOpenRequested.current && createShell()) {
-						terminalOpenRequested.current = false;
-					}
-					setView(v);
-					setDrawer(null);
+				onOpenPanel={(side) => {
+					if (side === "left") setDrawer("left");
 				}}
-				onOpenPanel={setDrawer}
 				onOpenSettings={() => setSettingsOpen(true)}
 				onOpenBgTasks={() => setBgTasksOpen(true)}
 				onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+				workspaceOpen={workspaceOpen}
+				onToggleWorkspace={toggleWorkspace}
+				bottomTerminalOpen={bottomTerminalOpen}
+				onToggleBottomTerminal={toggleBottomTerminal}
 				sound={sound}
 				onSoundChange={setSound}
 				onSoundPreview={(kind: SoundKind) => playSound(kind, sound)}
@@ -708,6 +915,7 @@ export function App() {
 				theme={theme}
 				onThemeChange={switchTheme}
 			/>
+
 			{chat.protocolMismatch && <div className="protocol-banner">⚠ {t("protocolMismatch")}</div>}
 			<div className="notices">
 				{chat.notices.map((n) => (
@@ -715,134 +923,237 @@ export function App() {
 				))}
 			</div>
 			<TemplateProvider currentModelId={model ? `${model.provider}/${model.id}` : null}>
-				<div
-					className="layout"
-					style={{ "--left-w": `${leftWidth}px`, "--right-w": `${rightWidth}px` } as CSSProperties}
-				>
+				<div className="astra-body" style={{ "--left-w": `${leftWidth}px` } as CSSProperties}>
 					{drawer && <div className="drawer-backdrop" onClick={() => setDrawer(null)} />}
-					<div className={`view-pane ${view === "chat" ? "" : "hidden"}`}>
-						{!isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
-						<div
-							className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${isMobile ? "" : leftCollapsed ? " hidden" : ""}`}
-						>
-							<LeftPanel
-								collapsible={!isMobile}
-								onToggleCollapse={toggleLeft}
-								panelSend={panelSend}
-								active={!isMobile || drawer === "left"}
-								sessionFile={chat.state?.sessionFile ?? null}
-								conversations={chat.conversations}
-								sessions={chat.sessions}
-								projects={chat.projects}
-								activeConversationId={chat.activeConversationId}
-							/>
-						</div>
-						{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
-						<main className={wide ? "main wide-chat" : "main"}>
-							{chat.state ? (
-								<MessageList
-									key={chat.state.conversationId ?? "boot"}
-									state={chat.state}
-									liveOutputs={chat.liveOutputs}
-									toolStatuses={chat.toolStatuses}
-									onEdit={onEditMessage}
-									onKillBash={() => send({ type: "abort_bash" })}
-									onRetry={() => {
-										// 重试沿用当前模型续跑上一轮请求，同样算一次模型使用（下拉按次数排序）。
-										if (send({ type: "retry_last" })) {
-											const m = chat.state?.model;
-											if (m) recordModelUsage(`${m.provider}/${m.id}`);
-										}
-									}}
-									onRemoveQueued={onRemoveQueued}
-									onRecallQueued={onRecallQueued}
-									thinkingWrap={chat.settings?.thinkingWrap ?? true}
-									toolsWrap={chat.settings?.toolsWrap ?? true}
-									jumpTarget={searchJump}
-									onJumpDone={() => setSearchJump(null)}
-								/>
-							) : (
-								<div className="boot-wait">{chat.ready ? t("loadingSession") : t("connectingServer")}</div>
-							)}
-							{chat.settings?.goalModeEnabled !== false && (
-								<GoalBar
-									goal={chat.goal}
-									models={chat.models}
-									modelsLoading={chat.modelsLoading}
-									activeConversationId={chat.activeConversationId}
-								/>
-							)}
-							{/* 扩展问卷：非模态内联面板，插在输入框上方，对话内容保持可见 */}
-							{chat.dialog && <Dialog dialog={chat.dialog} />}
-							{chat.question && <DshQuestionDialog question={chat.question} />}
-							<ChatInput
-								streaming={chat.state?.isStreaming ?? false}
-								messages={chat.state?.messages ?? EMPTY_MESSAGES}
-								slashCommands={chat.slashCommands}
-								modelState={modelState}
-								models={chat.models}
-								modelsLoading={chat.modelsLoading}
-								providerKeys={chat.providerKeys}
-								attachments={attachments}
-								onRemoveAttachment={removeAttachmentCb}
-								onAddImageFiles={addImageFilesCb}
-								onAddLocalFiles={addLocalFilesCb}
-								onNotice={pushNotice}
-								onManageModels={openManageModels}
-								onSent={clearAttachments}
-								quickPhrases={chat.settings?.quickPhrases ?? []}
-								quickPhrasesEnabled={chat.settings?.quickPhrasesEnabled ?? true}
-								recallDrafts={recallDrafts}
-							/>
-						</main>
-						{!isMobile && <ResizeHandle side="right" width={rightWidth} onResize={resizeRight} />}
-						<div
-							className={`panel-drawer drawer-right ${drawer === "right" ? "open" : ""}${isMobile ? "" : rightCollapsed ? " hidden" : ""}`}
-						>
-							<RightPanel
-								collapsible={!isMobile}
-								onToggleCollapse={toggleRight}
-								panelSend={panelSend}
-								files={chat.files}
-								fileChanged={chat.fileChanged}
-								widgets={chat.widgets}
-								onAttach={(path, name, mode, isDir) => {
-									setDrawer(null);
-									attach(path, name, mode, isDir);
-								}}
-								onPreview={(path, name) => {
-									setDrawer(null);
-									setPreviewFile({ path, name });
-								}}
-								onNotice={(level, text) => pushNotice(level, text)}
-							/>
-						</div>
-						{!isMobile && rightCollapsed && <PanelRail side="right" onClick={toggleRight} />}
-					</div>
-					<div className={`view-pane ${view === "terminal" ? "" : "hidden"}`}>
-						<Suspense fallback={null}>
-							<TerminalPanel chat={chat} terminal={terminal} />
-						</Suspense>
-					</div>
-					<div className={`view-pane ${view === "git" ? "" : "hidden"}`}>
-						<ScmPanel
-							chat={chat}
-							terminal={terminal}
-							active={view === "git"}
-							onSwitchToTerminal={() => setView("terminal")}
+					{!isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
+					<div
+						className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${isMobile ? "" : leftCollapsed ? " hidden" : ""}`}
+					>
+						<LeftPanel
+							collapsible={!isMobile}
+							onToggleCollapse={toggleLeft}
+							panelSend={panelSend}
+							active={!isMobile || drawer === "left"}
+							sessionFile={chat.state?.sessionFile ?? null}
+							conversations={chat.conversations}
+							sessions={chat.sessions}
+							projects={chat.projects}
+							activeConversationId={chat.activeConversationId}
 						/>
 					</div>
-					{pluginViews.map((entry) => {
-						const name = `plugin:${entry.info.id}` as ViewName;
-						return (
-							<div key={entry.info.id} className={`view-pane ${view === name ? "" : "hidden"}`}>
-								<PluginView entry={entry} />
-							</div>
-						);
-					})}
+					{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
+					<div className="astra-column">
+						<div className="astra-row" style={{ "--right-w": `${rightWidth}px` } as CSSProperties}>
+							<main className={wide ? "main wide-chat" : "main"}>
+								{viewState ? (
+									<MessageList
+										key={viewState.conversationId ?? "boot"}
+										state={viewState}
+										liveOutputs={chat.liveOutputs}
+										toolStatuses={chat.toolStatuses}
+										onEdit={onEditMessage}
+										onKillBash={() => send({ type: "abort_bash" })}
+										onRetry={() => {
+											if (send({ type: "retry_last" })) {
+												const m = chat.state?.model;
+												if (m) recordModelUsage(`${m.provider}/${m.id}`);
+											}
+										}}
+										onRemoveQueued={onRemoveQueued}
+										onRecallQueued={onRecallQueued}
+										thinkingWrap={chat.settings?.thinkingWrap ?? true}
+										toolsWrap={chat.settings?.toolsWrap ?? false} // Astra 默认折叠摘要；错误卡自动展开，对话框不受影响
+										jumpTarget={searchJump}
+										onJumpDone={() => setSearchJump(null)}
+									/>
+								) : (
+									<div className="boot-wait">{chat.ready ? t("loadingSession") : t("connectingServer")}</div>
+								)}
+								{/* 扩展问卷：非模态内联面板，插在输入框上方 */}
+								{chat.dialog && <Dialog dialog={chat.dialog} />}
+								{chat.question && <DshQuestionDialog question={chat.question} />}
+								<ChatInput
+									streaming={viewState?.isStreaming ?? false}
+									messages={viewState?.messages ?? EMPTY_MESSAGES}
+									slashCommands={chat.slashCommands}
+									modelState={modelState}
+									models={chat.models}
+									modelsLoading={chat.modelsLoading}
+									providerKeys={chat.providerKeys}
+									attachments={attachments}
+									onRemoveAttachment={removeAttachmentCb}
+									onAddImageFiles={addImageFilesCb}
+									onAddLocalFiles={addLocalFilesCb}
+									onNotice={pushNotice}
+									onManageModels={openManageModels}
+									onSent={clearAttachments}
+									quickPhrases={chat.settings?.quickPhrases ?? []}
+									quickPhrasesEnabled={chat.settings?.quickPhrasesEnabled ?? true}
+									recallDrafts={recallDrafts}
+								/>
+							</main>
+							{workspaceOpen && (
+								<>
+									{!isMobile && <ResizeHandle side="right" width={rightWidth} max={RIGHT_MAX} onResize={resizeRight} />}
+									<aside className={`astra-workspace${isMobile ? " overlay" : ""}`} aria-label={t("astraWorkspace")}>
+										<div className="astra-workspace-tabs" role="tablist" aria-label={t("astraWorkspace")}>
+											{workspaceTab !== null && (
+												<button
+													type="button"
+													className="astra-workspace-back"
+													title={t("astraWorkspace")}
+													aria-label={t("astraWorkspace")}
+													onClick={() => setWorkspaceTab(null)}
+												>
+													<FiArrowLeft />
+												</button>
+											)}
+											<button
+												type="button"
+												role="tab"
+												aria-selected={workspaceTab === "files"}
+												className={workspaceTab === "files" ? "active" : ""}
+												onClick={() => setWorkspaceTab("files")}
+											>
+												<FiFolder />
+												<span>{t("astraFiles")}</span>
+											</button>
+											{tabOn("git") && (
+												<button
+													type="button"
+													role="tab"
+													aria-selected={workspaceTab === "git"}
+													className={workspaceTab === "git" ? "active" : ""}
+													onClick={() => setWorkspaceTab("git")}
+												>
+													<FiGitBranch />
+													<span>{t("astraReview")}</span>
+												</button>
+											)}
+											{pluginViews.map((entry) => (
+												<button
+													key={entry.info.id}
+													type="button"
+													role="tab"
+													aria-selected={workspaceTab === `plugin:${entry.info.id}`}
+													className={workspaceTab === `plugin:${entry.info.id}` ? "active" : ""}
+													onClick={() => setWorkspaceTab(`plugin:${entry.info.id}` as WorkspaceTab)}
+												>
+													{entry.info.icon ? <span aria-hidden>{entry.info.icon}</span> : null}
+													<span>{entry.info.name}</span>
+												</button>
+											))}
+											<button
+												type="button"
+												className="astra-workspace-close"
+												title={t("close")}
+												onClick={() => setWorkspaceOpen(false)}
+											>
+												<FiX />
+											</button>
+										</div>
+										<div className="astra-workspace-content">
+											{workspaceTab === null && (
+												<div className="astra-workspace-chooser" role="menu">
+													<div className="astra-workspace-hint">{t("astraWorkspaceHint")}</div>
+													<button
+														type="button"
+														role="menuitem"
+														className="astra-workspace-item"
+														onClick={() => setWorkspaceTab("files")}
+													>
+														<FiFolder />
+														<span>{t("astraFiles")}</span>
+														<kbd>Ctrl+P</kbd>
+													</button>
+													{tabOn("git") && (
+														<button
+															type="button"
+															role="menuitem"
+															className="astra-workspace-item"
+															onClick={() => setWorkspaceTab("git")}
+														>
+															<FiGitBranch />
+															<span>{t("astraReview")}</span>
+															<kbd>Ctrl+Shift+G</kbd>
+														</button>
+													)}
+													<button
+														type="button"
+														role="menuitem"
+														className={`astra-workspace-item${bottomTerminalOpen ? " active" : ""}`}
+														onClick={toggleBottomTerminal}
+													>
+														<FiTerminal />
+														<span>{t("terminal")}</span>
+														<kbd>Ctrl+`</kbd>
+													</button>
+													{pluginViews.map((entry) => (
+														<button
+															key={entry.info.id}
+															type="button"
+															role="menuitem"
+															className={`astra-workspace-item${workspaceTab === `plugin:${entry.info.id}` ? " active" : ""}`}
+															onClick={() => setWorkspaceTab(`plugin:${entry.info.id}` as WorkspaceTab)}
+														>
+															{entry.info.icon ? <span aria-hidden>{entry.info.icon}</span> : null}
+															<span>{entry.info.name}</span>
+														</button>
+													))}
+												</div>
+											)}
+											{workspaceTab === "files" && (
+												<RightPanel
+													collapsible={false}
+													panelSend={panelSend}
+													files={chat.files}
+													fileChanged={chat.fileChanged}
+													widgets={chat.widgets}
+													onAttach={(path, name, mode, isDir) => attach(path, name, mode, isDir)}
+													onPreview={(path, name) => setWorkspaceFile({ path, name })}
+													onNotice={(level, text) => pushNotice(level, text)}
+												/>
+											)}
+											{workspaceTab === "git" && (
+												<div className="astra-workspace-pane">
+													<ScmPanel chat={chat} terminal={terminal} active onSwitchToTerminal={openBottomTerminal} />
+												</div>
+											)}
+											{pluginViews.map((entry) =>
+												workspaceTab === `plugin:${entry.info.id}` ? (
+													<div key={entry.info.id} className="astra-workspace-pane">
+														<PluginView entry={entry} />
+													</div>
+												) : null,
+											)}
+											{workspaceTab === "files" && workspaceFile && (
+												<FilePreview
+													inline
+													file={workspaceFile}
+													content={chat.fileContent}
+													onAddLines={(path, name, start, end) => attach(path, name, "lines", false, { start, end })}
+													onAttach={(path, name, mode) => attach(path, name, mode)}
+													onClose={() => setWorkspaceFile(null)}
+												/>
+											)}
+										</div>
+									</aside>
+								</>
+							)}
+						</div>
+						<section
+							className={`astra-bottom-terminal${bottomTerminalOpen ? "" : " closed"}`}
+							aria-label={t("terminal")}
+						>
+							{everBottom && (
+								<Suspense fallback={null}>
+									<TerminalPanel chat={chat} terminal={terminal} />
+								</Suspense>
+							)}
+						</section>
+					</div>
 				</div>
 			</TemplateProvider>
-			<FooterBar chat={chat} />
 			{previewFile && (
 				<FilePreview
 					file={previewFile}
@@ -875,7 +1186,7 @@ export function App() {
 				<SettingsModal
 					chat={chat}
 					terminal={terminal}
-					onSwitchToTerminal={() => setView("terminal")}
+					onSwitchToTerminal={openBottomTerminal}
 					onClose={() => setSettingsOpen(false)}
 				/>
 			)}

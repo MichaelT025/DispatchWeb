@@ -7,6 +7,7 @@ import {
 	FiEdit2,
 	FiFolder,
 	FiMessageSquare,
+	FiPlus,
 	FiTrash2,
 	FiX,
 } from "react-icons/fi";
@@ -378,11 +379,20 @@ export const LeftPanel = memo(function LeftPanel({
 
 	return (
 		<aside ref={panelRef as React.RefObject<HTMLDivElement>} className="panel panel-left lp-panel">
-			{collapsible && onToggleCollapse && (
-				<button type="button" className="panel-collapse-btn" title={t("collapsePanel")} onClick={onToggleCollapse}>
-					<FiChevronsLeft />
-				</button>
-			)}
+			{/* Astra 品牌 + 突出的「新对话」——替代旧顶栏的 new_chat 入口（第一版改写
+			    时丢失，这里补回）。 */}
+			<div className="lp-brand">
+				<span className="lp-brand-name">PiAstra</span>
+				{collapsible && onToggleCollapse && (
+					<button type="button" className="panel-collapse-btn lp-brand-collapse" title={t("collapsePanel")} onClick={onToggleCollapse}>
+						<FiChevronsLeft />
+					</button>
+				)}
+			</div>
+			<button type="button" className="lp-new-chat" title={t("newChatTip")} onClick={() => panelSend({ type: "new_chat" })}>
+				<FiPlus />
+				<span>{t("newChat")}</span>
+			</button>
 			{/* Recent projects — collapsible, flex share */}
 			{projects.length > 0 && (
 				<div

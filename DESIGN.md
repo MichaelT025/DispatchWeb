@@ -9,28 +9,35 @@ right-aligned user bubbles. Preserve PiAstra's own content and real actions.
 ## 2. Color
 Default palette lives on `:root` in `web/src/styles.css`; downloaded theme links
 must override it through the existing cascade. Never put palette overrides on
-`.app`, where they would shadow inherited theme values.
+`.app`, where they would shadow inherited theme values. Surface restyles live
+in `web/src/css/{shell,messages,composer,workspace}.css`, loaded after
+`styles.css`, and must only use tokens (no literal colors) so themes keep
+working.
 
 | Token | Default | Role |
 | --- | --- | --- |
-| --bg | #0d0d0e | Main canvas |
-| --bg-elev | #17181a | Sidebar |
-| --bg-elev2 | #26272a | Hover and selected rows |
-| --inputbox-bg | #1b1b1d | Composer |
-| --border | #2c2c2e | Composer outline |
-| --border-soft | #242528 | Shell dividers |
-| --text | #ececec | Primary text |
-| --text-dim | #9a9a9e | Secondary text |
-| --text-faint | #6d6d72 | Hints |
-| --chip-bg | #2a2a2d | User bubble |
-| --send-blue | #e8e8e8 | Send fill (legacy token name) |
+| --bg | #000000 | Main canvas |
+| --bg-elev | #202020 | Sidebar, menus |
+| --bg-elev2 | #313131 | Hover and selected rows |
+| --inputbox-bg | #141414 | Composer |
+| --card-bg | #0c0c0c | Tool/bash cards, fenced code |
+| --chip-bg | #141414 | User bubble |
+| --border | #2e2e2e | Composer focus outline |
+| --border-soft | #1f1f1f | Shell dividers, card borders |
+| --text | #e4e4e4 | Primary text |
+| --text-dim | #a0a0a0 | Secondary text |
+| --text-faint | #727272 | Hints, section labels |
+| --send-blue / --send-fg | #ffffff / #000000 | Send fill and icon (legacy token name) |
+| --code-inline-bg | #1a1a1a | Inline code |
 
 Agent identity uses labels and pressed state, not hue. Status colors remain
 semantic (connection, errors, warnings, diff). Light/custom themes retain their
 existing palette mappings. Send uses text/background inversion for contrast.
 
 ## 3. Typography
-Reuse `--sans` and `--mono`. Brand 15px/700, title 13px/600, navigation
+`--sans` is Inter (Google Fonts, Segoe UI fallback); `--mono` is JetBrains
+Mono. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
+`components/Logo.tsx` so it follows `currentColor`. Brand 15px/700, title 13px/600, navigation
 13px/400, section/footer 11px, composer 14.5px, empty wordmark 20px.
 Long project and title labels ellipsize; chat prose wraps naturally.
 

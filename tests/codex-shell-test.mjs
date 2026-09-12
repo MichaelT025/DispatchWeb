@@ -179,7 +179,8 @@ try {
 		// Roles sit in a menu behind the composer pill.
 		await page.locator(".agent-picker-pill").click();
 		await page.locator(`[data-agent-role="${role}"]`).click();
-		await page.locator(`[data-agent-role="${role}"][aria-pressed="true"]`).waitFor();
+		// The menu closes on select; the pill reflects the confirmed server status.
+		await page.locator(`.agent-picker-pill[data-agent-active="${role}"]`).waitFor();
 		assert.equal(await page.locator(".inputbox").evaluate((el) => getComputedStyle(el).boxShadow), "none");
 		await shot(`agent-${role}`);
 	}

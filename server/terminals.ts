@@ -442,67 +442,119 @@ function truncateMiddle(text: string, max = 30_000): string {
 	return `${text.slice(0, head)}\n…（中间省略 ${text.length - max} 字符）…\n${text.slice(-tail)}`;
 }
 
-/** `-i` makes bash interactive; cmd.exe / powershell.exe are interactive on their own. */
+/** `-i` makes bash interactive; cmd.exe / powershell.exe / pwsh are interactive on their own. */
 function bashArgs(shell: string): string[] {
 	return /[\\/]bash(\.exe)?$/i.test(shell) ? ["-i"] : [];
 }
 
 /**
- * Interactive shell for PTYs.
- * - Windows: prefer bash — it matches the SDK's bash tool, so the agent and
- *   the terminal speak the same shell language (no more PowerShell/bash
- *   混用 that leaves heredocs / `&&` / `<<` hanging or erroring). Order:
+ * Candidate install locations for PowerShell 7+ (`pwsh.exe`), in preference
+ * order: the 64-bit install dir, the 32-bit install dir, then each directory
+ * on `PATH` (covers scoop/choco/portable installs that only prepend PATH).
+ * Windows PATH entries are always `;`-separated regardless of the host the
+ * server happens to run on, so split on the literal separator.
+ */
+function pwshCandidates(env: NodeJS.ProcessEnv): string[] {
+	const out: string[] = [];
+	const pf = env.ProgramFiles;
+	const pf86 = env["ProgramFiles(x86)"];
+	if (pf) out.push(join(pf, "PowerShell", "7", "pwsh.exe"));
+	if (pf86) out.push(join(pf86, "PowerShell", "7", "pwsh.exe"));
+	for (const dir of (env.PATH ?? "").split(";")) {
+		if (dir) out.push(join(dir, "pwsh.exe"));
+	}
+	return out;
+}
+
+/**
+ * Resolve the USER interactive terminal shell on Windows (pure apart from the
+ * injected `exists` probe, so it is unit-testable cross-platform). Priority:
  *   1. PI_WEB_SHELL (explicit override)
- *   2. $SHELL when it exists on disk (user launched from a Git Bash session)
- *   3. Git Bash install paths (ProgramFiles / ProgramFiles(x86))
- *   4. busybox-w32 fallback in <home>/.pi-web/bin/bash.exe (ensure-bash.ts
- *      downloads it automatically when 2–3 are absent)
- *   5. $COMSPEC (cmd.exe — always set)
- *   6. powershell.exe (last resort)
+ *   2. pwsh.exe (PowerShell 7+) — install dirs, then PATH
+ *   3. powershell.exe (Windows PowerShell 5.1, ships with every Windows)
+ *   4. bash fallbacks ($SHELL → Git Bash → busybox) for bare boxes
+ *   5. $COMSPEC (cmd.exe) last resort
+ *
+ * PowerShell is the user-terminal default so a browser tab opens the shell
+ * Windows users expect. This does NOT touch the agent's bash tool — that path
+ * resolves bash separately via resolveBashShell(), so agent commands keep bash
+ * semantics (heredocs, &&, process substitution) on every platform.
+ */
+export function resolveWindowsUserShell(
+	env: NodeJS.ProcessEnv,
+	exists: (p: string) => boolean,
+): { shell: string; args: string[] } {
+	const explicit = env.PI_WEB_SHELL;
+	if (explicit) return { shell: explicit, args: bashArgs(explicit) };
+	for (const cand of pwshCandidates(env)) {
+		if (exists(cand)) return { shell: cand, args: [] };
+	}
+	const sysRoot = env.SystemRoot ?? env.windir ?? "C:\\Windows";
+	const powershell = join(sysRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+	if (exists(powershell)) return { shell: powershell, args: [] };
+	const she = env.SHELL;
+	if (she && exists(she)) return { shell: she, args: bashArgs(she) };
+	const pf = env.ProgramFiles;
+	const pf86 = env["ProgramFiles(x86)"];
+	for (const cand of [
+		pf ? join(pf, "Git", "bin", "bash.exe") : "",
+		pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
+	]) {
+		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
+	}
+	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
+	if (exists(busybox)) return { shell: busybox, args: ["-i"] };
+	return { shell: env.COMSPEC || "powershell.exe", args: [] };
+}
+
+/**
+ * Windows shell for the terminal-backed bash tool ('ai-bash'): ALWAYS bash —
+ * Git Bash → busybox → $SHELL (only when it is bash) → plain `bash` on PATH.
+ * Kept separate from the user terminal so PowerShell defaulting never changes
+ * the agent's bash execution semantics.
+ */
+export function resolveWindowsBashShell(
+	env: NodeJS.ProcessEnv,
+	exists: (p: string) => boolean,
+): { shell: string; args: string[] } {
+	const pf = env.ProgramFiles;
+	const pf86 = env["ProgramFiles(x86)"];
+	for (const cand of [
+		pf ? join(pf, "Git", "bin", "bash.exe") : "",
+		pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
+	]) {
+		if (cand && exists(cand)) return { shell: cand, args: ["-i"] };
+	}
+	const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
+	if (exists(busybox)) return { shell: busybox, args: ["-i"] };
+	const she = env.SHELL;
+	if (she && she.endsWith("bash") && exists(she)) {
+		return { shell: she, args: ["-i"] };
+	}
+	return { shell: "bash", args: ["-i"] };
+}
+
+/**
+ * Interactive shell for PTYs.
+ * - Windows: PowerShell by default for the USER's interactive terminal
+ *   (see resolveWindowsUserShell for the full priority order).
  * - POSIX: the user's login shell, falling back to bash.
  * Resolved per terminal spawn (not at module load) so a busybox download that
  * finishes after startup is picked up by the next terminal.
  */
 function resolveShell(): { shell: string; args: string[] } {
-	if (isWindows) {
-		const explicit = process.env.PI_WEB_SHELL;
-		if (explicit) return { shell: explicit, args: bashArgs(explicit) };
-		const she = process.env.SHELL;
-		if (she && existsSync(she)) return { shell: she, args: bashArgs(she) };
-		const pf = process.env.ProgramFiles;
-		const pf86 = process.env["ProgramFiles(x86)"];
-		for (const cand of [
-			pf ? join(pf, "Git", "bin", "bash.exe") : "",
-			pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
-		]) {
-			if (cand && existsSync(cand)) return { shell: cand, args: ["-i"] };
-		}
-		const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
-		if (existsSync(busybox)) return { shell: busybox, args: ["-i"] };
-		return { shell: process.env.COMSPEC || "powershell.exe", args: [] };
-	}
+	if (isWindows) return resolveWindowsUserShell(process.env, existsSync);
 	return { shell: process.env.SHELL || "bash", args: ["-i"] };
 }
 
 /**
  * Shell for the terminal-backed bash tool ('ai-bash'): ALWAYS bash, never the
  * user's login shell (often zsh on macOS, whose `read -p` etc. diverge from
- * the bash semantics models write). Windows already prefers Git Bash/busybox
- * bash; on posix pick $SHELL when it is bash, else plain `bash`.
+ * the bash semantics models write). Windows resolves bash via
+ * resolveWindowsBashShell; on posix pick $SHELL when it is bash, else `bash`.
  */
 function resolveBashShell(): { shell: string; args: string[] } {
-	if (isWindows) {
-		const pf = process.env.ProgramFiles;
-		const pf86 = process.env["ProgramFiles(x86)"];
-		for (const cand of [
-			pf ? join(pf, "Git", "bin", "bash.exe") : "",
-			pf86 ? join(pf86, "Git", "bin", "bash.exe") : "",
-		]) {
-			if (cand && existsSync(cand)) return { shell: cand, args: ["-i"] };
-		}
-		const busybox = join(homedir(), ".pi-web", "bin", "bash.exe");
-		if (existsSync(busybox)) return { shell: busybox, args: ["-i"] };
-	}
+	if (isWindows) return resolveWindowsBashShell(process.env, existsSync);
 	const she = process.env.SHELL;
 	if (she && she.endsWith("bash") && existsSync(she)) {
 		return { shell: she, args: ["-i"] };

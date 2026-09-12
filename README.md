@@ -88,7 +88,7 @@ theme switching, and a full settings panel — tuned for daily development.
 
 ### 🖥️ Terminal & Git
 
-- Built-in terminal (xterm.js + node-pty) with per-client PTY management; Windows auto-selects Git Bash (busybox fallback).
+- Built-in terminal (xterm.js + node-pty) with per-client PTY management; on Windows the interactive shell defaults to PowerShell (`pwsh` → `powershell.exe`), while the AI bash tool always resolves to Git Bash/busybox.
 - **Source control (Git) panel** — status / branch / diff / untracked files via a hidden query terminal; commit, switch branch, push and pull run in the visible terminal and auto-switch to the terminal view.
 
 ### 🎛️ Models & settings

@@ -105,6 +105,47 @@ function makeGroup(
  * Order: current project first, then known projects by last-used desc, then
  * ungrouped cwds by label asc.
  */
+/**
+ * Which project groups currently need a scoped `list_sessions { cwd }`
+ * request. Pure so the lazy-history lifecycle is unit-testable without a DOM.
+ *
+ * The panel renders every group expanded by default (collapsing is opt-in), so
+ * "request the first time the user expands it" is wrong: an initially expanded
+ * non-current project, and a project that only appears after `list_projects`,
+ * would stay empty. The caller drives this from an effect over the visible
+ * groups instead.
+ *
+ * A group is pending when ALL hold:
+ *  - it is not the current cwd — the mount/reconnect effect lists the active
+ *    cwd separately with an unscoped `list_sessions` (whose reply is echoed
+ *    with the active cwd), so requesting it again here would only duplicate;
+ *  - it is expanded (`collapsed` holds only the user-collapsed paths);
+ *  - it has no request currently in flight (avoids request storms while the
+ *    reply is on the wire);
+ *  - it has not already loaded successfully (`loaded` = cwds the server has
+ *    echoed a `sessions` reply for), unless `refresh` forces a re-fetch — the
+ *    reconnect path uses that because a cached list may be stale.
+ *
+ * Returned in nav order; the caller sends one request per path.
+ */
+export function pendingSessionCwds(
+	groups: readonly NavGroup[],
+	collapsed: ReadonlySet<string>,
+	loaded: ReadonlySet<string>,
+	inFlight: ReadonlySet<string>,
+	refresh = false,
+): string[] {
+	const out: string[] = [];
+	for (const g of groups) {
+		if (g.isCurrent) continue;
+		if (collapsed.has(g.path)) continue;
+		if (inFlight.has(g.path)) continue;
+		if (!refresh && loaded.has(g.path)) continue;
+		out.push(g.path);
+	}
+	return out;
+}
+
 export function buildLeftNav(
 	projects: ProjectSummary[],
 	conversations: ConversationSummary[],

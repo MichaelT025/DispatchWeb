@@ -3,6 +3,7 @@ import {
 	basename,
 	buildLeftNav,
 	flattenConversations,
+	pendingSessionCwds,
 	type NavGroup,
 } from "../../web/src/components/left-panel-nav.js";
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
@@ -115,5 +116,53 @@ describe("buildLeftNav", () => {
 		const cur = groups.find((g) => g.path === "/cur") as NavGroup;
 		expect(cur.isCurrent).toBe(true);
 		expect(cur.sessions).toEqual(s);
+	});
+});
+
+describe("pendingSessionCwds", () => {
+	// Two projects discovered by list_projects; /a is the active cwd, /b is not.
+	const groups = () => buildLeftNav([project("/a", 2), project("/b", 1)], [], new Map(), "/a");
+
+	it("默认展开时，非当前但从未加载的项目也要拉取（初始空历史场景）", () => {
+		const pending = pendingSessionCwds(groups(), new Set(), new Set(), new Set());
+		expect(pending).toEqual(["/b"]);
+	});
+
+	it("新发现的项目（后于分组出现）同样补拉，已加载的不重复", () => {
+		const g = buildLeftNav([project("/a", 3), project("/b", 2), project("/c", 1)], [], new Map(), "/a");
+		expect(pendingSessionCwds(g, new Set(), new Set(["/b"]), new Set())).toEqual(["/c"]);
+	});
+
+	it("折叠的分组不拉取，展开后才进入待拉取", () => {
+		const collapsed = new Set(["/b"]);
+		expect(pendingSessionCwds(groups(), collapsed, new Set(), new Set())).toEqual([]);
+		expect(pendingSessionCwds(groups(), new Set(), new Set(), new Set())).toEqual(["/b"]);
+	});
+
+	it("当前 cwd 由无参 list_sessions 负责，不在分组拉取内", () => {
+		const g = buildLeftNav([project("/a", 2), project("/b", 1)], [], new Map([["/a", [session("/s/a")]]]), "/a");
+		expect(pendingSessionCwds(g, new Set(), new Set(["/a"]), new Set())).toEqual(["/b"]);
+	});
+
+	it("已成功加载的分组不重复请求", () => {
+		expect(pendingSessionCwds(groups(), new Set(), new Set(["/b"]), new Set())).toEqual([]);
+	});
+
+	it("在途请求不重复请求（防空转/风暴）", () => {
+		expect(pendingSessionCwds(groups(), new Set(), new Set(), new Set(["/b"]))).toEqual([]);
+	});
+
+	it("发送失败后（无在途标记）下一轮仍可重试", () => {
+		// 发送失败 = 未写入 inFlight；下一轮依赖变化时仍应待拉取。
+		expect(pendingSessionCwds(groups(), new Set(), new Set(), new Set())).toEqual(["/b"]);
+	});
+
+	it("重连刷新强制重拉已加载但展开的分组", () => {
+		expect(pendingSessionCwds(groups(), new Set(), new Set(["/b"]), new Set(), true)).toEqual(["/b"]);
+	});
+
+	it("重连刷新也不碰折叠分组或在途请求", () => {
+		expect(pendingSessionCwds(groups(), new Set(["/b"]), new Set(["/b"]), new Set(), true)).toEqual([]);
+		expect(pendingSessionCwds(groups(), new Set(), new Set(["/b"]), new Set(["/b"]), true)).toEqual([]);
 	});
 });

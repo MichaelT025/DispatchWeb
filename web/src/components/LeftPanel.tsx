@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useCallback, useRef } from "react";
+import { memo, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
 	FiCheck,
 	FiChevronDown,
@@ -14,7 +14,7 @@ import {
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../types";
 import { useT } from "../i18n";
 import { useAppField } from "../app-globals";
-import { buildLeftNav, type NavGroup } from "./left-panel-nav";
+import { buildLeftNav, pendingSessionCwds, type NavGroup } from "./left-panel-nav";
 
 /** Props are deliberately NARROW (no whole-ChatState object): every field is
  *  stable while tokens stream in, so the shallow-compared memo() below skips
@@ -122,32 +122,21 @@ export const LeftPanel = memo(function LeftPanel({
 			scopeId,
 		});
 	}, []);
-	/** 已请求过会话列表的项目 cwd —— 展开时只拉一次，避免每次展开都重扫磁盘。 */
-	const requestedCwds = useRef<Set<string>>(new Set());
-	const toggleGroup = useCallback(
-		(path: string, isCurrent: boolean) => {
-			// 展开非当前项目时惰性拉取该项目的保存会话（只读查询，不切活动对话）；
-			// 折叠/再展开不重复请求，当前项目由挂载 effect 负责。
-			const expanding = collapsedGroups.has(path);
-			if (expanding && !isCurrent && !requestedCwds.current.has(path)) {
-				requestedCwds.current.add(path);
-				panelSend({ type: "list_sessions", cwd: path });
+	/** 展开态切换只改折叠集合；发请求交给下面的可见分组 effect 统一处理。 */
+	const toggleGroup = useCallback((path: string) => {
+		setCollapsedGroups((prev) => {
+			const next = new Set(prev);
+			if (next.has(path)) {
+				next.delete(path);
+			} else {
+				next.add(path);
 			}
-			setCollapsedGroups((prev) => {
-				const next = new Set(prev);
-				if (next.has(path)) {
-					next.delete(path);
-				} else {
-					next.add(path);
-				}
-				try {
-					localStorage.setItem(LS_COLLAPSED_GROUPS, JSON.stringify([...next]));
-				} catch {}
-				return next;
-			});
-		},
-		[collapsedGroups, panelSend],
-	);
+			try {
+				localStorage.setItem(LS_COLLAPSED_GROUPS, JSON.stringify([...next]));
+			} catch {}
+			return next;
+		});
+	}, []);
 	useEffect(() => {
 		if (!convCtx) return;
 		const onDown = (e: MouseEvent) => {
@@ -239,6 +228,52 @@ export const LeftPanel = memo(function LeftPanel({
 		panelSend({ type: "list_sessions" });
 		panelSend({ type: "list_projects" });
 	}, [active, ready, status, cwd, panelSend]);
+
+	/** 已成功拉到过会话列表的项目 cwd 以 sessionsByCwd 为准（服务器只在收到
+	 *  list_sessions 后回推带 cwd 的 sessions）。in-flight 只是防抖标记，回执到达
+	 *  即删；这里不把「已发送」当成「已成功」，否则一次发送失败或重连丢包会把
+	 *  项目永久锁死为空。 */
+	const inFlightCwds = useRef<Set<string>>(new Set());
+	/** WebSocket 打开代数：重连时 +1，用来强制重拉已缓存展开分组的会话列表
+	 *  （断线期间的磁盘变动不会被旧缓存反映出来）。 */
+	const [liveToken, setLiveToken] = useState(0);
+	const wasLive = useRef(false);
+	const lastRefreshToken = useRef(0);
+
+	// 连接从「未就绪」变为 open：清掉在途标记（旧 socket 的请求永远不会回执），
+	// 并递增代数触发一次强制刷新。
+	useEffect(() => {
+		const live = ready && status === "open";
+		if (live && !wasLive.current) {
+			inFlightCwds.current.clear();
+			setLiveToken((n) => n + 1);
+		}
+		wasLive.current = live;
+	}, [ready, status]);
+
+	const navGroups = useMemo(
+		() => buildLeftNav(projects, conversations, sessionsByCwd, currentCwd),
+		[projects, conversations, sessionsByCwd, currentCwd],
+	);
+
+	// 可见且展开的项目都在这里惰性拉取历史：新发现的非当前项目、默认展开但从未
+	// 加载的分组都会补上；折叠分组不动。已加载成功的分组仅在重连刷新时重拉一次。
+	useEffect(() => {
+		if (!active || !ready || status !== "open") return;
+		const loaded = new Set(sessionsByCwd.keys());
+		// 回执到达 → 清在途标记，避免「发送成功但未回执」与「真正已加载」混淆。
+		for (const path of [...inFlightCwds.current]) {
+			if (loaded.has(path)) inFlightCwds.current.delete(path);
+		}
+		const refresh = liveToken !== lastRefreshToken.current;
+		lastRefreshToken.current = liveToken;
+		const pending = pendingSessionCwds(navGroups, collapsedGroups, loaded, inFlightCwds.current, refresh);
+		for (const path of pending) {
+			inFlightCwds.current.add(path);
+			// 发送失败（socket 未开）不驻留标记，下次连接/依赖变化时可重试。
+			if (!panelSend({ type: "list_sessions", cwd: path })) inFlightCwds.current.delete(path);
+		}
+	}, [active, ready, status, sessionsByCwd, navGroups, collapsedGroups, liveToken, panelSend]);
 
 	const displayName = (s: SessionSummary): string => {
 		const title = s.name || s.firstMessage.trim();
@@ -489,7 +524,7 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	const groups = buildLeftNav(projects, conversations, sessionsByCwd, currentCwd);
+	const groups = navGroups;
 
 	return (
 		<aside className="panel panel-left lp-panel">
@@ -540,7 +575,7 @@ export const LeftPanel = memo(function LeftPanel({
 										title={collapsed ? t("expandSection") : t("collapseSection")}
 										aria-expanded={!collapsed}
 										aria-label={g.label}
-										onClick={() => toggleGroup(g.path, g.isCurrent)}
+										onClick={() => toggleGroup(g.path)}
 									>
 										{collapsed ? <FiChevronRight /> : <FiChevronDown />}
 									</button>

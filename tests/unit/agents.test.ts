@@ -40,16 +40,75 @@ describe("isAgentRole", () => {
 });
 
 describe("hasPiastraExtension", () => {
-	it("true when /agent or /piastra is registered", () => {
-		expect(hasPiastraExtension([{ name: "agent" }])).toBe(true);
-		expect(hasPiastraExtension([{ name: "piastra" }])).toBe(true);
-		expect(hasPiastraExtension([{ name: "model" }, { name: "agent" }])).toBe(true);
+	it("true only when BOTH /agent and /piastra are extension commands", () => {
+		expect(
+			hasPiastraExtension([
+				{ name: "agent", source: "extension" },
+				{ name: "piastra", source: "extension" },
+			]),
+		).toBe(true);
+		// Extra catalog entries (builtins, skills, templates) do not interfere.
+		expect(
+			hasPiastraExtension([
+				{ name: "model", source: "builtin" },
+				{ name: "agent", source: "extension" },
+				{ name: "piastra", source: "extension" },
+				{ name: "review", source: "skill" },
+			]),
+		).toBe(true);
+	});
+
+	it("false when only one of the two extension commands is present", () => {
+		expect(hasPiastraExtension([{ name: "agent", source: "extension" }])).toBe(false);
+		expect(hasPiastraExtension([{ name: "piastra", source: "extension" }])).toBe(false);
+		expect(
+			hasPiastraExtension([
+				{ name: "agent", source: "extension" },
+				{ name: "piastra", source: "builtin" },
+			]),
+		).toBe(false);
+	});
+
+	it("false when a prompt template reuses an extension command name", () => {
+		// A template named "agent"/"piastra" must NOT enable role mode: sending
+		// `/agent <role>` would be expanded as a template / plain prompt.
+		expect(
+			hasPiastraExtension([
+				{ name: "agent", source: "prompt" },
+				{ name: "piastra", source: "extension" },
+			]),
+		).toBe(false);
+		expect(
+			hasPiastraExtension([
+				{ name: "agent", source: "extension" },
+				{ name: "piastra", source: "prompt" },
+			]),
+		).toBe(false);
+	});
+
+	it("false when a UI plugin reuses an extension command name", () => {
+		expect(
+			hasPiastraExtension([
+				{ name: "agent", source: "plugin" },
+				{ name: "piastra", source: "plugin" },
+			]),
+		).toBe(false);
+	});
+
+	it("false without a source (untrusted / legacy catalog entry)", () => {
+		// A bare name is not enough — only source === "extension" proves ownership.
+		expect(hasPiastraExtension([{ name: "agent" }, { name: "piastra" }])).toBe(false);
 	});
 
 	it("false otherwise (neutral fallback — never guess from the model)", () => {
 		expect(hasPiastraExtension(undefined)).toBe(false);
 		expect(hasPiastraExtension(null)).toBe(false);
 		expect(hasPiastraExtension([])).toBe(false);
-		expect(hasPiastraExtension([{ name: "model" }, { name: "new" }])).toBe(false);
+		expect(
+			hasPiastraExtension([
+				{ name: "model", source: "builtin" },
+				{ name: "new", source: "builtin" },
+			]),
+		).toBe(false);
 	});
 });

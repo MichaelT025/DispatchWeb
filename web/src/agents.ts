@@ -12,6 +12,14 @@
  * pushes: the extension registers `/agent` and `/piastra`. Absent → the UI
  * shows a neutral fallback and must not send a role command (which the SDK
  * would otherwise treat as a plain prompt — model-prompt masquerading).
+ *
+ * The catalog is NOT extension-only: it also contains prompt templates
+ * (source "prompt"), skills ("skill"), UI plugins ("plugin") and web builtins
+ * ("builtin"). A template/plugin may coincidentally be named "agent" or
+ * "piastra", so presence must require BOTH names AND source === "extension"
+ * (see SlashCommandInfo in server/protocol.ts) — otherwise a colliding
+ * non-extension command would wrongly switch the UI into role mode and let the
+ * picker send `/agent <role>` as a plain prompt to the model.
  */
 
 export const AGENT_ROLES = ["orchestrator", "general", "fast", "review"] as const;
@@ -45,11 +53,18 @@ export function parseAgentRole(
 }
 
 /**
- * True when the PiAstra extension is loaded: it registers `/agent` (role
- * selection) and `/piastra` (role summary). Checking the catalog is the most
- * reliable "extension present" signal the client has without a protocol change.
+ * True only when the PiAstra extension is loaded: it registers `/agent` (role
+ * selection) AND `/piastra` (role summary), both as SDK extension commands
+ * (source === "extension"). Requiring both names guards against a catalog that
+ * merely happens to carry one of them (e.g. a prompt template or UI plugin
+ * named "agent"), and requiring the extension source rejects same-named
+ * templates/plugins so the picker never sends `/agent <role>` as a plain prompt.
  */
-export function hasPiastraExtension(slashCommands: { name: string }[] | null | undefined): boolean {
+export function hasPiastraExtension(
+	slashCommands: { name: string; source?: string }[] | null | undefined,
+): boolean {
 	if (!slashCommands || slashCommands.length === 0) return false;
-	return slashCommands.some((c) => c.name === "agent" || c.name === "piastra");
+	const hasAgent = slashCommands.some((c) => c.name === "agent" && c.source === "extension");
+	const hasPiastra = slashCommands.some((c) => c.name === "piastra" && c.source === "extension");
+	return hasAgent && hasPiastra;
 }

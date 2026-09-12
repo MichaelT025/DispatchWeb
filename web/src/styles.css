@@ -11531,20 +11531,6 @@ button.source-default-toggle {
 .lp-group-main {
 	padding-right: 54px;
 }
-.lp-project-form {
-	display: flex;
-	gap: 4px;
-	padding: 4px 12px 8px;
-}
-.lp-project-form input {
-	min-width: 0;
-	width: 100%;
-	padding: 6px;
-	border: 1px solid var(--border);
-	border-radius: 5px;
-	background: var(--bg-elev2);
-	color: var(--text);
-}
 @media (hover: none) {
 	.lp-add-project {
 		opacity: 1;

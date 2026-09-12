@@ -396,6 +396,8 @@ export type ClientMessage =
 	| { type: "switch_session"; path: string }
 	| { type: "switch_conversation"; id: string }
 	| { type: "list_projects" }
+	/** Open the host OS folder picker; cancellation leaves the project unchanged. */
+	| { type: "pick_project_folder" }
 	| { type: "list_files"; path?: string }
 	/** 列目录：path 省略 = 工作区根；也接受工作区外绝对路径（Windows "C:/…"、
 	 *  posix "/…"）与机器根 "@root"（盘符列表，见 files-service.ts MACHINE_ROOT）。

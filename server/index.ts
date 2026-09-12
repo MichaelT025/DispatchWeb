@@ -28,6 +28,7 @@ import express from "express";
 import compression from "compression";
 import { WebSocket, WebSocketServer } from "ws";
 import { VERSION, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { pickProjectFolder } from "./project-folder-picker.js";
 import { PROTOCOL_VERSION } from "./protocol-version.js";
 import { AgentService, workspacePath, QuiesceRejectedError } from "./agent-service.js";
 import { isAbsoluteWirePath, wireToAbs } from "./files-service.js";
@@ -1049,6 +1050,20 @@ wss.on("connection", (ws) => {
 				break;
 			case "list_bg_servers":
 				void cs.listBgServers();
+				break;
+			case "pick_project_folder":
+				void pickProjectFolder(cs.cwd)
+					.then(async (path) => {
+						if (path && ws.readyState === WebSocket.OPEN) await cs.setCwd(path);
+					})
+					.catch((err: Error) => {
+						send({
+							type: "notice",
+							level: "error",
+							text: `无法打开文件夹选择器：${err.message}`,
+							textEn: `Could not open folder picker: ${err.message}`,
+						});
+					});
 				break;
 			case "new_chat":
 				void cs.newChat(msg.cwd);

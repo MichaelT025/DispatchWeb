@@ -194,7 +194,6 @@ export const zh = {
 	/* left panel */
 	recentProjects: "项目",
 	addProject: "添加项目",
-	projectPath: "项目文件夹路径",
 	recents: "最近对话",
 	runningConversations: "运行的对话",
 	subagentBadge: "子代理",
@@ -1287,7 +1286,6 @@ const en: Record<keyof typeof zh, string> = {
 	/* left panel */
 	recentProjects: "Projects",
 	addProject: "Add project",
-	projectPath: "Project folder path",
 	recents: "Recents",
 	runningConversations: "Running chats",
 	subagentBadge: "Subagent",

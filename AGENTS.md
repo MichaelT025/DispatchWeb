@@ -255,4 +255,4 @@ npm publish
 
 ---
 *结构/流程变更时同步更新本文件及相关 `docs/` 文档。修改后运行 `/reload` 生效。*
-Sidebar: global New chat uses `new_chat { cwd: null }` for projectless chats in `<dataDir>/chats`; project hover New chat passes `cwd`. Projects heading hover adds a folder path. Ungrouped chats render under Recents. See docs/architecture-core.md.
+Sidebar: global New chat uses `new_chat { cwd: null }` for projectless chats in `<dataDir>/chats`; project hover New chat passes `cwd`. Projects heading hover opens the native OS folder picker. Ungrouped chats render under Recents. See docs/architecture-core.md.

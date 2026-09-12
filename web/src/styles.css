@@ -195,7 +195,7 @@ body {
 	min-width: 0;
 	min-height: 0;
 	--chat-pad: 20px;
-	--chat-max: 860px;
+	--chat-max: 780px;
 	--chat-rail: 0px;
 	--chat-inset: max(var(--chat-pad), (100% - var(--chat-max)) / 2, var(--chat-rail));
 }
@@ -10797,15 +10797,26 @@ button.source-default-toggle {
    §Astra pass 2 — visual correction: black main/right, charcoal
    left nav + composer, neutral accent (no purple), compact
    terminal strip, centered chooser, decluttered left rows.
-   Scoped to .app so downloadable themes can still override.
+   Defaults live on :root so later downloadable theme links can override.
    ============================================================ */
 
-.app {
-	--bg: #0a0a0b; /* main chat + right workspace: black */
-	--bg-elev: #101012;
-	--bg-elev2: #18191b;
-	--border: #232427;
-	--border-soft: #1b1c1e;
+:root {
+	--bg: #0d0d0e;
+	--bg-elev: #17181a;
+	--bg-elev2: #26272a;
+	--border: #2c2c2e;
+	--border-soft: #242528;
+	--text: #ececec;
+	--text-dim: #9a9a9e;
+	--text-faint: #6d6d72;
+	--panel-bg: #17181a;
+	--inputbox-bg: #1b1b1d;
+	--chip-bg: #2a2a2d;
+	--msgs-bg: var(--bg);
+	--term-bg: var(--bg);
+	--control-fg: var(--text-dim);
+	--control-bg: var(--bg-elev2);
+	--control-border: var(--border);
 	/* neutral accent — replaces the upstream blue/purple */
 	--accent: #9ba1a9;
 	--accent-soft: rgba(155, 161, 169, 0.14);
@@ -10813,8 +10824,7 @@ button.source-default-toggle {
 	--term-selection: rgba(155, 161, 169, 0.3);
 	/* Neutralize the remaining purple/blue artifacts (links, send, info,
 	   brand gradient, scrollbars) so the whole surface reads charcoal, not
-	   purple-blue. Downloadable themes still override because this is
-	   scoped to .app. */
+	   purple-blue. Downloadable themes override these root defaults. */
 	--link: #aab3bd;
 	--link-hover: #d4dade;
 	--link-soft: #8f98a3;
@@ -10823,12 +10833,14 @@ button.source-default-toggle {
 	--plugin-purple: #9ba1a9;
 	--notice-info-bg: #191b1f;
 	--notice-info-border: #3a3d44;
-	--send-blue: #9ba1a9;
-	--send-blue-hover: #b7bdc5;
+	--send-blue: #e8e8e8;
+	--send-blue-hover: #ffffff;
 	--brand-grad-a: #c7cdd6;
 	--brand-grad-b: #9ba1a9;
 	--scroll-thumb: #26282d;
 	--scroll-thumb-hover: #35383e;
+}
+.app {
 	font-family: var(--sans);
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;
@@ -10837,10 +10849,10 @@ button.source-default-toggle {
 /* charcoal left nav + composer (one step lighter than the black main) */
 .app .panel-left,
 .app .drawer-left .panel {
-	background: #161719;
+	background: var(--panel-bg, var(--bg-elev));
 }
 .app .inputbox {
-	background: #1a1b1d;
+	background: var(--inputbox-bg, var(--bg-elev2));
 }
 /* active terminal tab: neutral highlight instead of the purple border */
 .app .term-tab.active {
@@ -11134,9 +11146,8 @@ button.source-default-toggle {
    ------------------------------------------------------------
    Left panel: single scrollable nav; project directories are
    top-level groups with running chats + current-project history
-   nested underneath (see components/left-panel-nav.ts). No more
-   three vertical sections. Composer: restrained [data-agent]
-   accents (teal/blue/amber/violet) with a neutral default.
+    nested underneath (see components/left-panel-nav.ts). No more
+    three vertical sections. Agent selection uses neutral pressed states.
    ============================================================ */
 
 /* ---- unified nav ---- */
@@ -11297,53 +11308,167 @@ button.source-default-toggle {
 	outline-offset: -1px;
 }
 
-/* ---- composer per-agent accents -------------------------------
-   data-agent is placed on the composer root by the agent-picker
-   worker. Both placements are covered so the CSS stays correct
-   regardless of which element carries the attribute. Default /
-   unknown values keep the neutral charcoal border. */
-
-.inputbar[data-agent="orchestrator"] .inputbox,
-.inputbox[data-agent="orchestrator"] {
-	--composer-agent: #2dd4bf;
-	--composer-agent-soft: rgba(45, 212, 191, 0.15);
+/* ---- Codex shell: full-height navigation and neutral controls ---- */
+.astra-header {
+	min-height: 44px;
+	background: var(--bg);
+	border-bottom-color: var(--border-soft);
+	padding: 6px 12px;
 }
-.inputbar[data-agent="general"] .inputbox,
-.inputbox[data-agent="general"] {
-	--composer-agent: #60a5fa;
-	--composer-agent-soft: rgba(96, 165, 250, 0.15);
+.astra-header-right {
+	flex-shrink: 0;
 }
-.inputbar[data-agent="fast"] .inputbox,
-.inputbox[data-agent="fast"] {
-	--composer-agent: #f59e0b;
-	--composer-agent-soft: rgba(245, 158, 11, 0.15);
+.astra-row .main {
+	padding-top: 0;
 }
-.inputbar[data-agent="review"] .inputbox,
-.inputbox[data-agent="review"] {
-	--composer-agent: #a78bfa;
-	--composer-agent-soft: rgba(167, 139, 250, 0.15);
+.astra-workspace {
+	background: var(--bg);
 }
-
-/* Only the four known roles are styled — an empty or unknown data-agent
-   (e.g. the neutral fallback) keeps the default charcoal border. */
-.inputbar[data-agent="orchestrator"] .inputbox,
-.inputbar[data-agent="general"] .inputbox,
-.inputbar[data-agent="fast"] .inputbox,
-.inputbar[data-agent="review"] .inputbox,
-.inputbox[data-agent="orchestrator"],
-.inputbox[data-agent="general"],
-.inputbox[data-agent="fast"],
-.inputbox[data-agent="review"] {
-	border-color: color-mix(in srgb, var(--composer-agent) 40%, var(--border));
+.fp-inline .fp-markdown {
+	background: var(--bg);
 }
-.inputbar[data-agent="orchestrator"] .inputbox:focus-within,
-.inputbar[data-agent="general"] .inputbox:focus-within,
-.inputbar[data-agent="fast"] .inputbox:focus-within,
-.inputbar[data-agent="review"] .inputbox:focus-within,
-.inputbox[data-agent="orchestrator"]:focus-within,
-.inputbox[data-agent="general"]:focus-within,
-.inputbox[data-agent="fast"]:focus-within,
-.inputbox[data-agent="review"]:focus-within {
-	border-color: color-mix(in srgb, var(--composer-agent) 70%, var(--border));
-	box-shadow: 0 0 0 3px var(--composer-agent-soft), 0 6px 22px rgba(0, 0, 0, 0.32);
+.lp-brand {
+	min-height: 44px;
+	padding: 8px 12px;
+}
+.lp-brand-name {
+	font-size: 15px;
+	letter-spacing: 0;
+}
+.lp-brand-collapse {
+	background: transparent;
+	border-color: transparent;
+}
+.lp-new-chat {
+	margin: 2px 8px;
+	width: calc(100% - 16px);
+	padding: 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	font-weight: 400;
+}
+.lp-new-chat:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+.lp-section-label {
+	padding: 20px 16px 8px;
+	font-size: 11px;
+	color: var(--text-dim);
+}
+.lp-nav .session-item {
+	color: var(--text-dim);
+	border: 1px solid transparent;
+}
+.lp-nav .session-item.active {
+	padding: 6px 9px;
+	background: var(--bg-elev2);
+	border-color: transparent;
+	color: var(--text);
+	box-shadow: none;
+}
+.lp-group-main {
+	font-weight: 400;
+}
+.lp-footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	min-height: 44px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--border-soft);
+	color: var(--text-dim);
+	font-size: 11px;
+}
+.lp-footer-project {
+	margin-left: auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.lp-footer .conn-dot {
+	flex-shrink: 0;
+	box-shadow: none;
+}
+.msg-user .msg-body {
+	margin-left: auto;
+	width: fit-content;
+	max-width: min(70%, 640px);
+	padding: 8px 14px;
+	border: 0;
+	border-radius: 18px;
+	background: var(--chip-bg, var(--bg-elev2));
+	box-shadow: none;
+}
+.msg-user .msg-meta {
+	justify-content: flex-end;
+}
+.app .inputbox {
+	border-radius: 18px;
+	border-color: var(--border);
+	box-shadow: none;
+}
+.app .inputbox:focus-within {
+	border-color: color-mix(in srgb, var(--text) 12%, var(--border));
+	box-shadow: none;
+}
+.app .agent-picker {
+	background: transparent;
+	border-color: transparent;
+}
+.app .inputbar .agent-picker-btn.active {
+	color: var(--text);
+	background: var(--bg-elev2);
+	border-color: transparent;
+	box-shadow: none;
+}
+.composer-tools .chip {
+	background: transparent;
+	border-color: transparent;
+}
+.app .inputbox .btn.send,
+.app .inputbox .btn.send:hover:not(:disabled),
+.app .inputbox .split-send {
+	background: var(--text);
+	border-color: var(--text);
+	color: var(--bg);
+	box-shadow: none;
+}
+.app .inputbox .split-send button {
+	color: var(--bg);
+}
+.app .inputbox .btn.stop,
+.app .inputbox .btn.stop:hover:not(:disabled) {
+	background: var(--bg-elev2);
+	border-color: var(--border);
+	color: var(--text);
+	box-shadow: none;
+}
+.astra-empty-mark {
+	font-size: 20px;
+	letter-spacing: 0;
+}
+@media (max-width: 768px) {
+	.astra-header {
+		gap: 4px;
+		padding-inline: 8px;
+	}
+	.astra-header-right {
+		gap: 2px;
+	}
+	.astra-header-right .chip {
+		padding: 6px;
+	}
+	.msg-user .msg-body {
+		max-width: 90%;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.panel-drawer,
+	.astra-bottom-terminal {
+		transition: none;
+	}
 }

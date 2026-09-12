@@ -67,6 +67,11 @@
 	--notice-info-border: #57534e;
 	--send-blue: #b45309;
 	--send-blue-hover: #92400e;
+	/* PiAstra shell tokens: send-button foreground/disabled, inline code */
+	--send-fg: #ffffff;
+	--send-disabled-bg: #e5e7eb;
+	--send-disabled-fg: #9ca3af;
+	--code-inline-bg: var(--code-bg);
 	--brand-grad-a: #d97706;
 	--brand-grad-b: #b45309;
 	--on-amber: #1a1a1a;

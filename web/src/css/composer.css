@@ -251,7 +251,7 @@
 	border: 0;
 	border-radius: 50%;
 	background: var(--send-blue);
-	color: #000;
+	color: var(--send-fg);
 	box-shadow: none;
 	transform: none;
 	transition:
@@ -266,21 +266,21 @@
 }
 .app .inputbox .btn.send:hover:not(:disabled) {
 	background: var(--send-blue-hover);
-	color: #000;
+	color: var(--send-fg);
 	transform: none;
 	box-shadow: none;
 }
 .app .inputbox .btn.send:disabled {
 	opacity: 1;
-	background: #2a2a2a;
-	color: #666;
+	background: var(--send-disabled-bg);
+	color: var(--send-disabled-fg);
 }
 .app .inputbox .btn.stop {
 	background: var(--bg-elev2);
 	color: var(--text);
 }
 .app .inputbox .btn.stop:hover:not(:disabled) {
-	background: #3a3a3a;
+	background: var(--bg-elev2);
 	color: var(--text);
 	transform: none;
 	box-shadow: none;
@@ -297,7 +297,7 @@
 	width: 28px;
 }
 .app .inputbox .split-send button {
-	color: #000;
+	color: var(--send-fg);
 }
 .app .inputbox .split-send .split-queue {
 	background: rgba(0, 0, 0, 0.1);
@@ -315,10 +315,10 @@
 }
 .app .inputbox .split-send.disabled,
 .app .inputbox .split-send.disabled:hover {
-	background: #2a2a2a;
+	background: var(--send-disabled-bg);
 }
 .app .inputbox .split-send.disabled button {
-	color: #666;
+	color: var(--send-disabled-fg);
 }
 
 /* ---- narrow: wrap the row, keep the send at the end ---- */

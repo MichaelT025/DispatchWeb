@@ -10840,6 +10840,10 @@ button.source-default-toggle {
 	--notice-info-border: #3a3a3a;
 	--send-blue: #ffffff;
 	--send-blue-hover: #e4e4e4;
+	--send-fg: #000000;
+	--send-disabled-bg: #2a2a2a;
+	--send-disabled-fg: #666666;
+	--code-inline-bg: #1a1a1a;
 	--brand-grad-a: #e4e4e4;
 	--brand-grad-b: #9ba1a9;
 	--scroll-thumb: #2a2a2a;

@@ -216,7 +216,7 @@
 .fp-markdown :not(pre) > code {
 	border: 0;
 	border-radius: 4px;
-	background: #1a1a1a;
+	background: var(--code-inline-bg);
 	color: var(--text);
 	font-size: 0.9em;
 }

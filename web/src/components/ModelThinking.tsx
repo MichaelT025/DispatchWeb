@@ -182,11 +182,11 @@ export const ModelThinking = memo(function ModelThinking({
 	}, [modelOpen, currentModelId, models.length]);
 
 	return (
-		<>
+		<div className={`model-thinking${compact ? " compact" : ""}`}>
 			<Dropdown
 				trigger={
 					<>
-						<FiCpu />
+						{!compact && <FiCpu />}
 						<span className="chip-model">{model ? model.name : t("selectModel")}</span>
 						{!compact && model?.vision && (
 							<span className="chip-vision" title={t("vision")}>
@@ -324,11 +324,15 @@ export const ModelThinking = memo(function ModelThinking({
 			<Dropdown
 				trigger={
 					<>
-						<FiZap />
+						{!compact && <FiZap />}
 						<span className="chip-sub">
-							{t("thinkingChip", {
-								level: state ? thinkingLabel(state.thinkingLevel) : "—",
-							})}
+							{compact
+								? state
+									? thinkingLabel(state.thinkingLevel)
+									: "—"
+								: t("thinkingChip", {
+										level: state ? thinkingLabel(state.thinkingLevel) : "—",
+									})}
 						</span>
 					</>
 				}
@@ -354,6 +358,6 @@ export const ModelThinking = memo(function ModelThinking({
 					</DropdownItem>
 				))}
 			</Dropdown>
-		</>
+		</div>
 	);
 });

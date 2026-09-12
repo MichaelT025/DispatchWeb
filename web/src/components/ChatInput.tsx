@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { FiList, FiSquare, FiPaperclip, FiArrowUp, FiGrid } from "react-icons/fi";
+import { FiList, FiSquare, FiPlus, FiArrowUp, FiGrid } from "react-icons/fi";
 import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
 import type { AgentRole } from "../agents";
 import { useT, useI18n } from "../i18n";
@@ -773,10 +773,19 @@ export const ChatInput = memo(function ChatInput({
 					onKeyDown={onKeyDown}
 					onPaste={onPaste}
 				/>
-				{/* 底部工具条（ChatGPT 风格）：附件 / 模型 / 思考强度 在左，
-				    发送 / 停止 在右，全部收进输入框容器内。 */}
+				{/* 底部工具条（Codex 风格）：附件「+」/ 智能体角色 / 模板 在左，
+				    模型 · 思考强度 / 发送 / 停止 在右，全部收进输入框容器内。 */}
 				<div className="composer-tools">
 					<div className="composer-tools-left">
+						<button
+							type="button"
+							className="btn attach-img"
+							title={t("uploadFile")}
+							disabled={!connected}
+							onClick={() => fileInputRef.current?.click()}
+						>
+							<FiPlus />
+						</button>
 						<AgentPicker
 							activeRole={activeAgent}
 							available={agentAvailable}
@@ -787,18 +796,11 @@ export const ChatInput = memo(function ChatInput({
 								appSend({ type: "prompt", text: `/agent ${role}` });
 							}}
 						/>
-						<button
-							type="button"
-							className="btn attach-img"
-							title={t("uploadFile")}
-							disabled={!connected}
-							onClick={() => fileInputRef.current?.click()}
-						>
-							<FiPaperclip />
-						</button>
 						<button type="button" className="btn tpl-open" title={t("tpl.openPicker")} onClick={openPicker}>
 							<FiGrid />
 						</button>
+					</div>
+					<div className="composer-tools-right">
 						<ModelThinking
 							state={modelState}
 							models={models}
@@ -807,8 +809,8 @@ export const ChatInput = memo(function ChatInput({
 							providerKeys={providerKeys}
 							compact
 						/>
+						{renderActions()}
 					</div>
-					<div className="composer-tools-right">{renderActions()}</div>
 				</div>
 			</div>
 		</div>

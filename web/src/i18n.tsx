@@ -123,7 +123,7 @@ export const zh = {
 	foldersNotSupported: "不支持直接拖入文件夹，请展开后选择文件",
 	placeholderStreaming: "智能体正在工作中…回车插队发送，或点「排队」等回答结束后发送",
 	placeholderStreamingQueued: "智能体正在工作中…回车或点「排队」，回答完全结束后发送（本引擎不支持插队）",
-	placeholderIdle: "给 pi 发送消息 — Enter 发送，/ 查看命令",
+	placeholderIdle: "想做什么？",
 	placeholderConnecting: "正在连接服务器…",
 	stopAgent: "停止智能体",
 	stop: "停止",
@@ -192,7 +192,7 @@ export const zh = {
 	slashCopyEmpty: "还没有可复制的助手回复",
 
 	/* left panel */
-	recentProjects: "最近项目",
+	recentProjects: "项目",
 	runningConversations: "运行的对话",
 	subagentBadge: "子代理",
 	convErrorBadge: "子代理运行报错：{error}",
@@ -1210,7 +1210,7 @@ const en: Record<keyof typeof zh, string> = {
 	placeholderStreaming: "The agent is working… press Enter to steer, or click Queue to send after the reply finishes",
 	placeholderStreamingQueued:
 		"The agent is working… press Enter or click Queue — delivered after the reply finishes (this engine cannot steer)",
-	placeholderIdle: "Message pi — Enter to send, / for commands",
+	placeholderIdle: "Do anything",
 	placeholderConnecting: "Connecting to server…",
 	stopAgent: "Stop agent",
 	stop: "Stop",
@@ -1282,7 +1282,7 @@ const en: Record<keyof typeof zh, string> = {
 	slashCopyEmpty: "No assistant reply to copy yet",
 
 	/* left panel */
-	recentProjects: "Recent projects",
+	recentProjects: "Projects",
 	runningConversations: "Running chats",
 	subagentBadge: "Subagent",
 	convErrorBadge: "Subagent failed: {error}",

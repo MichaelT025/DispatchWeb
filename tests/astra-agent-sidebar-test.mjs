@@ -62,8 +62,20 @@ function seedSession(file, cwd, userText, id) {
 		join(sessionRoot, file),
 		[
 			JSON.stringify({ type: "session", version: 3, id, timestamp: now, cwd }),
-			JSON.stringify({ type: "message", id: `${id}-u`, parentId: null, timestamp: now, message: { role: "user", content: userText } }),
-			JSON.stringify({ type: "message", id: `${id}-a`, parentId: `${id}-u`, timestamp: now, message: { role: "assistant", content: "ok" } }),
+			JSON.stringify({
+				type: "message",
+				id: `${id}-u`,
+				parentId: null,
+				timestamp: now,
+				message: { role: "user", content: userText },
+			}),
+			JSON.stringify({
+				type: "message",
+				id: `${id}-a`,
+				parentId: `${id}-u`,
+				timestamp: now,
+				message: { role: "assistant", content: "ok" },
+			}),
 			"",
 		].join("\n"),
 	);
@@ -195,7 +207,10 @@ check("current project group marked current", (await groupA.first().getAttribute
 
 // A is the active project → its saved chat is listed on boot, nested in A.
 check("saved chat for A rendered nested in A", (await groupA.locator(".lp-group-body .session-item").count()) >= 1);
-check("A's session text matches the seeded transcript", (await groupA.locator(".session-item").first().innerText()).includes("alpha nested chat"));
+check(
+	"A's session text matches the seeded transcript",
+	(await groupA.locator(".session-item").first().innerText()).includes("alpha nested chat"),
+);
 // B's history must NOT be attributed to A.
 check("B's seeded chat never appears under A", !(await groupA.innerText()).includes("beta nested chat"));
 
@@ -203,10 +218,19 @@ check("B's seeded chat never appears under A", !(await groupA.innerText()).inclu
 check("B starts without a loaded history", (await groupB.locator(".lp-group-body .session-item").count()) === 0);
 await groupB.locator(".lp-group-toggle").click();
 await sleep(1800);
-check("expanding B loads its saved chat (lazy list_sessions)", (await groupB.locator(".lp-group-body .session-item").count()) >= 1);
-check("B's nested chat matches the seeded transcript", (await groupB.locator(".session-item").first().innerText()).includes("beta nested chat"));
+check(
+	"expanding B loads its saved chat (lazy list_sessions)",
+	(await groupB.locator(".lp-group-body .session-item").count()) >= 1,
+);
+check(
+	"B's nested chat matches the seeded transcript",
+	(await groupB.locator(".session-item").first().innerText()).includes("beta nested chat"),
+);
 check("B's expansion does not leak B's chat into A", !(await groupA.innerText()).includes("beta nested chat"));
-check("both project groups hold their own nested rows", (await groupA.locator(".session-item").count()) >= 1 && (await groupB.locator(".session-item").count()) >= 1);
+check(
+	"both project groups hold their own nested rows",
+	(await groupA.locator(".session-item").count()) >= 1 && (await groupB.locator(".session-item").count()) >= 1,
+);
 
 await shot(`${String(++shotN).padStart(2, "0")}-sidebar-projects`);
 
@@ -215,11 +239,19 @@ await shot(`${String(++shotN).padStart(2, "0")}-sidebar-projects`);
 // extension). One neutral state before any confirmed status.
 await checkVisible(page, "agent picker available", ".agent-picker");
 check("picker exposes exactly the four role buttons", (await page.locator(".agent-picker-btn").count()) === 4);
-check("no role pressed before a confirmed status", (await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 0);
+check(
+	"no role pressed before a confirmed status",
+	(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 0,
+);
 
 const ROLES = ["orchestrator", "general", "fast", "review"];
-for (const role of ROLES) {
+// The roles live in a menu behind the composer pill; open it before each pick.
+const pickRole = async (role) => {
+	await page.locator(".agent-picker-pill").click();
 	await page.locator(`.agent-picker-btn[data-agent-role="${role}"]`).click();
+};
+for (const role of ROLES) {
+	await pickRole(role);
 	// Real WS round-trip: /agent <role> → extension ctx.ui.setStatus → statuses.
 	let confirmed = false;
 	for (let i = 0; i < 40; i++) {
@@ -230,7 +262,10 @@ for (const role of ROLES) {
 		await sleep(150);
 	}
 	check(`picker confirms ${role} from the server status bridge`, confirmed);
-	check(`composer root carries data-agent=${role}`, (await page.locator(`.inputbar[data-agent="${role}"]`).count()) === 1);
+	check(
+		`composer root carries data-agent=${role}`,
+		(await page.locator(`.inputbar[data-agent="${role}"]`).count()) === 1,
+	);
 	// Exactly one role highlighted at a time (server-confirmed, not optimistic).
 	check(`only ${role} is highlighted`, (await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1);
 	await shot(`${String(++shotN).padStart(2, "0")}-agent-${role}`);
@@ -238,10 +273,16 @@ for (const role of ROLES) {
 
 // Sending an unknown role must not fabricate a state (mock extension ignores
 // it); the last confirmed role stays. This guards against optimistic UI.
-await page.locator('.agent-picker-btn[data-agent-role="general"]').click();
+await pickRole("general");
 await sleep(1200);
-check("confirmed role persists after selecting another role", (await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1);
-check("composer accent tracks the confirmed role", (await page.locator('.inputbar[data-agent="general"]').count()) === 1);
+check(
+	"confirmed role persists after selecting another role",
+	(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1,
+);
+check(
+	"composer accent tracks the confirmed role",
+	(await page.locator('.inputbar[data-agent="general"]').count()) === 1,
+);
 
 await browser.close();
 server.kill();

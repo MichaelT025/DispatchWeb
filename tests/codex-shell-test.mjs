@@ -176,6 +176,8 @@ try {
 	assert.ok(bubble.x > user.x && bubble.width < user.width * 0.71);
 	await shot("02-conversation-desktop");
 	for (const role of ["orchestrator", "general", "fast", "review"]) {
+		// Roles sit in a menu behind the composer pill.
+		await page.locator(".agent-picker-pill").click();
 		await page.locator(`[data-agent-role="${role}"]`).click();
 		await page.locator(`[data-agent-role="${role}"][aria-pressed="true"]`).waitFor();
 		assert.equal(await page.locator(".inputbox").evaluate((el) => getComputedStyle(el).boxShadow), "none");

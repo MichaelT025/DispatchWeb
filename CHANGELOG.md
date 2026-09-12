@@ -10,7 +10,13 @@
 
 ## [Unreleased]
 
-暂无未发布内容。
+<!-- auto-i18n:start -->
+### i18n
+
+- 前端新增 key（19）：`astraWorkspace`、`astraFiles`、`astraReview`、`astraWorkspaceHint`、`astraEmptyHint`、`fpBack`、`agentPickerLabel`、`agentPickerNeutral`、`agentPickerBusy`、`agentPickerUnavailable`、`agentActiveRole`、`agentUnknown`、`agentRoleOrchestrator`、`agentRoleGeneral`、`agentRoleFast`、`agentRoleReview`、`addProject`、`projectPath`、`recents`
+- 前端中文变更（3）：`docTitle`、`placeholderIdle`、`recentProjects`
+- 前端英文变更（3）：`docTitle`、`placeholderIdle`、`recentProjects`
+<!-- auto-i18n:end -->
 
 ## [0.80.0] — 2026-09-12
 

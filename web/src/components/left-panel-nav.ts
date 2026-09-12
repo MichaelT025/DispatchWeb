@@ -168,7 +168,9 @@ export function buildLeftNav(
 		groups.push(makeGroup(p.path, true, p.lastUsed, convsByCwd, sessionsByCwd, currentCwd));
 	}
 
-	const ungroupedCwds = [...convsByCwd.keys()].filter((cwd) => !known.has(cwd)).sort();
+	const ungroupedCwds = [...new Set([...convsByCwd.keys(), ...sessionsByCwd.keys()])]
+		.filter((cwd) => !known.has(cwd))
+		.sort();
 	for (const cwd of ungroupedCwds) {
 		groups.push(makeGroup(cwd, false, 0, convsByCwd, sessionsByCwd, currentCwd));
 	}

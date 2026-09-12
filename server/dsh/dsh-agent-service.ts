@@ -1305,8 +1305,17 @@ export class DshClientSession {
 		this.emit({ type: "conversations", conversations: list, activeId: this.activeId });
 	}
 
-	async newChat(): Promise<void> {
+	private get projectlessCwd(): string {
+		return join(this.stateStore.dataDir, "chats");
+	}
+	async newChat(cwd?: string | null): Promise<void> {
 		if (this.quiesceBlocked()) return;
+		if (cwd !== undefined) {
+			const target = cwd === null ? this.projectlessCwd : resolve(cwd);
+			if (cwd === null) mkdirSync(target, { recursive: true });
+			await this.setCwd(target);
+			if (this.cwd !== target) return;
+		}
 		const active = this.conv;
 		if (active.messages.length === 0 && active.terminals.list().length === 0) {
 			this.flushSnapshot();
@@ -1314,7 +1323,7 @@ export class DshClientSession {
 		}
 		for (const conv of this.convs.values()) {
 			if (conv.id === this.activeId) continue;
-			if (conv.messages.length === 0) {
+			if (conv.cwd === this.cwd && conv.messages.length === 0 && conv.terminals.list().length === 0) {
 				this.switchConversation(conv.id);
 				this.flushSnapshot();
 				return;
@@ -1895,16 +1904,16 @@ export class DshClientSession {
 		}, 800);
 	}
 
-	async refreshSessions(): Promise<void> {
-		await this.pushSessions();
+	async refreshSessions(cwd?: string): Promise<void> {
+		await this.pushSessions(cwd);
 	}
 
-	private async pushSessions(): Promise<void> {
+	private async pushSessions(cwd = this.cwd): Promise<void> {
 		try {
 			// 目录/会话文件被删除、改名或不可读都不许把异常抛出去：本方法以
 			// fire-and-forget（void …）方式调用，未处理的 rejection 会杀死服务进程
 			// （issue #74 同类）。失败降级为空列表，面板显示“暂无历史”。
-			const files = findSessionFilesForCwd(this.sessionRoot, this.cwd);
+			const files = findSessionFilesForCwd(this.sessionRoot, cwd);
 			const summaries: SessionSummary[] = [];
 			for (const file of files) {
 				try {
@@ -1926,9 +1935,9 @@ export class DshClientSession {
 					/* skip unreadable */
 				}
 			}
-			this.emit({ type: "sessions", sessions: summaries });
+			this.emit({ type: "sessions", cwd, sessions: summaries });
 		} catch {
-			this.emit({ type: "sessions", sessions: [] });
+			this.emit({ type: "sessions", cwd, sessions: [] });
 		}
 	}
 
@@ -2172,10 +2181,12 @@ export class DshClientSession {
 		for (const cwd of cwdProjects) projects.set(cwd, Date.now());
 		projects.set(this.cwd, Date.now());
 		const list: ProjectSummary[] = [...projects.entries()]
+			.filter(([path]) => resolve(path) !== this.projectlessCwd)
 			.map(([path, lastUsed]) => ({ path, lastUsed }))
 			.sort((a, b) => b.lastUsed - a.lastUsed)
 			.slice(0, 30);
 		this.emit({ type: "projects", projects: list });
+		await this.pushSessions(this.projectlessCwd);
 	}
 
 	private decodeProjectKey(key: string): string | null {

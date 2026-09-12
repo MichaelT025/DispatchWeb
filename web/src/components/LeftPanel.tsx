@@ -6,6 +6,7 @@ import {
 	FiChevronsLeft,
 	FiEdit2,
 	FiFolder,
+	FiPlus,
 	FiSearch,
 	FiTrash2,
 	FiX,
@@ -31,7 +32,7 @@ interface LeftPanelProps {
 	activeConversationId: string;
 	panelSend: (
 		msg:
-			| { type: "new_chat" }
+			| { type: "new_chat"; cwd?: string | null }
 			| { type: "list_sessions"; cwd?: string }
 			| { type: "list_projects" }
 			| { type: "switch_session"; path: string }
@@ -101,6 +102,8 @@ export const LeftPanel = memo(function LeftPanel({
 	const status = useAppField("status");
 	const cwd = useAppField("cwd");
 	const currentCwd = cwd;
+	const [addingProject, setAddingProject] = useState(false);
+	const [projectPath, setProjectPath] = useState("");
 	const [confirmDel, setConfirmDel] = useState<string | null>(null);
 	const [renaming, setRenaming] = useState<string | null>(null);
 	const [renameDraft, setRenameDraft] = useState("");
@@ -524,7 +527,8 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	const groups = navGroups;
+	const groups = navGroups.filter((g) => g.isProject);
+	const recents = navGroups.filter((g) => !g.isProject);
 
 	return (
 		<aside className="panel panel-left lp-panel">
@@ -560,12 +564,49 @@ export const LeftPanel = memo(function LeftPanel({
 				type="button"
 				className="lp-new-chat"
 				title={t("newChatTip")}
-				onClick={() => panelSend({ type: "new_chat" })}
+				onClick={() => panelSend({ type: "new_chat", cwd: null })}
 			>
 				<FiEdit2 />
 				<span>{t("newChat")}</span>
 			</button>
-			<div className="lp-section-label">{t("recentProjects")}</div>
+			<div className="lp-section-label">
+				<span>{t("recentProjects")}</span>
+				<button
+					type="button"
+					className="lp-icon-btn lp-add-project"
+					title={t("addProject")}
+					aria-label={t("addProject")}
+					onClick={() => setAddingProject((v) => !v)}
+				>
+					<FiPlus />
+				</button>
+			</div>
+			{addingProject && (
+				<form
+					className="lp-project-form"
+					onSubmit={(e) => {
+						e.preventDefault();
+						if (projectPath.trim() && panelSend({ type: "set_cwd", path: projectPath.trim() })) {
+							setAddingProject(false);
+							setProjectPath("");
+						}
+					}}
+				>
+					<input
+						autoFocus
+						aria-label={t("projectPath")}
+						placeholder={t("projectPath")}
+						value={projectPath}
+						onChange={(e) => setProjectPath(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Escape") setAddingProject(false);
+						}}
+					/>
+					<button type="submit" className="lp-icon-btn" title={t("addProject")} aria-label={t("addProject")}>
+						<FiCheck />
+					</button>
+				</form>
+			)}
 			{/* Codex 式统一导航树：项目目录为顶层分组，运行中的对话与当前项目的历史
 			    会话按 cwd 嵌套在各目录下（未登记项目的运行对话单独成组，不丢弃）。 */}
 			<nav className="lp-nav">
@@ -606,6 +647,22 @@ export const LeftPanel = memo(function LeftPanel({
 										<span className="lp-group-label">{g.label}</span>
 										{count > 0 && <span className="lp-group-count">{count}</span>}
 									</button>
+									<button
+										type="button"
+										className="lp-del lp-project-new"
+										title={t("newChat")}
+										aria-label={`${t("newChat")} — ${g.label}`}
+										onClick={() => {
+											setCollapsedGroups((prev) => {
+												const next = new Set(prev);
+												next.delete(g.path);
+												return next;
+											});
+											panelSend({ type: "new_chat", cwd: g.path });
+										}}
+									>
+										<FiEdit2 />
+									</button>
 									{g.isProject &&
 										delButton(`proj:${g.path}`, t("deleteProject"), t("deleteProjectConfirm"), () =>
 											panelSend({ type: "remove_project", path: g.path }),
@@ -628,6 +685,14 @@ export const LeftPanel = memo(function LeftPanel({
 						);
 					})
 				)}
+				<div className="lp-section-label">{t("recents")}</div>
+				<div className="lp-recents">
+					{recents.flatMap((g) => g.conversations).map(({ c, depth }) => renderConversationRow(c, depth))}
+					{recents
+						.flatMap((g) => g.sessions)
+						.sort((a, b) => b.modified - a.modified)
+						.map(renderSessionRow)}
+				</div>
 			</nav>
 			<footer className="lp-footer">
 				<span className="lp-footer-avatar" aria-hidden="true">

@@ -166,3 +166,8 @@ describe("pendingSessionCwds", () => {
 		expect(pendingSessionCwds(groups(), new Set(), new Set(["/b"]), new Set(["/b"]), true)).toEqual([]);
 	});
 });
+
+it("keeps persisted projectless chats available after reconnect", () => {
+	const groups = buildLeftNav([project("/work", 1)], [], new Map([["/chats", [session("/saved.jsonl")]]]), "/work");
+	expect(groups.find((g) => !g.isProject)?.sessions[0].path).toBe("/saved.jsonl");
+});

@@ -368,7 +368,7 @@ export type ClientMessage =
 	| { type: "scm_filediff"; reqId: number; path: string }
 	/** Full patch of one commit. */
 	| { type: "scm_commit"; reqId: number; hash: string }
-	| { type: "new_chat" }
+	| { type: "new_chat"; cwd?: string | null }
 	/** Edit a past user question and re-ask it (forks a new session at that point). */
 	| {
 			type: "edit_message";

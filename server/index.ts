@@ -681,7 +681,7 @@ export interface DispatchSession {
 	killBackgroundServer(port?: number, taskId?: string): Promise<boolean>;
 	killAllBackgroundServers(): Promise<string[]>;
 	listBgServers(): Promise<void>;
-	newChat(): Promise<void>;
+	newChat(cwd?: string | null): Promise<void>;
 	editMessage(messageId: string, text: string, attachments?: PromptAttachment[]): Promise<void>;
 	cycleModel(): Promise<void>;
 	cycleThinking(): void;
@@ -1051,7 +1051,7 @@ wss.on("connection", (ws) => {
 				void cs.listBgServers();
 				break;
 			case "new_chat":
-				void cs.newChat();
+				void cs.newChat(msg.cwd);
 				break;
 			case "edit_message":
 				void cs.editMessage(msg.messageId, msg.text, msg.attachments);

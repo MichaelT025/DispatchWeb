@@ -3998,8 +3998,18 @@ export class ClientSession {
 		}
 	}
 
-	async newChat(): Promise<void> {
+	private get projectlessCwd(): string {
+		return join(this.stateStore.dataDir, "chats");
+	}
+
+	async newChat(cwd?: string | null): Promise<void> {
 		if (this.quiesceBlocked()) return;
+		if (cwd !== undefined) {
+			const target = cwd === null ? this.projectlessCwd : resolve(cwd);
+			if (cwd === null) mkdirSync(target, { recursive: true });
+			await this.setCwd(target);
+			if (this.cwd !== target) return;
+		}
 		// Reuse an already-open blank conversation instead of piling up new ones
 		// on every click: if the active chat has no messages it IS the new chat
 		// (focus already on it); otherwise switch to the first blank one (under
@@ -4020,7 +4030,7 @@ export class ClientSession {
 		}
 		for (const conv of this.convs.values()) {
 			if (conv.id === this.activeId) continue;
-			if (isBlank(conv)) {
+			if (conv.cwd === this.cwd && !conv.isSubagent && isBlank(conv)) {
 				await this.switchConversation(conv.id);
 				this.flushSnapshot();
 				return;
@@ -5151,11 +5161,12 @@ export class ClientSession {
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
 			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => !removedProjects.has(path) && existsSync(path))
+				.filter(([path]) => path !== this.projectlessCwd && !removedProjects.has(path) && existsSync(path))
 				.map(([path, lastUsed]) => ({ path, lastUsed }))
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
 			this.emit({ type: "projects", projects });
+			await this.refreshSessions(this.projectlessCwd);
 		} catch {
 			this.emit({ type: "projects", projects: [] });
 		}
@@ -5287,6 +5298,8 @@ export class ClientSession {
 				throw new Error("路径不是目录");
 			}
 			if (abs === this.cwd) {
+				this.stateStore.remember(this.clientId, abs);
+				void this.pushProjects();
 				this.emit({
 					type: "notice",
 					level: "info",

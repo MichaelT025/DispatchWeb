@@ -43,8 +43,8 @@
 	--mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 	--mermaid-font-size: 12px;
 	--sans:
-		"Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC",
-		"Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+		"Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+		"Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
 
 	/* ---- 主题相关派生色：浅色/自定义主题仅需覆盖这些变量 + --bg/--accent 等基础变量。
 	   styles.css 是唯一布局文件，改布局永不碰主题文件。 ---- */
@@ -11503,4 +11503,53 @@ button.source-default-toggle {
 .astra-empty-logo {
 	color: var(--text-dim);
 	margin-bottom: 2px;
+}
+
+/* Sidebar project actions: mouse, keyboard, and touch. */
+.lp-section-label {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+.lp-add-project {
+	opacity: 0;
+}
+.lp-section-label:hover .lp-add-project,
+.lp-section-label:focus-within .lp-add-project {
+	opacity: 1;
+}
+.lp-group-head .lp-del.lp-project-new {
+	right: 30px;
+}
+.lp-group-head:focus-within .lp-del {
+	display: inline-flex;
+}
+.lp-group-head .lp-project-new:hover {
+	color: var(--text);
+	background: var(--bg-elev2);
+}
+.lp-group-main {
+	padding-right: 54px;
+}
+.lp-project-form {
+	display: flex;
+	gap: 4px;
+	padding: 4px 12px 8px;
+}
+.lp-project-form input {
+	min-width: 0;
+	width: 100%;
+	padding: 6px;
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	background: var(--bg-elev2);
+	color: var(--text);
+}
+@media (hover: none) {
+	.lp-add-project {
+		opacity: 1;
+	}
+	.lp-group-head .lp-del {
+		display: inline-flex;
+	}
 }

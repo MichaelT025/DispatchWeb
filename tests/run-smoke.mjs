@@ -7,8 +7,8 @@
  *
  * 不收录的脚本及原因：
  *   - 浏览器 E2E（playwright/chromium，路径写死本机）：*-browser*、scm-test、
- *     freeze、goal-pill/ui/rounds、panel/left/sound/settings-ui 等 → 本地手动跑；
- *   - 真模型 live：goal-review-loop、live-test（需已运行 server）、update-test。
+ *     freeze、panel/left/settings-ui 等 → 本地手动跑；
+ *   - 真模型 live：live-test（需已运行 server）。
  *
  * 用法：node tests/run-smoke.mjs [name1 name2 …]   # 无参 = 全量
  */
@@ -32,24 +32,10 @@ const ALL = [
 	"saved-chats-per-project-test",
 	"project-model-key-test",
 	"provider-keys-test",
-	"db-client-test",
-	"dsh-smoke-test",
 	"fetch-models-test",
 	"global-search-test",
-	"goal-prefs-test",
-	"goal-test",
 	"left-panel-delete-test",
-	"legado-web-engine-test",
-	"legado-web-test",
 	"list-files-missing-dir-test",
-	"plugin-bgtask-test",
-	"plugin-command-test",
-	"plugin-cwd-test",
-	"plugin-http-test",
-	"mcp-bridge-test",
-	"plugin-settings-test",
-	"plugin-test",
-	"plugin-update-test",
 	"preview-test",
 	"quiesce-test",
 	"question-bridge-test",
@@ -61,23 +47,18 @@ const ALL = [
 	"settings-test",
 	"slash-commands-test",
 	"snapshot-delta-test",
-	"ssh-plugin-test",
 	"steer-queue-smoke",
-	"subagent-template-test",
 	"switch-session-background-test",
 	"terminal-smoke-test",
 	"token-auth-test",
-	"vision-bridge-test",
-	"vscode-editor-plugin-test",
 ];
 
 // 不在默认清单里的脚本：
 //   - 需外部已运行 server（attach 型，默认 8787）：ws-session-test /
 //     file-upload-test / image-paste-test / commands-test(8791) /
 //     edit-reask-test / projects-test —— 本地先起 server 再单独跑；
-//   - 需真模型（本地可跑，CI 无凭据必败）：goal-abort-test /
-//     goal-autostart-test / goal-wizard-test / goal-wizard-cancel-test /
-//     tool-status-test（需真模型执行 bash 工具，从仓库根或任意目录均可跑）；
+//   - 需真模型（本地可跑，CI 无凭据必败）：tool-status-test（需真模型执行
+//     bash 工具，从仓库根或任意目录均可跑）；
 //   - 平台相关：spawn-helper-test（macOS spawn-helper 二进制）；win32 下
 //     terminal-smoke / restart-handoff 自动跳过（见 WIN32_KNOWN_ENV_FAIL）；
 //   - title-jsonl-test：已修复（原 lsof/URL.pathname 的 Windows 兼容问题），本地可跑；

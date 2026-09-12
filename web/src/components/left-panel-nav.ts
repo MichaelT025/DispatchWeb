@@ -7,7 +7,7 @@
  */
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../types";
 
-/** A running conversation flattened into parent-first tree order with depth. */
+/** A running conversation row (depth kept for the nested-row layout). */
 export interface NavConversation {
 	c: ConversationSummary;
 	depth: number;
@@ -25,7 +25,7 @@ export interface NavGroup {
 	isCurrent: boolean;
 	/** Sort key: project last-used epoch ms; ungrouped chats = 0. */
 	lastUsed: number;
-	/** Running conversations nested under this group (subagent tree flattened). */
+	/** Running conversations under this group. */
 	conversations: NavConversation[];
 	/** History sessions under this group, matched by the group's cwd. */
 	sessions: SessionSummary[];
@@ -39,35 +39,9 @@ export function basename(path: string): string {
 	return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 }
 
-/**
- * Flatten one project's running conversations into a parent-first tree with
- * depth. Children whose parent is outside the list are treated as roots, and
- * any orphaned entry is appended at root depth (idempotent via a seen set).
- */
+/** Running conversations in list order, all at root depth. */
 export function flattenConversations(list: ConversationSummary[]): NavConversation[] {
-	const byId = new Map(list.map((c) => [c.id, c]));
-	const kids = new Map<string, ConversationSummary[]>();
-	const roots: ConversationSummary[] = [];
-	for (const c of list) {
-		if (c.parentId && byId.has(c.parentId)) {
-			const arr = kids.get(c.parentId) ?? [];
-			arr.push(c);
-			kids.set(c.parentId, arr);
-		} else {
-			roots.push(c);
-		}
-	}
-	const rows: NavConversation[] = [];
-	const seen = new Set<string>();
-	const append = (c: ConversationSummary, depth: number): void => {
-		if (seen.has(c.id)) return;
-		seen.add(c.id);
-		rows.push({ c, depth });
-		for (const child of kids.get(c.id) ?? []) append(child, depth + 1);
-	};
-	for (const root of roots) append(root, 0);
-	for (const orphan of list) append(orphan, 0);
-	return rows;
+	return list.map((c) => ({ c, depth: 0 }));
 }
 
 function makeGroup(
@@ -95,7 +69,7 @@ function makeGroup(
  *
  * - Every known recent project becomes a top-level directory group.
  * - Running conversations are nested under the group matching their workspace
- *   cwd (a subagent child inherits its parent's cwd).
+ *   cwd.
  * - Running conversations whose cwd is not a known project are kept as
  *   "ungrouped" groups (one per cwd) so they are never silently dropped.
  * - History sessions are attached to the group matching their cwd: the server
@@ -152,13 +126,11 @@ export function buildLeftNav(
 	sessionsByCwd: ReadonlyMap<string, SessionSummary[]>,
 	currentCwd: string,
 ): NavGroup[] {
-	const byId = new Map(conversations.map((c) => [c.id, c]));
 	const convsByCwd = new Map<string, ConversationSummary[]>();
 	for (const c of conversations) {
-		const groupCwd = c.parentId ? (byId.get(c.parentId)?.cwd ?? c.cwd) : c.cwd;
-		const arr = convsByCwd.get(groupCwd) ?? [];
+		const arr = convsByCwd.get(c.cwd) ?? [];
 		arr.push(c);
-		convsByCwd.set(groupCwd, arr);
+		convsByCwd.set(c.cwd, arr);
 	}
 
 	const known = new Map(projects.map((p) => [p.path, p]));

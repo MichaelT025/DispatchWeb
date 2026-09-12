@@ -30,7 +30,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { VERSION, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { pickProjectFolder } from "./project-folder-picker.js";
 import { PROTOCOL_VERSION } from "./protocol-version.js";
-import { AgentService, workspacePath, QuiesceRejectedError, type ClientSession } from "./agent-service.js";
+import { AgentService, workspacePath, QuiesceRejectedError } from "./agent-service.js";
 import { isAbsoluteWirePath, wireToAbs } from "./files-service.js";
 import { previewKind } from "./text-sniff.js";
 import { startControlServer } from "./control-socket.js";
@@ -190,7 +190,6 @@ if (AUTH_TOKEN) {
 			);
 	});
 }
-
 
 /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
 const MANAGED = isManaged();
@@ -636,7 +635,6 @@ wss.on("connection", (ws) => {
 		ws.send(wire);
 	};
 
-
 	const dispatch = (msg: ClientMessage): void => {
 		if (!clientId) {
 			pending.push(msg);
@@ -863,14 +861,7 @@ wss.on("connection", (ws) => {
 			case "terminal_create": {
 				const tm = cs.getTerminalManager(msg.conversationId);
 				if (tm)
-					tm.create(
-						msg.terminalId,
-						msg.cwd,
-						msg.cols,
-						msg.rows,
-						cs.getTerminalCwd(msg.conversationId),
-						msg.title,
-					);
+					tm.create(msg.terminalId, msg.cwd, msg.cols, msg.rows, cs.getTerminalCwd(msg.conversationId), msg.title);
 				break;
 			}
 			case "terminal_input":

@@ -64,9 +64,7 @@ export async function loadCommands(
 	return { commands, path, warning };
 }
 
-async function readCommandsFile(
-	path: string,
-): Promise<{ commands: CommandDef[]; warning?: string }> {
+async function readCommandsFile(path: string): Promise<{ commands: CommandDef[]; warning?: string }> {
 	if (!existsSync(path)) return { commands: [] };
 	let raw: string;
 	try {
@@ -1222,8 +1220,7 @@ export class TerminalManager {
 	inputChecked(id: string, data: string): string | null {
 		if (data.length > MAX_INPUT) return `输入过长（上限 ${MAX_INPUT} 字符） Input too long (max ${MAX_INPUT} chars)`;
 		const entry = this.terms.get(id);
-		if (!entry || entry.exited)
-			return "Terminal not found or its process has exited";
+		if (!entry || entry.exited) return "Terminal not found or its process has exited";
 		// 已武装的纪元里任何人（含用户手动敲键盘）写了输入都算新活动，重置倒计时。
 		entry.lastActivityAt = Date.now();
 		if (entry.idleTimer) this.armIdleWatch(entry);
@@ -1564,31 +1561,35 @@ export function makeTerminalBashTool(
 	return defineTool({
 		name: "bash",
 		label: "Run bash command",
-		description: "Run a shell command and return its full output plus exit code. Commands run in a visible terminal.\n" +
-				"persist=false (default, one-shot): a fresh terminal is created per call, run to completion, then the shell exits (the process ends) while its output stays in the terminal list for later review — like a normal bash call, but each command also leaves a viewable terminal record.\n" +
-				"persist=true: commands run in the PERSISTENT visible terminal 'ai-bash' — shell state such as cd, venv activation or ssh sessions is retained across calls; you can use terminal_wait to re-block on a backgrounded command, or terminal_read / terminal_input / terminal_key on 'ai-bash' to observe or interact anytime.\n" +
-				"Run the bare command — do NOT pipe through head/tail/more/less (output is returned complete anyway, and pipes hide live progress in the terminal). Use the head/tail parameters instead to trim the returned output. For interactive commands (REPLs, prompts, installers asking y/n) set persist=true and drive them with terminal_input / terminal_key.",
+		description:
+			"Run a shell command and return its full output plus exit code. Commands run in a visible terminal.\n" +
+			"persist=false (default, one-shot): a fresh terminal is created per call, run to completion, then the shell exits (the process ends) while its output stays in the terminal list for later review — like a normal bash call, but each command also leaves a viewable terminal record.\n" +
+			"persist=true: commands run in the PERSISTENT visible terminal 'ai-bash' — shell state such as cd, venv activation or ssh sessions is retained across calls; you can use terminal_wait to re-block on a backgrounded command, or terminal_read / terminal_input / terminal_key on 'ai-bash' to observe or interact anytime.\n" +
+			"Run the bare command — do NOT pipe through head/tail/more/less (output is returned complete anyway, and pipes hide live progress in the terminal). Use the head/tail parameters instead to trim the returned output. For interactive commands (REPLs, prompts, installers asking y/n) set persist=true and drive them with terminal_input / terminal_key.",
 		promptSnippet: "run shell commands (persist=true keeps the terminal alive across calls)",
 		parameters: Type.Object({
 			command: Type.String({ description: "The shell command to run" }),
 			timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds" })),
 			persist: Type.Optional(
 				Type.Boolean({
-					description: "Keep the terminal alive after the command (default: false → a one-shot terminal that exits when the command finishes while its output is retained for review). true runs in the persistent 'ai-bash' terminal so shell state (cd/venv/ssh) is retained across calls and the terminal stays interactive.",
+					description:
+						"Keep the terminal alive after the command (default: false → a one-shot terminal that exits when the command finishes while its output is retained for review). true runs in the persistent 'ai-bash' terminal so shell state (cd/venv/ssh) is retained across calls and the terminal stays interactive.",
 				}),
 			),
 			head: Type.Optional(
 				Type.Integer({
 					minimum: 1,
 					maximum: 5000,
-					description: "Only return the FIRST N lines of output (like `| head -N`). Use this for verbose commands instead of piping through head.",
+					description:
+						"Only return the FIRST N lines of output (like `| head -N`). Use this for verbose commands instead of piping through head.",
 				}),
 			),
 			tail: Type.Optional(
 				Type.Integer({
 					minimum: 1,
 					maximum: 5000,
-					description: "Only return the LAST N lines of output (like `| tail -N`). Use this for verbose commands instead of piping through tail.",
+					description:
+						"Only return the LAST N lines of output (like `| tail -N`). Use this for verbose commands instead of piping through tail.",
 				}),
 			),
 		}),
@@ -1608,9 +1609,7 @@ export function makeTerminalBashTool(
 					agentBash: true,
 				}) === null
 			) {
-				throw new Error(
-					`Failed to open the AI bash terminal (${termId})`,
-				);
+				throw new Error(`Failed to open the AI bash terminal (${termId})`);
 			}
 			// 阻塞等待期间挂起活力提醒（我们自己在检测静默，避免双重通知）。
 			terminals.suspendIdleWatch(termId);
@@ -1642,7 +1641,6 @@ export function makeTerminalBashTool(
 			// 这些 const 一律走可选链，只在 stripped=true（limiterNote 才被取用）时才有意义。
 			const limiterSegment = limiter?.segment ?? "";
 			const limiterTailLines = limiter?.lines ?? 10;
-			const limiterTailZh = limiter?.kind === "tail" ? `本次返回末尾 ${limiterTailLines} 行。` : "本次返回全部输出。";
 			const limiterTailEn =
 				limiter?.kind === "tail"
 					? `Returning the last ${limiterTailLines} lines this time.`
@@ -1693,9 +1691,7 @@ export function makeTerminalBashTool(
 						terminals.inputChecked(termId, "\x03");
 						closeOneShot();
 						const timeoutPartial = truncateMiddle(stripAnsi(collected), 4000);
-						throw new Error(
-							`Command timed out after ${p.timeout}s (sent Ctrl+C; partial output: ${timeoutPartial})`,
-						);
+						throw new Error(`Command timed out after ${p.timeout}s (sent Ctrl+C; partial output: ${timeoutPartial})`);
 					}
 					// 静默解阻（仅持久终端）：转后台 + 注册完成观察器，立即把控制权还给模型。
 					if (persist && idleMs > 0 && Date.now() - lastDataAt >= idleMs) {
@@ -1737,16 +1733,16 @@ function backgroundResult(
 	// partialText 已在调用方做过 cleanBashOutput + applyTail。
 	const partial = truncateMiddle(partialText, 6000);
 	// 空输出占位按语言预渲染（issue #91 v2：vars 只收干净标识）。
-	const partialZh = partial || "（暂无输出）";
 	const partialEn = partial || "(no output yet)";
 	return {
 		content: [
 			{
 				type: "text",
-				text: `Command still running in the persistent terminal ai-bash (no output for ${silentSeconds}s, not finished). ` +
-						`This call does not block — the command keeps running in the background and you will be notified automatically when it finishes.\n` +
-						`Partial output:\n${partialEn}\n` +
-						`To block until it finishes, use terminal_wait(terminalId="ai-bash") (no polling needed); use terminal_input / terminal_key to interact (Ctrl+C aborts).`,
+				text:
+					`Command still running in the persistent terminal ai-bash (no output for ${silentSeconds}s, not finished). ` +
+					`This call does not block — the command keeps running in the background and you will be notified automatically when it finishes.\n` +
+					`Partial output:\n${partialEn}\n` +
+					`To block until it finishes, use terminal_wait(terminalId="ai-bash") (no polling needed); use terminal_input / terminal_key to interact (Ctrl+C aborts).`,
 			},
 		],
 		details: { running: true, terminalId: "ai-bash", silentSeconds },
@@ -1788,8 +1784,10 @@ export function makePersistentTerminalTools(
 		defineTool({
 			name: "terminal_create",
 			label: "Create terminal",
-			description: "Create a named persistent interactive PTY in the current workspace. Use terminal_input or terminal_key to interact with it and terminal_read to inspect incremental output. Prefer this over bash when the program is interactive/TUI-based (REPLs, vim/htop, y/n prompts), when starting a long-running server you want to keep observing or interrupt, or when the user asks to work in the visible terminal. For simple one-shot commands use bash instead.",
-			promptSnippet: "run interactive programs or long-running servers in a persistent visible PTY (multi-step: create → input/key → read)",
+			description:
+				"Create a named persistent interactive PTY in the current workspace. Use terminal_input or terminal_key to interact with it and terminal_read to inspect incremental output. Prefer this over bash when the program is interactive/TUI-based (REPLs, vim/htop, y/n prompts), when starting a long-running server you want to keep observing or interrupt, or when the user asks to work in the visible terminal. For simple one-shot commands use bash instead.",
+			promptSnippet:
+				"run interactive programs or long-running servers in a persistent visible PTY (multi-step: create → input/key → read)",
 			parameters: Type.Object({
 				terminalId: Type.String({ description: "Stable terminal name" }),
 				cwd: Type.Optional(Type.String({ description: "Workspace-relative directory" })),
@@ -1800,16 +1798,10 @@ export function makePersistentTerminalTools(
 				const lang = getLang();
 				const info = terminals.create(p.terminalId, p.cwd ?? cwd, p.cols ?? 120, p.rows ?? 40, cwd, p.terminalId);
 				const infoJson = JSON.stringify(info);
-				if (!info)
-					throw new Error(
-						`Failed to create terminal: ${p.terminalId}`,
-					);
+				if (!info) throw new Error(`Failed to create terminal: ${p.terminalId}`);
 				// AI 创建 → 启动活力检测纪元（静默提醒只针对 agent 触碰过的终端）。
 				terminals.noteAgentActivity(p.terminalId);
-				return result(
-					`Terminal created: ${infoJson}`,
-					info,
-				);
+				return result(`Terminal created: ${infoJson}`, info);
 			},
 		}),
 		defineTool({
@@ -1827,14 +1819,9 @@ export function makePersistentTerminalTools(
 			parameters: Type.Object({ terminalId: Type.String() }),
 			execute: async (_id, p) => {
 				const lang = getLang();
-				if (!terminals.has(p.terminalId))
-					throw new Error(
-						`Terminal not found: ${p.terminalId}`,
-					);
+				if (!terminals.has(p.terminalId)) throw new Error(`Terminal not found: ${p.terminalId}`);
 				terminals.kill(p.terminalId);
-				return result(
-					`Terminal closed: ${p.terminalId}`,
-				);
+				return result(`Terminal closed: ${p.terminalId}`);
 			},
 		}),
 		defineTool({
@@ -1847,9 +1834,7 @@ export function makePersistentTerminalTools(
 				failIf(terminals.inputChecked(p.terminalId, p.data));
 				// AI 发了输入 = 在等结果，重开一个静默纪元。
 				terminals.noteAgentActivity(p.terminalId);
-				return result(
-					`Sent ${p.data.length} chars to ${p.terminalId}`,
-				);
+				return result(`Sent ${p.data.length} chars to ${p.terminalId}`);
 			},
 		}),
 		defineTool({
@@ -1874,15 +1859,14 @@ export function makePersistentTerminalTools(
 				failIf(terminals.key(p.terminalId, p.key, p.modifiers));
 				// 同 terminal_input：AI 主动交互后重新计时。
 				terminals.noteAgentActivity(p.terminalId);
-				return result(
-					`Sent key ${p.key} to ${p.terminalId}`,
-				);
+				return result(`Sent key ${p.key} to ${p.terminalId}`);
 			},
 		}),
 		defineTool({
 			name: "terminal_read",
 			label: "Read terminal output",
-			description: "Read incremental output from a persistent PTY. Keep the returned cursor and pass it on the next read; optionally wait for new output or process exit.",
+			description:
+				"Read incremental output from a persistent PTY. Keep the returned cursor and pass it on the next read; optionally wait for new output or process exit.",
 			parameters: Type.Object({
 				terminalId: Type.String(),
 				cursor: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -1894,17 +1878,15 @@ export function makePersistentTerminalTools(
 				const cursor = p.cursor ?? 0;
 				if (p.waitMs) await terminals.waitForOutput(p.terminalId, cursor, p.waitMs, signal);
 				const read = terminals.read(p.terminalId, cursor, p.maxBytes ?? 20000);
-				if (!read)
-					throw new Error(
-						`Terminal not found: ${p.terminalId}`,
-					);
+				if (!read) throw new Error(`Terminal not found: ${p.terminalId}`);
 				return result(JSON.stringify(read), read);
 			},
 		}),
 		defineTool({
 			name: "terminal_wait",
 			label: "Wait for terminal command",
-			description: "Block until a command started THROUGH THE BASH TOOL finishes (its exit marker appears) or the timeout expires — no polling needed. Only applies to terminals with a pending bash-tool command; terminals driven manually via terminal_input (e.g. interactive programs) have no completion marker — use terminal_read(waitMs=…) to observe those instead. Returns {finished, exitCode} plus the output produced while waiting; finished=false means it is STILL running (call again to keep waiting).",
+			description:
+				"Block until a command started THROUGH THE BASH TOOL finishes (its exit marker appears) or the timeout expires — no polling needed. Only applies to terminals with a pending bash-tool command; terminals driven manually via terminal_input (e.g. interactive programs) have no completion marker — use terminal_read(waitMs=…) to observe those instead. Returns {finished, exitCode} plus the output produced while waiting; finished=false means it is STILL running (call again to keep waiting).",
 			promptSnippet: "block until a terminal's current command finishes (no polling)",
 			parameters: Type.Object({
 				terminalId: Type.String(),

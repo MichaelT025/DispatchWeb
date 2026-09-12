@@ -4,7 +4,7 @@
  * 任何组件 `useAppGlobals()` 直接读，不用再一层层传 props。
  *
  * 为什么不用 props / Context：
- *  - `engine`（pi | dsh）、`managed`（PI_WEB_MANAGED）、`tabs`（PI_WEB_TABS）、
+ *  - `managed`（PI_WEB_MANAGED）、`tabs`（PI_WEB_TABS）、
  *    `service`（是否被平台服务托管，更新面板的「重启服务」靠它）、版本号这些是
  *    「整棵树都要知道、整个连接内只变一次」的信息，却要钻进
  *    GoalBar / SettingsModal / PiSetupModal / ChatInput…… 传参版漏一个就是一个看不见的
@@ -40,8 +40,6 @@ import type { ClientMessage, UiServiceInfo } from "./types";
 import type { ConnStatus } from "./use-chat";
 
 export interface AppGlobals {
-	/** 引擎标识（"pi" | "dsh"）。缺省 "pi" —— 老服务端不发这个字段。 */
-	engine: string;
 	/** PI_WEB_MANAGED=1：更新与插件安装由部署方负责，界面不提供入口。 */
 	managed: boolean;
 	/** PI_WEB_TABS：本实例提供的 tab 白名单；undefined = 全部（默认）。 */
@@ -62,7 +60,6 @@ export interface AppGlobals {
 }
 
 export const DEFAULT_APP_GLOBALS: AppGlobals = {
-	engine: "pi",
 	managed: false,
 	status: "connecting",
 	ready: false,
@@ -81,7 +78,6 @@ function sameArray(a?: string[], b?: string[]): boolean {
 
 function same(a: AppGlobals, b: AppGlobals): boolean {
 	return (
-		a.engine === b.engine &&
 		a.managed === b.managed &&
 		a.appVersion === b.appVersion &&
 		a.serverVersion === b.serverVersion &&
@@ -144,11 +140,6 @@ export function useAppField<K extends keyof AppGlobals>(key: K): AppGlobals[K] {
 		() => cached[key],
 		() => cached[key],
 	);
-}
-
-/** 当前是否 DSH 引擎（最常用的那个判断：DSH 缺一堆 pi 才有的能力）。 */
-export function useIsDsh(): boolean {
-	return useAppField("engine") === "dsh";
 }
 
 /** 实例是否受管（PI_WEB_MANAGED=1）。 */

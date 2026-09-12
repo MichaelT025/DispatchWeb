@@ -23,7 +23,6 @@ describe("app-globals", () => {
 	it("默认值：pi 引擎、非受管、未连接/未就绪、无工作目录、无 tabs / 版本号", () => {
 		resetAppGlobals();
 		expect(getAppGlobals()).toBe(DEFAULT_APP_GLOBALS);
-		expect(getAppGlobals().engine).toBe("pi");
 		expect(getAppGlobals().managed).toBe(false);
 		expect(getAppGlobals().status).toBe("connecting");
 		expect(getAppGlobals().ready).toBe(false);
@@ -50,16 +49,16 @@ describe("app-globals", () => {
 	});
 
 	it("合并写入：只覆盖传入字段，引用整体替换（useSyncExternalStore 靠它判定变化）", () => {
-		setAppGlobals({ engine: "dsh", appVersion: "1.2.3" });
+		setAppGlobals({ serverVersion: "0.9", appVersion: "1.2.3" });
 		const a = getAppGlobals();
-		expect(a.engine).toBe("dsh");
+		expect(a.serverVersion).toBe("0.9");
 		expect(a.appVersion).toBe("1.2.3");
 		expect(a.managed).toBe(false);
 
 		setAppGlobals({ managed: true });
 		const b = getAppGlobals();
 		expect(b).not.toBe(a);
-		expect(b.engine).toBe("dsh"); // 未传的字段保留
+		expect(b.serverVersion).toBe("0.9"); // 未传的字段保留
 		expect(b.managed).toBe(true);
 	});
 
@@ -67,11 +66,11 @@ describe("app-globals", () => {
 		let hits = 0;
 		const off = subscribeAppGlobals(() => hits++);
 
-		setAppGlobals({ engine: "dsh", tabs: ["chat", "terminal"] });
+		setAppGlobals({ managed: true, tabs: ["chat", "terminal"] });
 		const a = getAppGlobals();
 		expect(hits).toBe(1);
 
-		setAppGlobals({ engine: "dsh", tabs: ["chat", "terminal"] }); // 等价的新数组
+		setAppGlobals({ managed: true, tabs: ["chat", "terminal"] }); // 等价的新数组
 		expect(getAppGlobals()).toBe(a);
 		expect(hits).toBe(1);
 
@@ -80,22 +79,12 @@ describe("app-globals", () => {
 		expect(hits).toBe(2);
 
 		off();
-		setAppGlobals({ engine: "pi" });
+		setAppGlobals({ managed: false });
 		expect(hits).toBe(2); // 退订后不再收到
-	});
-
-	it("引擎缺省回落到 pi（老服务端不发 engine 字段）", () => {
-		setAppGlobals({ engine: "pi" });
-		expect(getAppGlobals().engine).toBe("pi");
-		// 同 use-chat 的 ready 处理：msg.engine 缺失时传 "pi"
-		const ready: { engine?: string } = {};
-		setAppGlobals({ engine: ready.engine ?? "pi" });
-		expect(getAppGlobals().engine).toBe("pi");
 	});
 
 	it("完整 ready 载荷落地", () => {
 		const patch: Partial<AppGlobals> = {
-			engine: "dsh",
 			managed: true,
 			tabs: ["chat", "git"],
 			appVersion: "0.77.0",
@@ -106,7 +95,7 @@ describe("app-globals", () => {
 	});
 
 	it("reset 回到默认（测试隔离用）", () => {
-		setAppGlobals({ engine: "dsh", managed: true });
+		setAppGlobals({ managed: true });
 		resetAppGlobals();
 		expect(getAppGlobals()).toBe(DEFAULT_APP_GLOBALS);
 	});

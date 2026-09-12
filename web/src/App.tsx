@@ -13,47 +13,24 @@ import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
-import { Dropdown, DropdownItem } from "./components/Dropdown";
-import { SoundSettingsPanel } from "./components/SoundSettings";
-import { NotifyToggle } from "./components/NotifyToggle";
-import {
-	FiFolder,
-	FiGlobe,
-	FiGitBranch,
-	FiLayers,
-	FiMenu,
-	FiSearch,
-	FiSettings,
-	FiSun,
-	FiTerminal,
-	FiVolume2,
-	FiSidebar,
-	FiMoreHorizontal,
-} from "react-icons/fi";
+import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar } from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
-import { DshQuestionDialog } from "./components/DshQuestionDialog";
+import { QuestionDialog } from "./components/QuestionDialog";
 // 终端视图懒加载：xterm.js 体积大且只在切到终端时才需要，拆出主包
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
-import { PluginView } from "./components/PluginView";
-import { createPluginHostApi, installPluginHostApi } from "./plugin-host";
 import { registerAttachmentSink } from "./composer-bridge";
 import { appendDraftAttachments } from "./composer-draft";
-import { syncPluginViews, subscribeLoadedPluginViews, type LoadedPluginView } from "./plugin-loader";
-import { setFenceSend, syncFenceRenderers } from "./plugin-fence";
 import { PiSetupModal } from "./components/PiSetupModal";
 import { ModelConfigModal } from "./components/ModelConfigModal";
 
 import { SettingsModal } from "./components/SettingsModal";
-import { BgTasksModal } from "./components/BgTasksModal";
 import { GlobalSearchModal } from "./components/GlobalSearchModal";
-import { TemplateProvider } from "./components/PromptTemplates";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
 import { parseAgentRole, hasPiastraExtension } from "./agents";
-import type { ClientMessage, CommandDef, PromptAttachment, UiMessage } from "./types";
-import { QUICK_PHRASE_DEFAULTS } from "./quick-phrases";
-import { useI18n, localeShort, useT } from "./i18n";
+import type { ClientMessage, PromptAttachment, UiMessage } from "./types";
+import { useT } from "./i18n";
 import {
 	FiAlertCircle,
 	FiAlertTriangle,
@@ -67,12 +44,9 @@ import type { Notice } from "./use-chat";
 import { fileToProcessedImage, isRasterImage, type ProcessedImage } from "./image-paste";
 import { randomUuid } from "./uuid";
 import { recordModelUsage } from "./model-usage";
-import { loadSoundSettings, playSound, saveSoundSettings, type SoundKind, type SoundSettings } from "./sounds";
 import { useWideChat } from "./chat-width-settings";
 import { projectNameFromCwd, useProjectTitle } from "./title-settings";
 import { notify } from "./notify";
-import { useTheme } from "./theme";
-import { useWallpaperEffect } from "./wallpaper";
 
 export interface PendingAttachment {
 	path: string;
@@ -98,8 +72,7 @@ export interface PendingAttachment {
  *  only the × button dismisses (and the auto timer). */
 function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: (id: number) => void }) {
 	const t = useT();
-	const { locale } = useI18n();
-	const text = locale !== "zh" && notice.textEn ? notice.textEn : notice.text;
+	const text = notice.text;
 	const [paused, setPaused] = useState(false);
 	useEffect(() => {
 		if (paused) return;
@@ -210,50 +183,33 @@ function PanelRail({ side, onClick }: { side: PanelSide; onClick: () => void }) 
 	);
 }
 
-/** 右侧工作台面板：文件 / Git 审查 / 已装插件视图。终端走底部条，不在此列。 */
-type WorkspaceTab = "files" | "git" | `plugin:${string}`;
+/** Right workspace pane: files / git review. The terminal is the bottom strip. */
+type WorkspaceTab = "files" | "git";
 
-/** Astra 紧凑顶栏：项目名 + 连接态 + 右上角工作台开关。替代原 TopBar 的
- *  常驻多标签/工具链，只保留搜索 / 声音 / 语言 / 主题 / 更新等必要入口。 */
+/** Compact conversation header: project name plus the workspace toggles. */
 function AstraHeader({
 	chat,
 	title,
 	onOpenPanel,
 	onOpenSettings,
-	onOpenBgTasks,
 	onOpenGlobalSearch,
 	workspaceOpen,
 	onToggleWorkspace,
 	bottomTerminalOpen,
 	onToggleBottomTerminal,
-	sound,
-	onSoundChange,
-	onSoundPreview,
-	themes,
-	theme,
-	onThemeChange,
 }: {
-	chat: { ready: boolean; status: string; state: { cwd: string } | null; bgServers: unknown[] };
+	chat: { ready: boolean; status: string; state: { cwd: string } | null };
 	readonly title: string | undefined;
 	onOpenPanel: (side: "left" | "right") => void;
 	onOpenSettings: () => void;
-	onOpenBgTasks: () => void;
 	onOpenGlobalSearch: () => void;
 	workspaceOpen: boolean;
 	onToggleWorkspace: () => void;
 	bottomTerminalOpen: boolean;
 	onToggleBottomTerminal: () => void;
-	sound: SoundSettings;
-	onSoundChange: (s: SoundSettings) => void;
-	onSoundPreview: (k: SoundKind) => void;
-	themes: { id: string; name: string; builtin: boolean; nameEn?: string }[];
-	theme: string | null;
-	onThemeChange: (id: string | null) => void;
 }) {
-	const { locale, setLocale, t, packs } = useI18n();
-	const [overflowOpen, setOverflowOpen] = useState(false);
+	const t = useT();
 	const projectName = projectNameFromCwd(chat.state?.cwd ?? "");
-	const chatBgCount = chat.bgServers.length;
 	return (
 		<header className="astra-header">
 			<div className="astra-header-left">
@@ -269,50 +225,9 @@ function AstraHeader({
 				<button type="button" className="chip" title={t("searchGlobalTip")} onClick={onOpenGlobalSearch}>
 					<FiSearch />
 				</button>
-				<button type="button" className="chip bg-task-chip" data-tip={t("bgTasksTip")} onClick={onOpenBgTasks}>
-					<FiLayers />
-					{chatBgCount > 0 && <span className="bg-task-badge">{chatBgCount}</span>}
-				</button>
 				<button type="button" className="chip" title={t("settingsTitle")} onClick={onOpenSettings}>
 					<FiSettings />
 				</button>
-				<Dropdown trigger={<FiMoreHorizontal />} open={overflowOpen} onOpenChange={setOverflowOpen}>
-					<div className="dd-header">
-						<FiSun /> {t("theme")}
-					</div>
-					<DropdownItem
-						active={theme === null}
-						onClick={() => {
-							onThemeChange(null);
-						}}
-					>
-						{t("themeDefault")}
-					</DropdownItem>
-					{themes.map((th) => (
-						<DropdownItem
-							key={th.id}
-							active={theme === th.id}
-							onClick={() => {
-								onThemeChange(th.id);
-							}}
-						>
-							{locale === "zh" ? th.name : (th.nameEn ?? th.name)}
-						</DropdownItem>
-					))}
-					<div className="dd-header">
-						<FiGlobe /> {t("language")}
-					</div>
-					{packs.map((l) => (
-						<DropdownItem key={l.code} active={locale === l.code} onClick={() => setLocale(l.code)}>
-							{l.nativeName}
-						</DropdownItem>
-					))}
-					<div className="dd-header">
-						<FiVolume2 /> {t("sound")}
-					</div>
-					<SoundSettingsPanel settings={sound} onChange={onSoundChange} onPreview={onSoundPreview} />
-					<NotifyToggle />
-				</Dropdown>
 				<button
 					type="button"
 					className={`chip astra-terminal-toggle${bottomTerminalOpen ? " active" : ""}`}
@@ -339,26 +254,7 @@ function AstraHeader({
 
 export function App() {
 	const t = useT();
-	const { locale } = useI18n();
 	const { chat, send, dismissNotice, pushNotice, terminal } = useChat();
-	// 快捷短语 seeding：首次看到空列表 → 按界面语言填一批内置常用短语，之后即为用户
-	// 数据（增删改/恢复默认/关闭都在设置里）。「已 seed」标记存服务端全局
-	// （settings.quickPhrasesSeeded，非浏览器 localStorage）——clientId 在
-	// sessionStorage、每次新会话都是新 id，若按浏览器记 seed，重启后删掉的默认
-	// 短语又会被填回默认；存服务端则跨会话/跨浏览器一致。
-	const quickSeedRef = useRef(false);
-	useEffect(() => {
-		if (!chat.ready || !chat.settings) return;
-		if (quickSeedRef.current || chat.settings.quickPhrasesSeeded) return;
-		quickSeedRef.current = true;
-		if (chat.settings.quickPhrases.length === 0) {
-			send({
-				type: "set_settings",
-				quickPhrases: QUICK_PHRASE_DEFAULTS[locale] ?? QUICK_PHRASE_DEFAULTS.en,
-				quickPhrasesSeeded: true,
-			});
-		}
-	}, [chat.ready, chat.settings, send, locale]);
 	// 浏览器标题：开关开启时显示当前项目（工作目录文件夹名），否则固定应用名。
 	const cwd = chat.state?.cwd ?? "";
 	const projectTitle = useProjectTitle();
@@ -391,51 +287,6 @@ export function App() {
 	   messages anyway, so the pane would sit there empty. No list means every
 	   tab, which is the default. */
 	const tabOn = (tab: string) => !chat.tabs || tab === "chat" || chat.tabs.includes(tab);
-	// 已安装且未在设置面板禁用的插件（决定 tab 与视图加载）。
-	const enabledPlugins = useMemo(
-		() => chat.plugins.filter((p) => !chat.settings?.disabledPlugins?.includes(p.id)),
-		[chat.plugins, chat.settings?.disabledPlugins],
-	);
-	// 已加载的插件视图（bundle 动态 import 完成后出现）。
-	const [pluginViews, setPluginViews] = useState<LoadedPluginView[]>([]);
-	useEffect(() => subscribeLoadedPluginViews(setPluginViews), []);
-	// 目录清单/禁用集合/epoch 变化 → 同步注册表：新增的拉取、消失的清理
-	// （React 卸载对应 PluginView 时调用插件的 cleanup）、服务端 reload 后重拉。
-	// fenced-code 渲染插件：注入底层 send + 同步「语言→插件」注册表（renderer
-	// 插件是命中了才懒加载，见 plugin-fence.ts / PluginFenceBlock.tsx）。
-	useEffect(() => {
-		setFenceSend(send);
-		syncFenceRenderers(enabledPlugins, chat.pluginsEpoch);
-		void syncPluginViews(enabledPlugins, chat.pluginsEpoch);
-	}, [enabledPlugins, chat.pluginsEpoch, send]);
-	// 插件宿主动作桥（window.__piWebUiHost）：插件 client bundle 拿不到 React 实例，
-	// 需要「切视图 / 新建对话 + 自动发一段话」这类动作时走它（见 plugin-host.ts）。
-	// deps 读的是 ref（挂载时装一次，不能把每次渲染的闭包困在里面）。
-	const chatRefForPlugins = useRef(chat);
-	chatRefForPlugins.current = chat;
-	useEffect(() => {
-		installPluginHostApi(
-			createPluginHostApi({
-				send,
-				isReady: () => Boolean(chatRefForPlugins.current.state),
-				setView: (view) => {
-					if (view === "chat") {
-						setWorkspaceOpen(false);
-						setBottomTerminalOpen(false);
-					} else if (view === "terminal") {
-						setBottomTerminalOpen(true);
-					} else if (view === "git" || view === "files" || view.startsWith("plugin:")) {
-						setWorkspaceTab(view as WorkspaceTab);
-						setWorkspaceOpen(true);
-					}
-				},
-				getCwd: () => chatRefForPlugins.current.state?.cwd ?? "",
-				getConversationId: () => chatRefForPlugins.current.state?.conversationId ?? null,
-				isConversationBlank: () => (chatRefForPlugins.current.state?.messages.length ?? 0) === 0,
-			}),
-		);
-		return () => installPluginHostApi(null);
-	}, [send]);
 	// 左右面板可拖拽宽度（桌面端）：localStorage 持久化，双击手柄复位。
 	const [leftWidth, setLeftWidth] = useState(() => readPanelWidth("left"));
 	const [rightWidth, setRightWidth] = useState(readWorkspaceWidth);
@@ -473,8 +324,6 @@ export function App() {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	// Wide chat column (client-local, default off).
 	const wide = useWideChat();
-	// Background-task panel (AI-started servers — stop individually or all).
-	const [bgTasksOpen, setBgTasksOpen] = useState(false);
 	// Global search panel (sessions / projects / workspace files).
 	const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 	/** 全局搜索「会话」结果点击后的跳转目标：切到该会话并定位到命中消息。
@@ -492,56 +341,6 @@ export function App() {
 		return () => clearTimeout(t);
 	}, [searchJump]);
 
-	// 插件视图桥：插件无 chat 上下文，通过窗口事件请求在可见终端执行命令
-	// （与 SCM 面板同款：已有同名 tab 原地重跑，否则新建并自动切到终端视图）。
-	useEffect(() => {
-		const onPluginRunCommand = (e: Event) => {
-			const detail = (e as CustomEvent<{ title?: string; command?: string }>).detail;
-			const title = detail?.title || t("pluginCommandFallback");
-			const command = detail?.command;
-			if (!command || !chat.ready) return;
-			const def: CommandDef = { name: title, command, cwd: "${pwd}" };
-			const existing = chat.terminals.find((tm) => tm.title === title);
-			if (existing) {
-				terminal.restart(existing.id);
-				send({
-					type: "run_command",
-					terminalId: existing.id,
-					conversationId: existing.conversationId,
-					command: def,
-					cols: 80,
-					rows: 24,
-				});
-			} else {
-				const id = randomUuid();
-				terminal.create({
-					id,
-					conversationId: chat.activeConversationId || chat.state?.conversationId || "",
-					title,
-					cwd: chat.state?.cwd ?? "",
-					cols: 80,
-					rows: 24,
-					running: true,
-					exitCode: null,
-					command: def,
-				});
-			}
-			setBottomTerminalOpen(true);
-			setEverBottom(true);
-		};
-		window.addEventListener("pi-web-ui:plugin-run-command", onPluginRunCommand);
-		// 派单卡片的「查看子代理」按钮：切到对应的子代理对话（与左栏点击同效果）。
-		const onSwitchConversation = (e: Event) => {
-			const id = (e as CustomEvent<string>).detail;
-			if (typeof id === "string" && id) send({ type: "switch_conversation", id });
-		};
-		window.addEventListener("pi-web-ui:switch-conversation", onSwitchConversation);
-		return () => {
-			window.removeEventListener("pi-web-ui:plugin-run-command", onPluginRunCommand);
-			window.removeEventListener("pi-web-ui:switch-conversation", onSwitchConversation);
-		};
-	}, [chat, terminal, send]);
-
 	// Ctrl+K / Cmd+K opens global search (also reachable via the topbar button).
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -553,12 +352,6 @@ export function App() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	// -- sound notifications --------------------------------------------------
-	const [sound, setSound] = useState<SoundSettings>(loadSoundSettings);
-	// -- theme (whole stylesheet swap) ---------------------------------------
-	const { themes, theme, switchTheme } = useTheme();
-	// -- chat wallpaper (message-list background image, issue #100) -------------
-	useWallpaperEffect();
 	const prevStreaming = useRef<boolean | null>(null);
 	const prevDialogId = useRef<number | null>(null);
 	const prevQuestionId = useRef<string | null>(null);
@@ -568,13 +361,8 @@ export function App() {
 	// Previous terminal list — drives the uninstall-finished watcher below.
 	const prevTerminalsRef = useRef(chat.terminals);
 
-	useEffect(() => {
-		saveSoundSettings(sound);
-	}, [sound]);
-
-	// Maintenance watcher: when a `pi remove …` / `pi-web-ui install|uninstall …`
-	// command tab transitions running → exited, re-discover extensions/skills
-	// (extensions_reload) or re-scan the UI-plugin dir (plugins_reload).
+	// Maintenance watcher: when a `pi remove …` command tab transitions
+	// running → exited, re-discover extensions/skills.
 	useEffect(() => {
 		const prev = prevTerminalsRef.current;
 		prevTerminalsRef.current = chat.terminals;
@@ -582,65 +370,46 @@ export function App() {
 			const cmd = tm.command?.command ?? "";
 			const before = prev.find((p) => p.id === tm.id);
 			if (!before?.running || tm.running) continue;
-			if (cmd.startsWith("pi remove ")) {
+			if (cmd.startsWith("pi remove ") || cmd.startsWith("npm i -g ")) {
 				send({ type: "extensions_reload" });
-			} else if (cmd.startsWith("pi-web-ui install ") || cmd.startsWith("pi-web-ui uninstall ")) {
-				send({ type: "plugins_reload" });
-			} else if (cmd.startsWith("npm i -g ")) {
-				// A component update ran in the visible terminal (per-row "更新"
-				// or "全部更新" buttons): re-discover extensions + UI plugins and
-				// re-check versions so the dropdown reflects the new state.
-				send({ type: "extensions_reload" });
-				send({ type: "plugins_reload" });
-				send({ type: "check_updates_all", force: true });
 			}
 		}
 	}, [chat.terminals, send]);
 
-	// Run start / end cues (streaming edge transitions).
+	// Run end cue: OS/PWA notification for when the user stepped away.
 	useEffect(() => {
 		const streaming = chat.state?.isStreaming ?? false;
 		const prev = prevStreaming.current;
 		prevStreaming.current = streaming;
 		if (prev === null) return; // first observation — don't cue
-		if (!prev && streaming) playSound("start", sound);
-		else if (prev && !streaming) {
-			playSound("done", sound);
-			// OS/PWA notification for when the user stepped away (not focused).
-			void notify(t("notifyDoneTitle"), t("notifyDoneBody"));
-		}
-	}, [chat.state?.isStreaming, sound]);
+		if (prev && !streaming) void notify(t("notifyDoneTitle"), t("notifyDoneBody"));
+	}, [chat.state?.isStreaming]);
 
-	// Questionnaire cue — each new dialog id + each new DSH question id.
-	// dialog = 扩展 select/confirm/input；question = ask_user_question 问卷。
-	// 之前只监听了 dialog，问卷出来没有提示音（issue：当前问卷出来没有问卷的提示音）。
+	// Questionnaire cue — each new dialog id + each new question id.
 	useEffect(() => {
 		const id = chat.dialog?.id ?? null;
 		if (id !== null && id !== prevDialogId.current) {
-			playSound("question", sound);
 			void notify(t("notifyQuestionTitle"), t("notifyQuestionBody"));
 		}
 		prevDialogId.current = id;
-	}, [chat.dialog, sound]);
+	}, [chat.dialog]);
 
 	useEffect(() => {
 		const qid = chat.question?.id ?? null;
 		if (qid !== null && qid !== prevQuestionId.current) {
-			playSound("question", sound);
 			void notify(t("notifyQuestionTitle"), t("notifyQuestionBody"));
 		}
 		prevQuestionId.current = qid;
-	}, [chat.question, sound]);
+	}, [chat.question]);
 
 	// Error cue — new error notices only.
 	useEffect(() => {
 		const err = [...chat.notices].reverse().find((n) => n.level === "error");
 		if (err && err.id !== lastErrorNotice.current) {
 			lastErrorNotice.current = err.id;
-			playSound("error", sound);
 			void notify(t("notifyErrorTitle"), t("notifyErrorBody"));
 		}
-	}, [chat.notices, sound]);
+	}, [chat.notices]);
 
 	const attach = (
 		path: string,
@@ -960,262 +729,216 @@ export function App() {
 					<NoticeToast key={n.id} notice={n} onDismiss={dismissNotice} />
 				))}
 			</div>
-			<TemplateProvider currentModelId={model ? `${model.provider}/${model.id}` : null}>
-				<div className="astra-body" style={{ "--left-w": `${leftWidth}px` } as CSSProperties}>
-					{drawer && <div className="drawer-backdrop" onClick={() => setDrawer(null)} />}
-					{!isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
-					<div
-						className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${isMobile ? "" : leftCollapsed ? " hidden" : ""}`}
-					>
-						<LeftPanel
-							onOpenGlobalSearch={() => {
-								setDrawer(null);
-								setGlobalSearchOpen(true);
-							}}
-							collapsible={!isMobile}
-							onToggleCollapse={toggleLeft}
-							panelSend={panelSend}
-							active={!isMobile || drawer === "left"}
-							sessionFile={chat.state?.sessionFile ?? null}
-							conversations={chat.conversations}
-							sessionsByCwd={chat.sessionsByCwd}
-							projects={chat.projects}
-							activeConversationId={chat.activeConversationId}
-						/>
-					</div>
-					{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
-					<div className="astra-column">
-						<AstraHeader
-							chat={chat}
-							title={conversationTitle}
-							onOpenPanel={() => setDrawer("left")}
-							onOpenSettings={() => setSettingsOpen(true)}
-							onOpenBgTasks={() => setBgTasksOpen(true)}
-							onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-							workspaceOpen={workspaceOpen}
-							onToggleWorkspace={toggleWorkspace}
-							bottomTerminalOpen={bottomTerminalOpen}
-							onToggleBottomTerminal={toggleBottomTerminal}
-							sound={sound}
-							onSoundChange={setSound}
-							onSoundPreview={(kind: SoundKind) => playSound(kind, sound)}
-							themes={themes}
-							theme={theme}
-							onThemeChange={switchTheme}
-						/>
-						<div className="astra-row" style={{ "--right-w": `${rightWidth}px` } as CSSProperties}>
-							<main className={wide ? "main wide-chat" : "main"}>
-								{viewState ? (
-									<MessageList
-										key={viewState.conversationId ?? "boot"}
-										state={viewState}
-										liveOutputs={chat.liveOutputs}
-										toolStatuses={chat.toolStatuses}
-										onEdit={onEditMessage}
-										onKillBash={() => send({ type: "abort_bash" })}
-										onRetry={() => {
-											if (send({ type: "retry_last" })) {
-												const m = chat.state?.model;
-												if (m) recordModelUsage(`${m.provider}/${m.id}`);
-											}
-										}}
-										onRemoveQueued={onRemoveQueued}
-										onRecallQueued={onRecallQueued}
-										thinkingWrap={chat.settings?.thinkingWrap ?? true}
-										toolsWrap={chat.settings?.toolsWrap ?? false} // Astra 默认折叠摘要；错误卡自动展开，对话框不受影响
-										jumpTarget={searchJump}
-										onJumpDone={() => setSearchJump(null)}
-									/>
-								) : (
-									<div className="boot-wait">{chat.ready ? t("loadingSession") : t("connectingServer")}</div>
-								)}
-								{/* 扩展问卷：非模态内联面板，插在输入框上方 */}
-								{chat.dialog && <Dialog dialog={chat.dialog} />}
-								{chat.question && <DshQuestionDialog question={chat.question} />}
-								<ChatInput
-									streaming={viewState?.isStreaming ?? false}
-									messages={viewState?.messages ?? EMPTY_MESSAGES}
-									slashCommands={chat.slashCommands}
-									modelState={modelState}
-									models={chat.models}
-									modelsLoading={chat.modelsLoading}
-									providerKeys={chat.providerKeys}
-									attachments={attachments}
-									onRemoveAttachment={removeAttachmentCb}
-									onAddImageFiles={addImageFilesCb}
-									onAddLocalFiles={addLocalFilesCb}
-									onNotice={pushNotice}
-									onManageModels={openManageModels}
-									onSent={clearAttachments}
-									quickPhrases={chat.settings?.quickPhrases ?? []}
-									quickPhrasesEnabled={chat.settings?.quickPhrasesEnabled ?? true}
-									activeAgent={activeAgent}
-									agentAvailable={agentAvailable}
-									recallDrafts={recallDrafts}
+			<div className="astra-body" style={{ "--left-w": `${leftWidth}px` } as CSSProperties}>
+				{drawer && <div className="drawer-backdrop" onClick={() => setDrawer(null)} />}
+				{!isMobile && leftCollapsed && <PanelRail side="left" onClick={toggleLeft} />}
+				<div
+					className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${isMobile ? "" : leftCollapsed ? " hidden" : ""}`}
+				>
+					<LeftPanel
+						onOpenGlobalSearch={() => {
+							setDrawer(null);
+							setGlobalSearchOpen(true);
+						}}
+						collapsible={!isMobile}
+						onToggleCollapse={toggleLeft}
+						panelSend={panelSend}
+						active={!isMobile || drawer === "left"}
+						sessionFile={chat.state?.sessionFile ?? null}
+						conversations={chat.conversations}
+						sessionsByCwd={chat.sessionsByCwd}
+						projects={chat.projects}
+						activeConversationId={chat.activeConversationId}
+					/>
+				</div>
+				{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
+				<div className="astra-column">
+					<AstraHeader
+						chat={chat}
+						title={conversationTitle}
+						onOpenPanel={() => setDrawer("left")}
+						onOpenSettings={() => setSettingsOpen(true)}
+						onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+						workspaceOpen={workspaceOpen}
+						onToggleWorkspace={toggleWorkspace}
+						bottomTerminalOpen={bottomTerminalOpen}
+						onToggleBottomTerminal={toggleBottomTerminal}
+					/>
+					<div className="astra-row" style={{ "--right-w": `${rightWidth}px` } as CSSProperties}>
+						<main className={wide ? "main wide-chat" : "main"}>
+							{viewState ? (
+								<MessageList
+									key={viewState.conversationId ?? "boot"}
+									state={viewState}
+									liveOutputs={chat.liveOutputs}
+									toolStatuses={chat.toolStatuses}
+									onEdit={onEditMessage}
+									onKillBash={() => send({ type: "abort_bash" })}
+									onRetry={() => {
+										if (send({ type: "retry_last" })) {
+											const m = chat.state?.model;
+											if (m) recordModelUsage(`${m.provider}/${m.id}`);
+										}
+									}}
+									onRemoveQueued={onRemoveQueued}
+									onRecallQueued={onRecallQueued}
+									thinkingWrap={chat.settings?.thinkingWrap ?? true}
+									toolsWrap={chat.settings?.toolsWrap ?? false} // Astra 默认折叠摘要；错误卡自动展开，对话框不受影响
+									jumpTarget={searchJump}
+									onJumpDone={() => setSearchJump(null)}
 								/>
-							</main>
-							{workspaceOpen && (
-								<>
-									{!isMobile && <ResizeHandle side="right" width={rightWidth} max={RIGHT_MAX} onResize={resizeRight} />}
-									<aside className={`astra-workspace${isMobile ? " overlay" : ""}`} aria-label={t("astraWorkspace")}>
-										<div className="astra-workspace-tabs" role="tablist" aria-label={t("astraWorkspace")}>
-											{workspaceTab !== null && (
-												<button
-													type="button"
-													className="astra-workspace-back"
-													title={t("astraWorkspace")}
-													aria-label={t("astraWorkspace")}
-													onClick={() => setWorkspaceTab(null)}
-												>
-													<FiArrowLeft />
-												</button>
-											)}
+							) : (
+								<div className="boot-wait">{chat.ready ? t("loadingSession") : t("connectingServer")}</div>
+							)}
+							{/* 扩展问卷：非模态内联面板，插在输入框上方 */}
+							{chat.dialog && <Dialog dialog={chat.dialog} />}
+							{chat.question && <QuestionDialog question={chat.question} />}
+							<ChatInput
+								streaming={viewState?.isStreaming ?? false}
+								messages={viewState?.messages ?? EMPTY_MESSAGES}
+								slashCommands={chat.slashCommands}
+								modelState={modelState}
+								models={chat.models}
+								modelsLoading={chat.modelsLoading}
+								providerKeys={chat.providerKeys}
+								attachments={attachments}
+								onRemoveAttachment={removeAttachmentCb}
+								onAddImageFiles={addImageFilesCb}
+								onAddLocalFiles={addLocalFilesCb}
+								onNotice={pushNotice}
+								onManageModels={openManageModels}
+								onSent={clearAttachments}
+								activeAgent={activeAgent}
+								agentAvailable={agentAvailable}
+								recallDrafts={recallDrafts}
+							/>
+						</main>
+						{workspaceOpen && (
+							<>
+								{!isMobile && <ResizeHandle side="right" width={rightWidth} max={RIGHT_MAX} onResize={resizeRight} />}
+								<aside className={`astra-workspace${isMobile ? " overlay" : ""}`} aria-label={t("astraWorkspace")}>
+									<div className="astra-workspace-tabs" role="tablist" aria-label={t("astraWorkspace")}>
+										{workspaceTab !== null && (
+											<button
+												type="button"
+												className="astra-workspace-back"
+												title={t("astraWorkspace")}
+												aria-label={t("astraWorkspace")}
+												onClick={() => setWorkspaceTab(null)}
+											>
+												<FiArrowLeft />
+											</button>
+										)}
+										<button
+											type="button"
+											role="tab"
+											aria-selected={workspaceTab === "files"}
+											className={workspaceTab === "files" ? "active" : ""}
+											onClick={() => setWorkspaceTab("files")}
+										>
+											<FiFolder />
+											<span>{t("astraFiles")}</span>
+										</button>
+										{tabOn("git") && (
 											<button
 												type="button"
 												role="tab"
-												aria-selected={workspaceTab === "files"}
-												className={workspaceTab === "files" ? "active" : ""}
-												onClick={() => setWorkspaceTab("files")}
+												aria-selected={workspaceTab === "git"}
+												className={workspaceTab === "git" ? "active" : ""}
+												onClick={() => setWorkspaceTab("git")}
 											>
-												<FiFolder />
-												<span>{t("astraFiles")}</span>
+												<FiGitBranch />
+												<span>{t("astraReview")}</span>
 											</button>
-											{tabOn("git") && (
+										)}
+										<button
+											type="button"
+											className="astra-workspace-close"
+											title={t("close")}
+											onClick={() => setWorkspaceOpen(false)}
+										>
+											<FiX />
+										</button>
+									</div>
+									<div className="astra-workspace-content">
+										{workspaceTab === null && (
+											<div className="astra-workspace-chooser" role="menu">
+												<div className="astra-workspace-hint">{t("astraWorkspaceHint")}</div>
 												<button
 													type="button"
-													role="tab"
-													aria-selected={workspaceTab === "git"}
-													className={workspaceTab === "git" ? "active" : ""}
-													onClick={() => setWorkspaceTab("git")}
+													role="menuitem"
+													className="astra-workspace-item"
+													onClick={() => setWorkspaceTab("files")}
 												>
-													<FiGitBranch />
-													<span>{t("astraReview")}</span>
+													<FiFolder />
+													<span>{t("astraFiles")}</span>
+													<kbd>Ctrl+P</kbd>
 												</button>
-											)}
-											{pluginViews.map((entry) => (
-												<button
-													key={entry.info.id}
-													type="button"
-													role="tab"
-													aria-selected={workspaceTab === `plugin:${entry.info.id}`}
-													className={workspaceTab === `plugin:${entry.info.id}` ? "active" : ""}
-													onClick={() => setWorkspaceTab(`plugin:${entry.info.id}` as WorkspaceTab)}
-												>
-													{entry.info.icon ? <span aria-hidden>{entry.info.icon}</span> : null}
-													<span>{entry.info.name}</span>
-												</button>
-											))}
-											<button
-												type="button"
-												className="astra-workspace-close"
-												title={t("close")}
-												onClick={() => setWorkspaceOpen(false)}
-											>
-												<FiX />
-											</button>
-										</div>
-										<div className="astra-workspace-content">
-											{workspaceTab === null && (
-												<div className="astra-workspace-chooser" role="menu">
-													<div className="astra-workspace-hint">{t("astraWorkspaceHint")}</div>
+												{tabOn("git") && (
 													<button
 														type="button"
 														role="menuitem"
 														className="astra-workspace-item"
-														onClick={() => setWorkspaceTab("files")}
+														onClick={() => setWorkspaceTab("git")}
 													>
-														<FiFolder />
-														<span>{t("astraFiles")}</span>
-														<kbd>Ctrl+P</kbd>
+														<FiGitBranch />
+														<span>{t("astraReview")}</span>
+														<kbd>Ctrl+Shift+G</kbd>
 													</button>
-													{tabOn("git") && (
-														<button
-															type="button"
-															role="menuitem"
-															className="astra-workspace-item"
-															onClick={() => setWorkspaceTab("git")}
-														>
-															<FiGitBranch />
-															<span>{t("astraReview")}</span>
-															<kbd>Ctrl+Shift+G</kbd>
-														</button>
-													)}
-													<button
-														type="button"
-														role="menuitem"
-														className={`astra-workspace-item${bottomTerminalOpen ? " active" : ""}`}
-														onClick={toggleBottomTerminal}
-													>
-														<FiTerminal />
-														<span>{t("terminal")}</span>
-														<kbd>Ctrl+`</kbd>
-													</button>
-													{pluginViews.map((entry) => (
-														<button
-															key={entry.info.id}
-															type="button"
-															role="menuitem"
-															className={`astra-workspace-item${workspaceTab === `plugin:${entry.info.id}` ? " active" : ""}`}
-															onClick={() => setWorkspaceTab(`plugin:${entry.info.id}` as WorkspaceTab)}
-														>
-															{entry.info.icon ? <span aria-hidden>{entry.info.icon}</span> : null}
-															<span>{entry.info.name}</span>
-														</button>
-													))}
-												</div>
-											)}
-											{workspaceTab === "files" && (
-												<RightPanel
-													collapsible={false}
-													panelSend={panelSend}
-													files={chat.files}
-													fileChanged={chat.fileChanged}
-													widgets={chat.widgets}
-													onAttach={(path, name, mode, isDir) => attach(path, name, mode, isDir)}
-													onPreview={(path, name) => setWorkspaceFile({ path, name })}
-													onNotice={(level, text) => pushNotice(level, text)}
-												/>
-											)}
-											{workspaceTab === "git" && (
-												<div className="astra-workspace-pane">
-													<ScmPanel chat={chat} terminal={terminal} active onSwitchToTerminal={openBottomTerminal} />
-												</div>
-											)}
-											{pluginViews.map((entry) =>
-												workspaceTab === `plugin:${entry.info.id}` ? (
-													<div key={entry.info.id} className="astra-workspace-pane">
-														<PluginView entry={entry} />
-													</div>
-												) : null,
-											)}
-											{workspaceTab === "files" && workspaceFile && (
-												<FilePreview
-													inline
-													file={workspaceFile}
-													content={chat.fileContent}
-													onAddLines={(path, name, start, end) => attach(path, name, "lines", false, { start, end })}
-													onAttach={(path, name, mode) => attach(path, name, mode)}
-													onClose={() => setWorkspaceFile(null)}
-												/>
-											)}
-										</div>
-									</aside>
-								</>
-							)}
-						</div>
-						<section
-							className={`astra-bottom-terminal${bottomTerminalOpen ? "" : " closed"}`}
-							aria-label={t("terminal")}
-						>
-							{everBottom && (
-								<Suspense fallback={null}>
-									<TerminalPanel chat={chat} terminal={terminal} />
-								</Suspense>
-							)}
-						</section>
+												)}
+												<button
+													type="button"
+													role="menuitem"
+													className={`astra-workspace-item${bottomTerminalOpen ? " active" : ""}`}
+													onClick={toggleBottomTerminal}
+												>
+													<FiTerminal />
+													<span>{t("terminal")}</span>
+													<kbd>Ctrl+`</kbd>
+												</button>
+											</div>
+										)}
+										{workspaceTab === "files" && (
+											<RightPanel
+												collapsible={false}
+												panelSend={panelSend}
+												files={chat.files}
+												fileChanged={chat.fileChanged}
+												widgets={chat.widgets}
+												onAttach={(path, name, mode, isDir) => attach(path, name, mode, isDir)}
+												onPreview={(path, name) => setWorkspaceFile({ path, name })}
+												onNotice={(level, text) => pushNotice(level, text)}
+											/>
+										)}
+										{workspaceTab === "git" && (
+											<div className="astra-workspace-pane">
+												<ScmPanel chat={chat} terminal={terminal} active onSwitchToTerminal={openBottomTerminal} />
+											</div>
+										)}
+										{workspaceTab === "files" && workspaceFile && (
+											<FilePreview
+												inline
+												file={workspaceFile}
+												content={chat.fileContent}
+												onAddLines={(path, name, start, end) => attach(path, name, "lines", false, { start, end })}
+												onAttach={(path, name, mode) => attach(path, name, mode)}
+												onClose={() => setWorkspaceFile(null)}
+											/>
+										)}
+									</div>
+								</aside>
+							</>
+						)}
 					</div>
+					<section className={`astra-bottom-terminal${bottomTerminalOpen ? "" : " closed"}`} aria-label={t("terminal")}>
+						{everBottom && (
+							<Suspense fallback={null}>
+								<TerminalPanel chat={chat} terminal={terminal} />
+							</Suspense>
+						)}
+					</section>
 				</div>
-			</TemplateProvider>
+			</div>
 			{previewFile && (
 				<FilePreview
 					file={previewFile}
@@ -1252,7 +975,6 @@ export function App() {
 					onClose={() => setSettingsOpen(false)}
 				/>
 			)}
-			{bgTasksOpen && <BgTasksModal servers={chat.bgServers} onClose={() => setBgTasksOpen(false)} />}
 			<GlobalSearchModal
 				open={globalSearchOpen}
 				projects={chat.projects}

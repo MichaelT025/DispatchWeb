@@ -15,7 +15,6 @@
 // wholesale (no union merge / no stale built-in leftovers).
 import "./patch-remote-catalog.js";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, rmSync, statSync, mkdirSync, watch } from "node:fs";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
@@ -66,7 +65,7 @@ import {
 	effectiveDisabledAgentTools,
 	isTerminalGuidanceOn,
 } from "./tool-manager.js";
-import { ConversationStatuses, WebUIContext, mockThemeProxy, type StatusEntry } from "./webui-context.js";
+import { ConversationStatuses, WebUIContext, type StatusEntry } from "./webui-context.js";
 import { decodeText } from "./text-sniff.js";
 import { buildAttachmentMessages } from "./attachments.js";
 import {
@@ -78,7 +77,6 @@ import {
 	type PromptComposerInputs,
 } from "./prompt-composer.js";
 import type {
-	BgServer,
 	CommandDef,
 	ConversationSummary,
 	MessageAnchor,
@@ -322,7 +320,8 @@ export function makeAskUserQuestionTool(
 		label: "Ask the user",
 		description:
 			"Ask the user focused questions to pin down ambiguous requirements. Use for clarifying the task, confirming decisions, or getting preferences. Each question renders a browser dialog with markdown/HTML rich text; options may carry a `preview`. Submit or cancel to resume.",
-		promptSnippet: "ask the user focused questions to clarify ambiguous requirements (browser dialog with options/preview)",
+		promptSnippet:
+			"ask the user focused questions to clarify ambiguous requirements (browser dialog with options/preview)",
 		promptGuidelines: [
 			"When requirements are ambiguous, use ask_user_question to ask the user instead of guessing; prefer multiple-choice options, each option may carry a preview",
 			"A cancelled question comes back as a tool error — respect it and continue without re-asking immediately",
@@ -402,18 +401,6 @@ function extractPartialText(partial: unknown): string | null {
 		return text.length > 0 ? text : null;
 	}
 	return null;
-}
-
-function extractAssistantTextFromContent(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter(
-			(c): c is { type: string; text: string } =>
-				(c as { type?: string }).type === "text" && typeof (c as { text?: string }).text === "string",
-		)
-		.map((c) => c.text)
-		.join("\n");
 }
 
 export { workspacePath };
@@ -678,7 +665,6 @@ export class ClientSession {
 		flushSnapshot: () => this.flushSnapshot(),
 		isDisposed: () => this.disposed,
 	});
-
 
 	/** The active conversation (all session operations target it). */
 	private get conv(): Conversation {
@@ -1022,7 +1008,6 @@ export class ClientSession {
 	private gitDirtyTimer: ReturnType<typeof setTimeout> | null = null;
 	private watchTimer: ReturnType<typeof setTimeout> | null = null;
 
-
 	// -----------------------------------------------------------------------
 	// User question bridge (ask_user_question customTool): the model calls the
 	// tool → question_pending goes to the browser → wait for question_answer →
@@ -1041,31 +1026,29 @@ export class ClientSession {
 		this.cwd = cwd;
 		this.agentDir = agentDir;
 		this.stateStore = stateStore;
-		this.settingsSvc = new SettingsService(
-			{
-				clientId,
-				stateStore,
-				emit: (msg) => this.emit(msg),
-				flushSnapshot: () => this.flushSnapshot(),
-				isDisposed: () => this.disposed,
-				getSession: () => this.session,
-				cwd: () => this.cwd,
-				agentDir: () => this.agentDir,
-				isStreaming: () => this.session.isStreaming,
-				reloadSession: async () => {
-					await this.session.reload();
-					// reload() 重读磁盘 settings.json，会丢掉内存 applyOverrides
-					// （含重试次数覆盖）——依次重放：重试覆盖 → 终端门控。
-					this.applyRetryOverrides();
-					// reload() 会把 custom 工具重新加回活跃集——重放终端开关。
-					this.applyToolGating(this.session);
-					await this.pushSlashCommands();
-				},
-				applyRetryOverrides: () => this.applyRetryOverrides(),
-				applyToolGating: () => this.applyToolGating(this.session),
-				promptSnapshot: () => this.promptSnapshot(),
+		this.settingsSvc = new SettingsService({
+			clientId,
+			stateStore,
+			emit: (msg) => this.emit(msg),
+			flushSnapshot: () => this.flushSnapshot(),
+			isDisposed: () => this.disposed,
+			getSession: () => this.session,
+			cwd: () => this.cwd,
+			agentDir: () => this.agentDir,
+			isStreaming: () => this.session.isStreaming,
+			reloadSession: async () => {
+				await this.session.reload();
+				// reload() 重读磁盘 settings.json，会丢掉内存 applyOverrides
+				// （含重试次数覆盖）——依次重放：重试覆盖 → 终端门控。
+				this.applyRetryOverrides();
+				// reload() 会把 custom 工具重新加回活跃集——重放终端开关。
+				this.applyToolGating(this.session);
+				await this.pushSlashCommands();
 			},
-		);
+			applyRetryOverrides: () => this.applyRetryOverrides(),
+			applyToolGating: () => this.applyToolGating(this.session),
+			promptSnapshot: () => this.promptSnapshot(),
+		});
 
 		this.modelAdmin = new ModelAdminService({
 			agentDir,
@@ -1384,7 +1367,7 @@ export class ClientSession {
 			// chat's role can't overwrite the active footer.
 			uiContext: this.uiContextFor(conv.id),
 			onError: (err) => {
-				this.emit({ type: "notice", level: "error", text: err.error,});
+				this.emit({ type: "notice", level: "error", text: err.error });
 			},
 		});
 		this.pushActiveStatuses();
@@ -3584,10 +3567,7 @@ export class ClientSession {
 	}
 	/** Force dismiss: abort the run (if any), release terminal retention and
 	 *  remove. An active target is vacated first (vacateActive). */
-	private async forceDismissConversation(
-		conv: Conversation,
-		isStreaming: (c: Conversation) => boolean,
-	): Promise<void> {
+	private async forceDismissConversation(conv: Conversation, isStreaming: (c: Conversation) => boolean): Promise<void> {
 		const title = conv.title;
 		let selfAborted = false;
 		if (isStreaming(conv)) {
@@ -3648,23 +3628,18 @@ export class ClientSession {
 			const targetCwd = sessionManager.getCwd();
 			const conversationId = this.nextConversationId();
 			openedTerminals = this.makeTerminalManager(conversationId, targetCwd);
-			openedRuntime = await createAgentSessionRuntime(
-				this.makeRuntimeFactory(openedTerminals, conversationId),
-				{
-					cwd: targetCwd,
-					agentDir: this.agentDir,
-					sessionManager,
-				},
-			);
+			openedRuntime = await createAgentSessionRuntime(this.makeRuntimeFactory(openedTerminals, conversationId), {
+				cwd: targetCwd,
+				agentDir: this.agentDir,
+				sessionManager,
+			});
 
 			// Only displace the old active conversation after the replacement runtime
 			// is known-good. This keeps a failed history open entirely non-destructive.
 			const oldListed = this.conv.listed;
 			const displaced = this.displaceActive();
 			const openInProject =
-				[...this.convs.values()].filter((c) => c.cwd === targetCwd).length +
-				1 -
-				(displaced?.cwd === targetCwd ? 1 : 0);
+				[...this.convs.values()].filter((c) => c.cwd === targetCwd).length + 1 - (displaced?.cwd === targetCwd ? 1 : 0);
 			if (openInProject > MAX_OPEN_CONVERSATIONS) {
 				// displaceActive() may have promoted a streaming conversation into the
 				// running list. Roll that presentation-only mutation back because no
@@ -4009,21 +3984,18 @@ export class ClientSession {
 				// First visit to this project: resume its most recent session.
 				const conversationId = this.nextConversationId();
 				const terminals = this.makeTerminalManager(conversationId, abs);
-				const newRuntime = await createAgentSessionRuntime(
-					this.makeRuntimeFactory(terminals, conversationId),
-					{
-						cwd: abs,
-						agentDir: this.agentDir,
-						sessionManager: SessionManager.continueRecent(abs),
-					},
-				);
+				const newRuntime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, conversationId), {
+					cwd: abs,
+					agentDir: this.agentDir,
+					sessionManager: SessionManager.continueRecent(abs),
+				});
 				const conv = this.makeConversation(newRuntime, conversationId, terminals);
 				this.convs.set(conv.id, conv);
 				this.activeId = conv.id;
 				if (displaced) this.removeConversation(displaced.id);
 				for (const d of newRuntime.diagnostics) {
 					if (d.type !== "info") {
-						this.emit({ type: "notice", level: d.type, text: d.message,});
+						this.emit({ type: "notice", level: d.type, text: d.message });
 					}
 				}
 				await this.bindSession();
@@ -4184,7 +4156,7 @@ export class ClientSession {
 			return;
 		}
 		this.emit({ type: "commands", commands, path });
-		this.emit({ type: "notice", level: "info", text: `Command saved: ${path}`,});
+		this.emit({ type: "notice", level: "info", text: `Command saved: ${path}` });
 	}
 
 	async dispose(): Promise<void> {

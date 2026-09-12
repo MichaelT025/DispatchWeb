@@ -57,9 +57,7 @@ export class SettingsService {
 	/** 流式中改了需要 reload 的设置 → agent_end 后延迟应用（防拆毁运行中 run）。 */
 	private pendingReload = false;
 
-	constructor(
-		private readonly host: SettingsHost,
-	) {
+	constructor(private readonly host: SettingsHost) {
 		this.settings = host.stateStore.getSettings(host.clientId);
 		this.presets = host.stateStore.getPresets(host.clientId);
 	}
@@ -165,10 +163,7 @@ export class SettingsService {
 		// skill 被一直记录”）。session 未就绪时保守跳过。
 		if (loadedSkillNames !== null) {
 			const stale = [
-				...new Set([
-					...this.settings.disabledSkills,
-					...normalizeSkillList(this.settings.skillsFullText),
-				]),
+				...new Set([...this.settings.disabledSkills, ...normalizeSkillList(this.settings.skillsFullText)]),
 			].filter((name) => !loadedSkillNames!.has(name) && !this.skillStillOnDisk(name));
 			if (stale.length > 0) {
 				this.settings.disabledSkills = this.settings.disabledSkills.filter((n) => !stale.includes(n));
@@ -431,7 +426,6 @@ export class SettingsService {
 		this.push();
 	}
 
-
 	/**
 	 * Make settings changes effective in the running runtime. The resource-loader
 	 * overrides read this.settings at call time, so a reload re-applies them.
@@ -457,7 +451,7 @@ export class SettingsService {
 			await this.host.reloadSession();
 			this.push();
 			this.host.flushSnapshot();
-			this.host.emit({ type: "notice", level: "info", text: "Settings applied",});
+			this.host.emit({ type: "notice", level: "info", text: "Settings applied" });
 		} catch (err) {
 			this.host.emit({
 				type: "notice",

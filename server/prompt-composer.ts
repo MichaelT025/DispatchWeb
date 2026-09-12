@@ -186,9 +186,7 @@ function buildGuidelinesText(inputs: PromptComposerInputs): string {
 	}
 	for (const g of inputs.toolGuidelines) add(g);
 	add("Be concise in your responses");
-	add(
-		"Show file paths clearly when working with files",
-	);
+	add("Show file paths clearly when working with files");
 	return `${"Guidelines:"}\n${lines.map((l) => `- ${l}`).join("\n")}`;
 }
 
@@ -289,8 +287,7 @@ export function resolveSectionTexts(inputs: PromptComposerInputs): Record<Prompt
 	// soul：用户 SYSTEM.md 优先；无则按 lang 选内置默认（调用方自定义的 builtinSoul 原样保留）。
 	let soul = inputs.systemPromptFile?.trim() ? inputs.systemPromptFile : inputs.builtinSoul;
 	if (lang === "zh" && soul === BUILTIN_SOUL) soul = BUILTIN_SOUL_ZH;
-	else if (soul === BUILTIN_SOUL)
-		soul = BUILTIN_SOUL.split("\n").join("\n");
+	else if (soul === BUILTIN_SOUL) soul = BUILTIN_SOUL.split("\n").join("\n");
 	return {
 		soul,
 		tools: buildToolsText(inputs),

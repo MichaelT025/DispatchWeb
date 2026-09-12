@@ -433,10 +433,7 @@ export class FilesService {
 				// from our own listing, and execFile passes args verbatim anyway).
 				const { resolve, relative } = await import("node:path");
 				const rel = relative(resolve(cwd), resolve(cwd, arg.path));
-				if (rel.startsWith("..") || rel === "")
-					throw new Error(
-						"Path is outside the workspace",
-					);
+				if (rel.startsWith("..") || rel === "") throw new Error("Path is outside the workspace");
 				const { staged, worktree } = await scmFileDiff(cwd, arg.path, () => this.lang());
 				this.host.emit({
 					type: "scm_data",
@@ -453,9 +450,7 @@ export class FilesService {
 				this.host.emit({ type: "scm_data", reqId, kind, ok: true, text });
 				return;
 			}
-			throw new Error(
-				"Invalid scm query arguments",
-			);
+			throw new Error("Invalid scm query arguments");
 		} catch (err) {
 			if (isNotRepoError(err)) {
 				// Not a repo — a valid empty answer so the panel shows its hint.
@@ -854,9 +849,7 @@ export class FilesService {
 				return;
 			}
 			if (buf.length > MAX_UPLOAD_BYTES) {
-				emitErr(
-					`File too large: ${name} (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB)`,
-				);
+				emitErr(`File too large: ${name} (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB)`);
 				return;
 			}
 			mkdirSync(wp.abs, { recursive: true });

@@ -71,10 +71,7 @@ export interface ClientSettings {
 
 /** A named combo of prompt + skill/extension toggles the user can re-apply.
  *  UI-only prefs are intentionally NOT part of a preset. */
-export interface SettingsPreset extends Omit<
-	ClientSettings,
-	"questionnaireEnabled" | "thinkingWrap" | "toolsWrap"
-> {
+export interface SettingsPreset extends Omit<ClientSettings, "questionnaireEnabled" | "thinkingWrap" | "toolsWrap"> {
 	name: string;
 }
 

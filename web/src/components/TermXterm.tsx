@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { CommandDef } from "../types";
-import { buildTermTheme, THEME_CHANGE_EVENT } from "../theme";
+import { buildTermTheme } from "../theme";
 import { useI18n } from "../i18n";
 import { appSend } from "../app-globals";
 
@@ -56,14 +56,6 @@ export function TermXterm({
 }: TermXtermProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
-	// PTY lifecycle: the mount effect must NOT re-run on a language switch
-	// (re-running would dispose and re-create the xterm view — scrollback lost
-	// — and, for run_command terminals, make the server kill the running
-	// process and re-execute the command). The exit banner instead follows the
-	// LIVE locale via a small effect keyed on the running→stopped edge.
-	const { locale } = useI18n();
-	const localeRef = useRef(locale);
-	localeRef.current = locale;
 	// Metadata snapshots recreate the command object; use a value key so a
 	// terminal is not torn down when only its running/exit metadata changes.
 	const commandKey = command ? JSON.stringify(command) : "";
@@ -87,13 +79,6 @@ export function TermXterm({
 		term.open(container);
 		termRef.current = { term, fit };
 		if (active) term.focus();
-
-		// Re-theme the canvas when the active theme changes (the injected <link>
-		// fires THEME_CHANGE_EVENT after its stylesheet has applied).
-		const onThemeChange = () => {
-			term.options.theme = buildTermTheme();
-		};
-		window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
 
 		// xterm maps Ctrl+V to ^V (0x16, readline quoted-insert) and Ctrl+C to
 		// ^C, preventDefault()ing both, so the browser's native copy/paste never
@@ -163,7 +148,6 @@ export function TermXterm({
 					type: "terminal_create",
 					terminalId,
 					title,
-					locale: localeRef.current,
 					conversationId,
 					cwd,
 					cols: term.cols,
@@ -189,7 +173,6 @@ export function TermXterm({
 		return () => {
 			cancelAnimationFrame(raf);
 			onData.dispose();
-			window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
 			ro?.disconnect();
 			unregister();
 			// Unmounting happens when switching conversations/views; the PTY is

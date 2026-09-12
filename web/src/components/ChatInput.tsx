@@ -1,9 +1,9 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { FiList, FiSquare, FiPlus, FiArrowUp, FiGrid } from "react-icons/fi";
+import { FiList, FiSquare, FiPlus, FiArrowUp } from "react-icons/fi";
 import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
 import type { AgentRole } from "../agents";
-import { useT, useI18n } from "../i18n";
-import { appSend, useAppField, useIsDsh } from "../app-globals";
+import { useT } from "../i18n";
+import { appSend, useAppField } from "../app-globals";
 import { mergeRecalledDraft } from "../composer-draft";
 import { registerDraftSink } from "../composer-bridge";
 import { caretVisualLineFlags } from "../caret-visual-line";
@@ -14,7 +14,6 @@ import { detectTouchFirstDevice } from "../touch-device";
 
 import { ModelThinking } from "./ModelThinking";
 import { AgentPicker } from "./AgentPicker";
-import { useTemplates } from "./PromptTemplates";
 
 /** True on touch-first devices (phones / tablets driven by a soft keyboard) —
  *  see `touch-device.ts` for the detection rules (Windows 触屏笔记本不算触屏，
@@ -70,9 +69,6 @@ interface ChatInputProps {
 	/** Stored API keys per built-in provider (masked) — drives the picker's
 	 *  multi-key grouping (click a model under a key to switch to it). */
 	providerKeys: Record<string, ProviderKeyInfo[]>;
-	/** 输入框上方的快捷短语（点击即发送；与文件引用 chips 是两套独立 UI，互不干扰）。 */
-	quickPhrases: string[];
-	quickPhrasesEnabled: boolean;
 	/** PiAstra agent picker: CONFIRMED role from the server status bridge
 	 *  (null = unknown; we never show an optimistic local guess). */
 	activeAgent: AgentRole | null;
@@ -95,8 +91,6 @@ export const ChatInput = memo(function ChatInput({
 	onSent,
 	onManageModels,
 	providerKeys,
-	quickPhrases,
-	quickPhrasesEnabled,
 	activeAgent,
 	agentAvailable,
 	recallDrafts,
@@ -104,16 +98,8 @@ export const ChatInput = memo(function ChatInput({
 	const t = useT();
 	/** 连接/会话就绪：走全局（web/src/app-globals.ts），不再从 App 传。 */
 	const ready = useAppField("ready");
-	/** DSH 无 mid-run steering（isStreaming 时 prompt 全部走 followUp，
-	 *  见 server/dsh/dsh-agent-service.ts）—— 只渲染「排队」半段，不摆一个说了不算的「插队」。 */
-	const isDsh = useIsDsh();
-	const { locale } = useI18n();
-	/** 打开模板库（对话中途也可随时取用提示词模板）。 */
-	const { openPicker } = useTemplates();
-	const slashDesc = (c: SlashCommandInfo) =>
-		locale !== "zh" && c.descriptionEn ? c.descriptionEn : (c.description ?? "");
-	const slashHint = (c: SlashCommandInfo) =>
-		locale !== "zh" && c.argumentHintEn ? c.argumentHintEn : (c.argumentHint ?? "");
+	const slashDesc = (c: SlashCommandInfo) => c.description ?? "";
+	const slashHint = (c: SlashCommandInfo) => c.argumentHint ?? "";
 	const [text, setText] = useState("");
 	/** Slash-command picker: non-null while open (filtered by the current input). */
 	const [completions, setCompletions] = useState<SlashCommandInfo[] | null>(null);
@@ -174,7 +160,6 @@ export const ChatInput = memo(function ChatInput({
 		extension: t("slashExtension"),
 		prompt: t("slashPrompt"),
 		skill: t("slashSkill"),
-		plugin: t("slashPlugin"),
 	};
 
 	/** Recompute the command picker from the current input text. */
@@ -433,24 +418,6 @@ export const ChatInput = memo(function ChatInput({
 		}
 	};
 
-	/** 快捷短语一键发送：直接发出短语文本（带上当前文件附件），不碰输入框草稿。 */
-	const sendPhrase = (phrase: string) => {
-		const trimmed = phrase.trim();
-		if (!connected || !trimmed) return;
-		if (appSend({ type: "prompt", text: trimmed, attachments: buildPromptAttachments() })) {
-			if (trimmed) pushPromptHistory(trimmed);
-			historyIndexRef.current = -1;
-			draftRef.current = "";
-			onSent();
-			const m = modelState?.model;
-			if (m) recordModelUsage(`${m.provider}/${m.id}`);
-			// 触屏设备点击快捷短语后不回焦输入框：点按钮时虚拟键盘本未弹出，回焦会
-			// 立刻把它弹起来盖住界面（发送按钮/回车路径本就处于键盘开启状态，不受
-			// 影响，仍保留 submit() 里的回焦）。桌面端保留回焦，方便直接接着输入。
-			if (!IS_TOUCH) taRef.current?.focus();
-		}
-	};
-
 	const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.nativeEvent.isComposing) return;
 		// Slash-command picker navigation.
@@ -588,7 +555,7 @@ export const ChatInput = memo(function ChatInput({
 		<div className="inputbox-actions">
 			{streaming ? (
 				canSubmit ? (
-					<div className={`split-send${isDsh ? " single" : ""}`}>
+					<div className="split-send">
 						<button
 							type="button"
 							className="split-queue"
@@ -598,17 +565,15 @@ export const ChatInput = memo(function ChatInput({
 						>
 							<FiList />
 						</button>
-						{!isDsh && (
-							<button
-								type="button"
-								className="split-steer"
-								title={t("steerTip")}
-								aria-label={t("queueSteerTag")}
-								onClick={() => submit()}
-							>
-								<FiArrowUp />
-							</button>
-						)}
+						<button
+							type="button"
+							className="split-steer"
+							title={t("steerTip")}
+							aria-label={t("queueSteerTag")}
+							onClick={() => submit()}
+						>
+							<FiArrowUp />
+						</button>
 					</div>
 				) : (
 					<button type="button" className="btn stop" title={t("stopAgent")} onClick={() => appSend({ type: "abort" })}>
@@ -757,13 +722,7 @@ export const ChatInput = memo(function ChatInput({
 					value={text}
 					rows={1}
 					placeholder={
-						connected
-							? streaming
-								? isDsh
-									? t("placeholderStreamingQueued")
-									: t("placeholderStreaming")
-								: t("placeholderIdle")
-							: t("placeholderConnecting")
+						connected ? (streaming ? t("placeholderStreaming") : t("placeholderIdle")) : t("placeholderConnecting")
 					}
 					disabled={!connected}
 					onChange={(e) => {
@@ -798,9 +757,6 @@ export const ChatInput = memo(function ChatInput({
 								appSend({ type: "prompt", text: `/agent ${role}` });
 							}}
 						/>
-						<button type="button" className="btn tpl-open" title={t("tpl.openPicker")} onClick={openPicker}>
-							<FiGrid />
-						</button>
 					</div>
 					<div className="composer-tools-right">
 						<ModelThinking

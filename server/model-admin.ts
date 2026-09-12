@@ -358,11 +358,11 @@ export class ModelAdminService {
 		const pid = provider.trim();
 		const key = apiKey.trim();
 		if (!pid) {
-			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID",});
+			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID" });
 			return;
 		}
 		if (!key) {
-			this.host.emit({ type: "notice", level: "error", text: "Enter an API key",});
+			this.host.emit({ type: "notice", level: "error", text: "Enter an API key" });
 			return;
 		}
 		try {
@@ -411,11 +411,11 @@ export class ModelAdminService {
 		const pid = provider.trim();
 		const key = apiKey.trim();
 		if (!pid) {
-			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID",});
+			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID" });
 			return;
 		}
 		if (!key) {
-			this.host.emit({ type: "notice", level: "error", text: "Enter an API key",});
+			this.host.emit({ type: "notice", level: "error", text: "Enter an API key" });
 			return;
 		}
 		try {
@@ -603,7 +603,7 @@ export class ModelAdminService {
 	async clearProviderApiKey(provider: string): Promise<void> {
 		const pid = provider.trim();
 		if (!pid) {
-			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID",});
+			this.host.emit({ type: "notice", level: "error", text: "Enter a provider ID" });
 			return;
 		}
 		try {
@@ -705,9 +705,7 @@ export class ModelAdminService {
 				models = readModels();
 			}
 			if (models.length === 0) {
-				fail(
-					`Model list for ${pid} is empty, cannot clone (retry later)`,
-				);
+				fail(`Model list for ${pid} is empty, cannot clone (retry later)`);
 				return;
 			}
 			// 供应商级 api 取占比最高，模型保留全量去重（避免 muse-spark 被过滤）
@@ -1009,14 +1007,10 @@ export class ModelAdminService {
 		try {
 			url = new URL(base);
 		} catch {
-			throw new Error(
-				`Invalid baseUrl: ${base}`,
-			);
+			throw new Error(`Invalid baseUrl: ${base}`);
 		}
 		if (url.protocol !== "http:" && url.protocol !== "https:") {
-			throw new Error(
-				"baseUrl supports http/https only",
-			);
+			throw new Error("baseUrl supports http/https only");
 		}
 
 		const headers: Record<string, string> = {
@@ -1049,9 +1043,7 @@ export class ModelAdminService {
 					throw new Error("Request timed out (15s)");
 				}
 				const errMessage = (err as Error).message;
-				throw new Error(
-					`Request failed: ${errMessage}`,
-				);
+				throw new Error(`Request failed: ${errMessage}`);
 			} finally {
 				clearTimeout(timer);
 			}
@@ -1071,11 +1063,8 @@ export class ModelAdminService {
 			} catch {
 				// response body already consumed / not text — ignore
 			}
-			const detailSuffixZh = detail ? `：${detail}` : "";
 			const detailSuffixEn = detail ? `: ${detail}` : "";
-			throw new Error(
-				`Upstream returned HTTP ${res.status}${detailSuffixEn}`,
-			);
+			throw new Error(`Upstream returned HTTP ${res.status}${detailSuffixEn}`);
 		}
 		let models: UiModelConfigEntry[] = [];
 		try {
@@ -1096,8 +1085,7 @@ export class ModelAdminService {
 		models = models
 			.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
 			.sort((a, b) => a.id.localeCompare(b.id));
-		if (models.length === 0)
-			throw new Error("The endpoint returned no models");
+		if (models.length === 0) throw new Error("The endpoint returned no models");
 		return models;
 	}
 

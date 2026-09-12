@@ -68,10 +68,7 @@ async function git(cwd: string, args: string[], lang?: () => ServerLang): Promis
 		return stdout;
 	} catch (err) {
 		const e = err as { message?: string; stderr?: string; killed?: boolean; code?: string };
-		if (e.code === "ENOENT")
-			throw new Error(
-				"git command not found — make sure Git is installed and on PATH",
-			);
+		if (e.code === "ENOENT") throw new Error("git command not found — make sure Git is installed and on PATH");
 		if (e.killed) throw new Error("git command timed out");
 		const detail = (e.stderr ?? e.message ?? "").trim().split("\n")[0];
 		throw new Error(detail || "git command failed");

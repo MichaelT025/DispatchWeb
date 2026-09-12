@@ -1,2 +1,450 @@
 /* PiAstra messages — Codex-style restyle. Loaded after styles.css; equal-specificity
    selectors here win by source order, so no !important is needed. */
+
+/* ---- turn rhythm: plain prose turns, ~24px apart ---- */
+.msg {
+	position: relative;
+	padding: 0;
+	margin: 0 0 24px;
+}
+.msg:last-child {
+	margin-bottom: 8px;
+}
+
+/* ---- meta line (role / model / time) is gone from the default layout.
+   The container stays (it hosts the collapse control and question tags)
+   but is zero-height when empty and only reveals its controls on hover. */
+.msg-meta {
+	margin: 0;
+	gap: 6px;
+	opacity: 1;
+	font-size: 11px;
+	justify-content: flex-end;
+	min-height: 0;
+}
+.msg-role,
+.msg-model,
+.msg-time {
+	display: none;
+}
+.msg-collapse-btn {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+.msg:hover .msg-collapse-btn,
+.msg-collapse-btn:focus-visible {
+	opacity: 1;
+}
+.msg-collapse-btn:hover {
+	color: var(--text);
+}
+.qn-tag {
+	background: var(--bg);
+	border-color: var(--border-soft);
+}
+.qn-tag.active {
+	color: var(--text);
+	border-color: var(--border);
+}
+
+/* ---- user turn: quiet right-aligned bubble ---- */
+.msg-user .msg-body {
+	margin-left: auto;
+	width: fit-content;
+	max-width: min(70%, 640px);
+	padding: 8px 14px;
+	border: 1px solid var(--border-soft);
+	border-radius: 18px;
+	background: var(--chip-bg);
+	color: var(--text);
+	font-size: 14px;
+	line-height: 1.55;
+	box-shadow: none;
+}
+/* the copy control leaves the bubble and floats to its left on hover */
+.msg-user .msg-text.single {
+	display: block;
+}
+.msg-user .msg-text-copy,
+.msg-user .msg-text.single .msg-text-copy {
+	position: absolute;
+	top: 50%;
+	left: -46px;
+	right: auto;
+	transform: translateY(-50%);
+	opacity: 0;
+}
+.msg-user .msg-body:hover .msg-text-copy,
+.msg-user .msg-text-copy:focus-visible {
+	opacity: 1;
+}
+/* edit / re-ask sits under the bubble, hover-only, muted */
+.msg-actions {
+	margin-top: 4px;
+	gap: 4px;
+}
+.msg-action {
+	font-size: 12px;
+	padding: 3px 8px;
+	border-radius: 6px;
+}
+.msg-action:hover {
+	color: var(--text);
+	background: var(--bg-elev2);
+}
+
+/* ---- assistant turn: bare prose, no avatar, no label ---- */
+.msg-assistant .msg-body {
+	background: transparent;
+	border: 0;
+	padding: 0;
+}
+.msg-text {
+	font-size: 14px;
+	line-height: 1.6;
+	color: var(--text);
+}
+.msg-text p {
+	margin: 10px 0;
+}
+.msg-text ul,
+.msg-text ol {
+	margin: 8px 0;
+	padding-left: 24px;
+}
+.msg-text li {
+	margin: 3px 0;
+}
+.msg-text li > p {
+	margin: 2px 0;
+}
+.msg-text h1,
+.msg-text h2,
+.msg-text h3,
+.msg-text h4 {
+	font-weight: 600;
+	line-height: 1.35;
+	color: #fff;
+	margin: 18px 0 8px;
+}
+.msg-text h1 {
+	font-size: 20px;
+}
+.msg-text h2 {
+	font-size: 17px;
+}
+.msg-text h3 {
+	font-size: 15px;
+}
+.msg-text h4 {
+	font-size: 14px;
+}
+.msg-text > .md > :first-child,
+.msg-text > :first-child {
+	margin-top: 0;
+}
+.msg-text strong {
+	color: var(--md-strong, #fff);
+	font-weight: 600;
+}
+.msg-text a {
+	color: var(--text);
+	text-decoration: underline;
+	text-decoration-color: var(--text-faint);
+	text-underline-offset: 2px;
+}
+.msg-text a:hover {
+	text-decoration-color: var(--text);
+}
+.msg-text code {
+	font-size: 12.5px;
+	background: #1a1a1a;
+	border: 0;
+	border-radius: 4px;
+	padding: 1px 5px;
+}
+.msg-text blockquote {
+	border-left: 2px solid var(--border);
+	padding: 2px 12px;
+	color: var(--text-dim);
+}
+.msg-text th,
+.msg-text td {
+	border-color: var(--border-soft);
+	padding: 5px 10px;
+}
+.msg-text th {
+	color: var(--text-dim);
+	font-weight: 500;
+}
+.msg-text hr {
+	border: 0;
+	border-top: 1px solid var(--border-soft);
+	margin: 16px 0;
+}
+/* fenced code: same card surface as tool cards */
+.codeblock {
+	margin: 12px 0;
+}
+.codeblock pre {
+	border: 1px solid var(--border-soft);
+	border-radius: 12px;
+	background: var(--card-bg, #0c0c0c) !important;
+}
+
+/* assistant copy control: hidden until hover, then a small muted icon row
+   under the prose (the reference shows its action icons beneath the turn) */
+.msg-assistant .msg-text:not(.single) {
+	padding-bottom: 28px;
+}
+.msg-assistant .msg-text-copy {
+	top: auto;
+	bottom: 0;
+	left: -6px;
+	right: auto;
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	opacity: 0;
+}
+.msg-assistant .msg-text.single {
+	display: block;
+	padding-bottom: 28px;
+}
+.msg-assistant .msg-text.single .msg-text-copy {
+	position: absolute;
+}
+.msg-assistant .msg:hover .msg-text-copy,
+.msg-assistant:hover .msg-text-copy,
+.msg-text-copy:focus-visible {
+	opacity: 1;
+}
+.msg-text-copy:hover {
+	color: var(--text);
+	background: var(--bg-elev2);
+}
+
+/* ---- collapsed turns: one quiet muted line with a chevron, no card ---- */
+.msg-collapsed {
+	margin: 0 0 6px;
+	padding: 4px 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 13px;
+	gap: 8px;
+}
+.msg-collapsed:hover {
+	background: transparent;
+	border-color: transparent;
+	color: var(--text-dim);
+}
+.msg-collapsed-role,
+.msg-collapsed-role.role-user,
+.msg-collapsed-role.role-assistant,
+.msg-collapsed-role.role-bashExecution,
+.msg-collapsed-role.role-toolResult {
+	display: none;
+}
+.msg-collapsed-preview {
+	color: inherit;
+}
+.msg-collapsed-time {
+	display: none;
+}
+.msg-collapsed-chip {
+	font-size: 11px;
+	padding: 0 6px;
+	border-color: var(--border-soft);
+	color: var(--text-faint);
+}
+.msg-collapsed-action {
+	order: -1;
+	gap: 0;
+	font-size: 0;
+	color: inherit;
+}
+.msg-collapsed-action > svg {
+	width: 14px;
+	height: 14px;
+	font-size: 14px;
+}
+.msg-collapsed:hover .msg-collapsed-action {
+	color: var(--text-dim);
+}
+
+/* ---- thinking: quiet line, opens into an italic muted body ---- */
+.thinking {
+	margin: 6px 0;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+}
+.thinking .chead {
+	min-height: 28px;
+	padding: 0 4px 0 0;
+	color: var(--text-faint);
+	font-size: 13px;
+}
+.thinking .chead:hover {
+	color: var(--text-dim);
+}
+.thinking-icon {
+	color: var(--text-faint);
+}
+.thinking-body {
+	border-top: 0;
+	padding: 2px 0 8px 30px;
+	font-size: 13px;
+	color: var(--text-faint);
+}
+
+/* ---- cards: tool calls, bash runs, attachments, skills, compaction ---- */
+.toolcall,
+.bashblock,
+.attachcard,
+.skillcard,
+.compaction-card {
+	margin: 10px 0;
+	border: 1px solid var(--border-soft);
+	border-radius: 12px;
+	background: var(--card-bg, #0c0c0c);
+	overflow: hidden;
+}
+.toolcall.err {
+	border-color: color-mix(in srgb, var(--red) 30%, var(--border-soft));
+}
+.chead {
+	min-height: 36px;
+	padding: 4px 10px 4px 6px;
+	border-radius: 0;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--text);
+}
+.toolcall .chead {
+	min-height: 36px;
+	padding: 4px 10px 4px 6px;
+	font-size: 13px;
+}
+.toolcall-name {
+	font-family: var(--sans);
+	font-weight: 500;
+}
+.chead-toggle,
+.chead-copy,
+.msg-text-copy {
+	border-radius: 6px;
+}
+.chead-toggle:hover,
+.chead-copy:hover {
+	color: var(--text);
+	background: var(--bg-elev2);
+}
+.chead-icon {
+	color: var(--text-dim);
+}
+.toolcall-cmd,
+.toolcall-path {
+	font-size: 12px;
+	color: var(--text-dim);
+}
+.toolcall.ok .toolcall-status {
+	color: var(--text-faint);
+}
+.toolcall-body,
+.toolcall:not(.err) .toolcall-body {
+	border-top: 1px solid var(--border-soft);
+	padding: 8px 12px 10px;
+}
+.toolcall-args pre,
+.toolcall-output pre {
+	font-size: 12.5px;
+	line-height: 1.5;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	padding: 2px 0;
+	color: var(--text-dim);
+}
+.termline {
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	padding: 2px 0 6px;
+	color: var(--text);
+}
+.termline-icon {
+	color: var(--text-faint);
+}
+.toolcall-output {
+	margin-top: 6px;
+}
+.toolcall-output-label {
+	font-size: 11px;
+	letter-spacing: 0.4px;
+	color: var(--text-faint);
+	border-top: 1px solid var(--border-soft);
+	padding-top: 6px;
+}
+.toolcall-open,
+.toolcall-kill {
+	border-radius: 6px;
+}
+
+/* bash: command line as the header, output as the body */
+.bashblock-command {
+	padding: 8px 12px;
+	font-size: 12.5px;
+	border-bottom-color: var(--border-soft);
+}
+.bashblock-prompt {
+	color: var(--text-faint);
+	font-weight: 500;
+}
+.bashblock-exit {
+	border: 0;
+	padding: 0;
+	font-size: 11.5px;
+}
+.bashblock-output {
+	padding: 8px 12px 10px;
+	font-size: 12.5px;
+	color: var(--text-dim);
+}
+
+/* diff stats stay semantic: green additions, red deletions */
+.diff-add,
+.stat-add {
+	color: var(--green);
+}
+.diff-del,
+.stat-del {
+	color: var(--red);
+}
+
+/* ---- errors keep their emphasis but lose the saturated tint ---- */
+.msg-error {
+	background: color-mix(in srgb, var(--red) 8%, transparent);
+	border-color: color-mix(in srgb, var(--red) 30%, transparent);
+	border-radius: 10px;
+}
+
+/* ---- streaming / waiting indicators ---- */
+.thinking-wait {
+	color: var(--text-faint);
+}
+.stream-cursor {
+	background: var(--text-dim);
+}
+
+@media (max-width: 768px) {
+	.msg-user .msg-body {
+		max-width: 90%;
+	}
+	.msg-user .msg-text-copy,
+	.msg-user .msg-text.single .msg-text-copy {
+		display: none;
+	}
+}

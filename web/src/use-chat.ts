@@ -10,7 +10,6 @@ import type {
 	FileContent,
 	FileListing,
 	FileSearchResult,
-	GoalStatus,
 	ModelInfo,
 	ProjectSummary,
 	ProviderKeyInfo,
@@ -23,8 +22,6 @@ import type {
 	TerminalInfo,
 	UiModelConfigEntry,
 	UiPendingQuestion,
-	UiPluginCatalogEntry,
-	UiPluginInfo,
 	UiProviderConfig,
 	UiServiceInfo,
 	UiSettingsState,
@@ -34,38 +31,9 @@ import type {
 import { applyMessageDelta, type MessageDeltaMsg } from "./message-delta";
 import { resolvePendingQuestion, type QuestionSource } from "./pending-question";
 import { setAppGlobals, setAppSend } from "./app-globals";
-import { emitPluginData } from "./plugin-loader";
 import { PROTOCOL_VERSION } from "./protocol-version";
 
 export type ConnStatus = "connecting" | "open" | "closed";
-
-/** localStorage key for the UI language (mirrors i18n.tsx STORAGE_KEY). */
-const UI_LANG_KEY = "pi-web-ui:lang";
-
-/** Browser UI locale for the hello/set_locale server report (issue #91).
- *  Read straight from localStorage so the socket layer never depends on
- *  React context. Missing → "" (server treats it as English default). */
-function readUiLocale(): string {
-	try {
-		return (localStorage.getItem(UI_LANG_KEY) ?? "").trim();
-	} catch {
-		return "";
-	}
-}
-
-/** Event fired by i18n.tsx setLocale when the user switches UI language. */
-export const UI_LOCALE_EVENT = "pi-web-ui:locale";
-
-/** One component in an all-source update check (update_status_all). */
-export interface UpdateAllItem {
-	name: string;
-	kind: "webui" | "pi-core" | "package";
-	current: string;
-	latest: string | null;
-	latestPublishedAt?: string | null;
-	upToDate: boolean;
-	error?: string;
-}
 
 export interface Notice {
 	id: number;
@@ -96,8 +64,6 @@ export interface ChatState {
 	toolStatuses: Map<string, ToolStatus>;
 	notices: Notice[];
 	serverVersion?: string;
-	/** 引擎标识（pi | dsh）—— ready 消息携带，底栏显示徽标。 */
-	engine?: string;
 	/** PI_WEB_MANAGED=1 on the server: updates and plugin installs come from
 	 *  whoever deploys this instance, so the interface does not offer them.
 	 *  The server refuses those messages regardless (server/managed.ts). */
@@ -139,16 +105,6 @@ export interface ChatState {
 	installResult: { ok: boolean; detail: string } | null;
 	/** Path completions for the cwd input. */
 	pathCompletions: { name: string; path: string; type: "dir" | "file" }[];
-	/** Self-update status (result of check_update). */
-	update: {
-		current: string;
-		latest: string | null;
-		latestPublishedAt: string | null;
-		upToDate: boolean;
-		error?: string;
-	} | null;
-	/** All-source update check (webui + pi core + installed packages). */
-	updatesAll: UpdateAllItem[] | null;
 	/** Extension widgets (TUI overlays bridged to the web UI). */
 	widgets: { key: string; lines: string[] }[];
 	/** Extension footer statuses (setStatus bridge). */
@@ -173,8 +129,6 @@ export interface ChatState {
 	terminals: TerminalMeta[];
 	/** Terminal the SCM/settings panel asked to focus (auto-switch on write ops). */
 	terminalActiveId: string | null;
-	/** Goal / review status (set via the goal bar). */
-	goal: GoalStatus;
 	/** Settings-panel state (system prompt, skill/extension toggles, presets). */
 	settings: UiSettingsState | null;
 	/** AI-started background servers (managed from the 后台任务 panel). The
@@ -223,17 +177,6 @@ export interface ChatState {
 		ok: boolean;
 		results: SessionSearchResult[];
 	} | null;
-	/** Installed optional plugins (<dataDir>/plugins). Empty = none installed. */
-	plugins: UiPluginInfo[];
-	/** Server-side plugin reload counter (import-cache buster, see plugins msg). */
-	pluginsEpoch: number;
-	/** Installable-plugin list (marketplace): shipped catalog + user-added
-	 *  entries, each a one-click install candidate (see plugin_catalog msg). */
-	pluginCatalog: UiPluginCatalogEntry[];
-	/** Catalog epoch (increments on every add/remove — re-render trigger). */
-	pluginCatalogEpoch: number;
-	/** DSH engine: <dataDir>/dsh-patches user patch files (list + dir). */
-	dshPatches: { patchDir: string; files: { name: string; path: string; size: number; mtimeMs: number }[] } | null;
 	/** Increments when the server reports the watched git dir changed
 	 *  outside the panel — SCMPanel refreshes on change while visible. */
 	scmDirty: number;
@@ -256,7 +199,6 @@ type Action =
 			type: "ready";
 			serverVersion: string;
 			protocolVersion?: number;
-			engine?: string;
 			appVersion?: string;
 			managed?: boolean;
 			tabs?: string[];
@@ -312,18 +254,6 @@ type Action =
 			type: "path_completions";
 			completions: { name: string; path: string; type: "dir" | "file" }[];
 	  }
-	| {
-			type: "update_status";
-			status: {
-				current: string;
-				latest: string | null;
-				latestPublishedAt: string | null;
-				upToDate: boolean;
-				error?: string;
-			};
-	  }
-	| { type: "update_status_all"; items: UpdateAllItem[] }
-	| { type: "updates_check_started" }
 	| { type: "widgets"; widgets: { key: string; lines: string[] }[] }
 	| { type: "statuses"; statuses: { key: string; text: string | undefined }[] }
 	| {
@@ -347,43 +277,14 @@ type Action =
 	| { type: "terminal_restart"; terminalId: string }
 	| { type: "terminal_list"; conversationId?: string; terminals: TerminalInfo[] }
 	| { type: "terminal_active"; id: string }
-	| { type: "goal_status"; status: GoalStatus }
 	| { type: "settings"; settings: UiSettingsState }
-	| { type: "bg_servers"; servers: BgServer[] }
-	| { type: "plugins"; plugins: UiPluginInfo[]; epoch: number }
-	| { type: "plugin_catalog"; entries: UiPluginCatalogEntry[]; epoch: number }
-	| {
-			type: "dsh_patches";
-			patchDir: string;
-			files: { name: string; path: string; size: number; mtimeMs: number }[];
-	  };
+	| { type: "bg_servers"; servers: BgServer[] };
 
 const MAX_LIVE_OUTPUT = 200_000;
 const MAX_TERM_BUFFER = 200_000;
 /** Marker for truncated live output (was "…[前 N 字符已省略]…" / "…[N chars omitted above]…").
  *  ToolCallBlock maps it through the liveOutputOmitted i18n key so only one language shows. */
 const LIVE_OMIT_MARK = "LIVE_OMIT";
-
-/** Initial (inactive) goal status before the server pushes the first one. */
-const DEFAULT_GOAL: GoalStatus = {
-	conversationId: null,
-	goal: null,
-	reviewModel: null,
-	maxRounds: 3,
-	locked: true,
-	reviewing: false,
-	round: 0,
-	status: "",
-	verdict: "pending",
-	wizard: {
-		active: false,
-		draft: "",
-		model: null,
-		step: 0,
-		maxSteps: 6,
-		status: "",
-	},
-};
 
 /**
  * Bridges terminal output from the socket to live xterm instances. Output for
@@ -511,7 +412,6 @@ function reducer(state: ChatState, action: Action): ChatState {
 			return {
 				...state,
 				serverVersion: action.serverVersion,
-				engine: action.engine,
 				appVersion: action.appVersion,
 				managed: action.managed === true,
 				tabs: action.tabs,
@@ -637,13 +537,6 @@ function reducer(state: ChatState, action: Action): ChatState {
 			return { ...state, scmDirty: state.scmDirty + 1 };
 		case "path_completions":
 			return { ...state, pathCompletions: action.completions };
-		case "update_status":
-			return { ...state, update: action.status };
-		case "update_status_all":
-			return { ...state, updatesAll: action.items };
-		case "updates_check_started":
-			// Forced re-check: clear stale rows so the "checking" state renders.
-			return { ...state, updatesAll: null };
 		case "widgets":
 			return { ...state, widgets: action.widgets };
 		case "statuses":
@@ -660,18 +553,10 @@ function reducer(state: ChatState, action: Action): ChatState {
 			};
 		case "slash_commands":
 			return { ...state, slashCommands: action.commands };
-		case "goal_status":
-			return { ...state, goal: action.status };
 		case "settings":
 			return { ...state, settings: action.settings };
 		case "bg_servers":
 			return { ...state, bgServers: action.servers };
-		case "plugins":
-			return { ...state, plugins: action.plugins, pluginsEpoch: action.epoch };
-		case "plugin_catalog":
-			return { ...state, pluginCatalog: action.entries, pluginCatalogEpoch: action.epoch };
-		case "dsh_patches":
-			return { ...state, dshPatches: { patchDir: action.patchDir, files: action.files } };
 		case "terminal_add":
 			return { ...state, terminals: [...state.terminals, action.meta] };
 		case "terminal_remove":
@@ -807,8 +692,6 @@ export function useChat() {
 		providerKeys: {},
 		installResult: null,
 		pathCompletions: [],
-		update: null,
-		updatesAll: null,
 		widgets: [],
 		statuses: [],
 		dialog: null,
@@ -818,7 +701,6 @@ export function useChat() {
 		slashCommands: [],
 		terminals: [],
 		terminalActiveId: null,
-		goal: DEFAULT_GOAL,
 		bgServers: [],
 		settings: null,
 		fetchModelsResult: null,
@@ -828,11 +710,6 @@ export function useChat() {
 		fileSearch: null,
 		sessionSearch: null,
 		scmDirty: 0,
-		plugins: [],
-		pluginsEpoch: 0,
-		pluginCatalog: [],
-		pluginCatalogEpoch: 0,
-		dshPatches: null,
 		protocolMismatch: false,
 	});
 	const wsRef = useRef<WebSocket | null>(null);
@@ -903,11 +780,6 @@ export function useChat() {
 	const send = useCallback((msg: ClientMessage) => {
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
-			// Forced re-check: drop stale rows immediately so the "checking"
-			// state renders instead of the cached list.
-			if (msg.type === "check_updates_all" && msg.force === true) {
-				dispatch({ type: "updates_check_started" });
-			}
 			ws.send(JSON.stringify(msg));
 			// 提交/取消模型提问后立即收起对话框：服务端只 resolve 模型侧 Promise，
 			// 不会发任何回执清除前端面板（否则会出现“回答后不消失、取消无效”）。
@@ -968,9 +840,6 @@ export function useChat() {
 				JSON.stringify({
 					type: "hello",
 					clientId: getClientId(),
-					// UI language report (issue #91): server persists it per
-					// client and uses it for tool return values / AI prompts.
-					locale: readUiLocale(),
 				} satisfies ClientMessage),
 			);
 		};
@@ -986,11 +855,10 @@ export function useChat() {
 			}
 			switch (msg.type) {
 				case "ready":
-					// 全局运行态（engine / managed / tabs / 版本号）在这里落一次：
-					// 同步于 dispatch 之前，等 React 因为新状态重渲染时，读全局的组件
-					// 已经拿到正确值（不会闪一帧 pi）。详见 web/src/app-globals.ts。
+					// Global runtime facts (managed / tabs / versions) land here once,
+					// synchronously before dispatch, so components reading the globals
+					// see the right values on the very next render. See app-globals.ts.
 					setAppGlobals({
-						engine: msg.engine ?? "pi",
 						managed: !!msg.managed,
 						tabs: msg.tabs,
 						appVersion: msg.appVersion,
@@ -1001,7 +869,6 @@ export function useChat() {
 						type: "ready",
 						serverVersion: msg.serverVersion,
 						protocolVersion: msg.protocolVersion,
-						engine: msg.engine,
 						appVersion: msg.appVersion,
 						managed: msg.managed,
 						tabs: msg.tabs,
@@ -1017,13 +884,6 @@ export function useChat() {
 					ws.send(JSON.stringify({ type: "list_models" } satisfies ClientMessage));
 					ws.send(JSON.stringify({ type: "list_commands" } satisfies ClientMessage));
 					ws.send(JSON.stringify({ type: "get_commands" } satisfies ClientMessage));
-					// A managed instance refuses both (server/managed.ts): asking
-					// anyway would greet every visitor with two red toasts about a
-					// thing the interface does not even offer.
-					if (!msg.managed) {
-						ws.send(JSON.stringify({ type: "check_update" } satisfies ClientMessage));
-						ws.send(JSON.stringify({ type: "check_updates_all" } satisfies ClientMessage));
-					}
 					break;
 				case "snapshot":
 					// Snapshot is authoritative — delta sequence tracking restarts.
@@ -1173,12 +1033,6 @@ export function useChat() {
 				case "path_completions":
 					dispatch({ type: "path_completions", completions: msg.completions });
 					break;
-				case "update_status":
-					dispatch({ type: "update_status", status: msg });
-					break;
-				case "update_status_all":
-					dispatch({ type: "update_status_all", items: msg.items });
-					break;
 				case "widgets":
 					dispatch({ type: "widgets", widgets: msg.widgets });
 					break;
@@ -1242,26 +1096,11 @@ export function useChat() {
 				case "slash_commands":
 					dispatch({ type: "slash_commands", commands: msg.commands });
 					break;
-				case "goal_status":
-					dispatch({ type: "goal_status", status: msg.status });
-					break;
 				case "settings_state":
 					dispatch({ type: "settings", settings: msg.settings });
 					break;
 				case "bg_servers":
 					dispatch({ type: "bg_servers", servers: msg.servers });
-					break;
-				case "plugins":
-					dispatch({ type: "plugins", plugins: msg.plugins, epoch: msg.epoch });
-					break;
-				case "plugin_catalog":
-					dispatch({ type: "plugin_catalog", entries: msg.entries, epoch: msg.epoch });
-					break;
-				case "dsh_patches":
-					dispatch({ type: "dsh_patches", patchDir: msg.patchDir, files: msg.files });
-					break;
-				case "plugin_data":
-					emitPluginData(msg.pluginId, msg.payload);
 					break;
 				default:
 					break;
@@ -1295,18 +1134,6 @@ export function useChat() {
 			// when the connection is still in CONNECTING state.
 		};
 	}, []);
-
-	// UI language changes (i18n.tsx setLocale) → report to the server so tool
-	// return values / AI prompts follow the UI locale (issue #91). Socket may
-	// be mid-reconnect — hello already carries the fresh code on re-open.
-	useEffect(() => {
-		const onLocale = (ev: Event) => {
-			const locale = (ev as CustomEvent<string>).detail ?? readUiLocale();
-			if (locale) send({ type: "set_locale", locale });
-		};
-		window.addEventListener(UI_LOCALE_EVENT, onLocale);
-		return () => window.removeEventListener(UI_LOCALE_EVENT, onLocale);
-	}, [send]);
 
 	// Mount once; all reconnection is self-contained in `connect`.
 	useEffect(() => {

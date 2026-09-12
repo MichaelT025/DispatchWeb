@@ -39,7 +39,6 @@ function inputs(partial: Partial<PromptComposerInputs> = {}): PromptComposerInpu
 		appendFiles: [],
 		windowsPersona: "You are a coding agent running on Windows. Follow these rules to avoid hanging the session:",
 		terminalGuidance: "Persistent interactive terminal tools are available:",
-		markersGuidance: "",
 		contextFiles: [{ path: "E:\\pi-web-ui\\AGENTS.md", content: AGENTS_CONTENT }],
 		skills: [{ name: "mermaid", description: "render mermaid diagrams", filePath: "E:/pi-web-ui/plugins/mermaid" }],
 		...partial,
@@ -141,11 +140,10 @@ describe("resolveSectionTexts — 各来源自动内容", () => {
 		expect(resolveSectionTexts(inputs()).cwd).toBe("Current working directory: E:/pi-web-ui");
 	});
 
-	it("persona/terminal/markers 直接透传自动内容", () => {
+	it("persona/terminal 直接透传自动内容", () => {
 		const auto = resolveSectionTexts(inputs());
 		expect(auto.persona).toContain("Windows");
 		expect(auto.terminal).toContain("terminal");
-		expect(auto.markers).toBe("");
 	});
 });
 
@@ -206,7 +204,7 @@ describe("renderPromptTemplate — 组合与覆盖", () => {
 	});
 
 	it("空自动段展开为空串；未知名 token 保留原文", () => {
-		const noCtx = resolveSectionTexts(inputs({ contextFiles: [], markersGuidance: "", skills: [] }));
+		const noCtx = resolveSectionTexts(inputs({ contextFiles: [], skills: [] }));
 		const out = renderPromptTemplate("a{{context}}b", noCtx, {});
 		expect(out).toBe("ab");
 		const unknown = renderPromptTemplate("x{{typo}}y", texts, {});
@@ -290,18 +288,9 @@ describe("buildSkillsText 全文/名单模式", () => {
 });
 
 describe("READONLY_PROMPT_SOURCES / isReadonlyPromptSource — 只读来源判定", () => {
-	it("只读集合为 8 个，且不含 soul / guidelines / append", () => {
-		expect(READONLY_PROMPT_SOURCES).toHaveLength(8);
-		expect(READONLY_PROMPT_SOURCES).toEqual([
-			"tools",
-			"pi_docs",
-			"persona",
-			"terminal",
-			"markers",
-			"context",
-			"skills",
-			"cwd",
-		]);
+	it("只读集合为 7 个，且不含 soul / guidelines / append", () => {
+		expect(READONLY_PROMPT_SOURCES).toHaveLength(7);
+		expect(READONLY_PROMPT_SOURCES).toEqual(["tools", "pi_docs", "persona", "terminal", "context", "skills", "cwd"]);
 		for (const s of ["soul", "guidelines", "append"]) {
 			expect(READONLY_PROMPT_SOURCES).not.toContain(s);
 		}

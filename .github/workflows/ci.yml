@@ -2,54 +2,75 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
+  check:
+    name: Format, lint and types
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
+      - run: npm ci
+      - run: npm run check
 
-      - name: Install dependencies
-        run: npm ci
+  test:
+    name: Unit and protocol (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: protocol-${{ matrix.os }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
-      # 代码格式（prettier；失败先修格式：npm run format）
-      - name: Check formatting
-        run: npm run format:check
-
-      # 静态检查（oxlint；失败先看报告：npm run lint）
-      - name: Lint
-        run: npm run lint
-
-      # 协议双端手工同步校验（server/protocol.ts ↔ web/src/types.ts）
-      - name: Check protocol sync
-        run: node scripts/check-protocol-sync.mjs
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      # 浏览器扩展打包（esbuild；语法/入口问题在 PR 阶段就暴露）
-      - name: Build browser extension
-        run: npm run build:extension
-
-      - name: Pack browser extension (自校验 zip)
-        run: npm run pack:extension
-
-      # 纯函数单测（毫秒级、零 token）
-      - name: Unit tests
-        run: npx vitest run
-
-      # 零 token 协议冒烟（每个测试自起隔离 server：独立端口 + 临时 data-dir）
-      - name: Protocol smoke tests
-        run: node tests/run-smoke.mjs
+  browser:
+    name: Browser regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run build
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -36,35 +36,10 @@ import { previewKind } from "./text-sniff.js";
 import { startControlServer } from "./control-socket.js";
 import { scheduleUploadCleanup } from "./uploads.js";
 import { ensureWindowsBash, windowsBashDir } from "./ensure-bash.js";
-import { listThemes, resolveThemeFile } from "./themes.js";
 import { isManaged, managedRefusal } from "./managed.js";
 import { launchOrigin, toServiceInfo } from "./launch-origin.js";
 import { parseTabs, tabsRefusal } from "./tabs.js";
-import {
-	installPack,
-	isKnownPack,
-	listPacks,
-	loadServerStrings,
-	readPackFile,
-	removePack,
-	unloadServerStrings,
-} from "./locales.js";
-import {
-	PluginManager,
-	resolvePluginClientFile,
-	type PluginConversationSnapshot,
-	type PluginRunEvent,
-} from "./plugins.js";
-import { McpBridge } from "./mcp-bridge.js";
-import type {
-	BgServer,
-	ClientMessage,
-	CommandDef,
-	PromptAttachment,
-	ServerMessage,
-	UiServiceInfo,
-	UiSubagentTemplate,
-} from "./protocol.js";
+import type { ClientMessage, ServerMessage } from "./protocol.js";
 
 /** 从 CLI 参数中取 flag 值：支持 --flag value 与 --flag=value 两种写法。
  *  让 `node dist/server/index.js --host 0.0.0.0 --port 9000` 这类直接启动也能生效，
@@ -104,9 +79,6 @@ const ALLOW_ORIGINS = (process.env.PI_WEB_ALLOW_ORIGINS ?? "")
  *  Authorization: Bearer / X-PI-Token 头、?token= 查询参数或 pi_web_token cookie
  *  任一匹配即可；供 0.0.0.0 / 反代等暴露场景兜底，未设置则行为不变。 */
 const AUTH_TOKEN = process.env.PI_WEB_TOKEN?.trim() ?? "";
-/** 语言包下载根（语言包仓库的 raw 文件地址；版本 tag 优先、main 兜底，见 locales.ts）。 */
-const LOCALE_BASE_URL =
-	process.env.PI_WEB_LOCALE_BASE_URL?.trim() || "https://raw.githubusercontent.com/xing-shuyin/pi-web-ui";
 /**
  * 本包版本 —— 下载语言包时优先取同版本 tag，保证 key 对齐。
  *
@@ -219,9 +191,6 @@ if (AUTH_TOKEN) {
 	});
 }
 
-/** 引擎选择：PI_WEB_ENGINE=pi|dsh（默认 pi）。重启生效。 */
-const ENGINE: "pi" | "dsh" = process.env.PI_WEB_ENGINE === "dsh" ? "dsh" : "pi";
-
 /** PI_WEB_MANAGED=1: this instance is updated by whoever deploys it. */
 const MANAGED = isManaged();
 /** Who started this process: a platform service manager (launchd / systemd /
@@ -235,7 +204,7 @@ const SERVICE_INFO = toServiceInfo(ORIGIN);
 const TABS = parseTabs();
 
 app.get("/api/health", (_req, res) => {
-	res.json({ ok: true, piVersion: VERSION, cwd: CWD, pid: process.pid, engine: ENGINE });
+	res.json({ ok: true, piVersion: VERSION, cwd: CWD, pid: process.pid });
 });
 
 /**
@@ -391,118 +360,6 @@ function resolvePkgRoot(): string {
 	return candidates[0];
 }
 const pkgRoot = resolvePkgRoot();
-// Theme CSS files: complete standalone stylesheets. Builtin themes ship in
-// <pkg>/themes (npm files whitelist); user themes can be dropped into
-// <dataDir>/themes and are served alongside (user wins on id collision).
-const BUILTIN_THEMES_DIR = join(pkgRoot, "themes");
-const USER_THEMES_DIR = join(DATA_DIR, "themes");
-
-app.get("/api/themes", (_req, res) => {
-	res.json({ themes: listThemes(BUILTIN_THEMES_DIR, USER_THEMES_DIR) });
-});
-// 语言包：核心只随包发布中英，其余按需下载到 <dataDir>/locales/<code>.json。
-// 手工放进去的同名 JSON 也会被识别（离线安装）。PI_WEB_TOKEN 鉴权自动覆盖。
-/**
- * PI_WEB_LOCALE — the language a first visit falls back to.
- *
- * It is a fallback, not an override: an explicit choice, and then the
- * browser's own languages, come first (web/src/pick-locale.ts). It rides on
- * /api/locales because the client already asks for that at boot, so naming a
- * default costs no extra request.
- */
-const DEFAULT_LOCALE = (process.env.PI_WEB_LOCALE ?? "").trim().toLowerCase() || null;
-
-app.get("/api/locales", (_req, res) => {
-	res.json({ packs: listPacks(DATA_DIR), defaultLocale: DEFAULT_LOCALE });
-});
-app.get("/api/locales/:code", (req, res) => {
-	const code = String(req.params.code ?? "");
-	if (!isKnownPack(code)) {
-		res.status(404).end("unknown locale");
-		return;
-	}
-	const pack = readPackFile(DATA_DIR, code);
-	if (!pack) {
-		res.status(404).end("locale not installed");
-		return;
-	}
-	res.setHeader("Cache-Control", "no-cache");
-	res.json(pack);
-});
-app.post("/api/locales/:code/install", async (req, res) => {
-	const code = String(req.params.code ?? "");
-	if (!isKnownPack(code)) {
-		res.status(400).json({ error: `unknown locale: ${code}` });
-		return;
-	}
-	try {
-		const meta = await installPack(DATA_DIR, code, { baseUrl: LOCALE_BASE_URL, version: appVersion() });
-		// 新包可能自带 serverStrings（issue #91 v2）——重扫注册，无表则跳过。
-		loadServerStrings(DATA_DIR);
-		res.json({ ok: true, ...meta });
-	} catch (e) {
-		res.status(502).json({ error: e instanceof Error ? e.message : String(e) });
-	}
-});
-app.delete("/api/locales/:code", (req, res) => {
-	const code = String(req.params.code ?? "");
-	if (!isKnownPack(code)) {
-		res.status(404).end("unknown locale");
-		return;
-	}
-	if (!removePack(DATA_DIR, code)) {
-		res.status(404).end("locale not installed");
-		return;
-	}
-	unloadServerStrings(code);
-	res.json({ ok: true });
-});
-// Serve a theme's full CSS file so the frontend can swap the whole stylesheet.
-// Registered before the SPA catch-all below (otherwise it'd return index.html).
-app.get("/themes/:id.css", (req, res) => {
-	const file = resolveThemeFile(BUILTIN_THEMES_DIR, USER_THEMES_DIR, req.params.id);
-	if (!file) {
-		res.status(404).end("theme not found");
-		return;
-	}
-	res.setHeader("Content-Type", "text/css; charset=utf-8");
-	res.setHeader("Cache-Control", "no-cache");
-	res.sendFile(file);
-});
-
-// Plugin client bundles: <dataDir>/plugins/<id>/client/* served at
-// /plugins/<id>/client/* so the frontend can import() plugin views. Only the
-// client/ subtree is exposed — manifest.json and the server-side index.mjs
-// (which may hold credentials) never leave the machine. Registered BEFORE the
-// SPA catch-all below.
-const PLUGINS_DIR = join(DATA_DIR, "plugins");
-// 插件 HTTP 路由挂载点：host.route("GET", "/inbox") 实际暴露为
-// /plugins-api/<id>/inbox。PI_WEB_TOKEN 鉴权（上方 app.use）自动覆盖；
-// 响应已在前面过了 express.json。注意不要在此 catch-all 里消费 body。
-app.all(["/plugins-api/:id/*", "/plugins-api/:id"], (req, res) => {
-	const rest = String((req.params as unknown as Record<string, string | undefined>)[0] ?? "");
-	pluginMgr.handleHttp(String(req.params.id ?? ""), req.method, rest, req, res);
-});
-app.get("/plugins/:id/client/*", (req, res) => {
-	// express 4 的通配参数在运行时落在 params[0]，但类型声明里没有 —— 显式取
-	const rest = String((req.params as unknown as Record<string, string | undefined>)[0] ?? "");
-	const abs = resolvePluginClientFile(PLUGINS_DIR, req.params.id, rest);
-	if (!abs) {
-		res.status(404).end("plugin not found");
-		return;
-	}
-	// .mjs 常不在老 mime 表里，手动定 Content-Type 保证 import() 可用
-	if (/\.(mjs|js)$/.test(abs)) {
-		res.setHeader("Content-Type", "text/javascript; charset=utf-8");
-	}
-	res.setHeader("Cache-Control", "no-cache"); // 开发期改文件即生效
-	res.sendFile(abs, (err) => {
-		if (err && !res.headersSent)
-			res
-				.status((err as NodeJS.ErrnoException & { statusCode?: number }).statusCode === 404 ? 404 : 500)
-				.end("not found");
-	});
-});
 /** Set in the env of the replacement child spawned by a self-update restart. */
 const RESTART_CHILD_ENV = "PI_WEB_RESTART_CHILD";
 const webDist = join(pkgRoot, "web", "dist");
@@ -654,248 +511,11 @@ const heartbeatTimer = setInterval(() => {
 	}
 }, 10_000);
 
-// 引擎分发：PI_WEB_ENGINE=dsh 时使用 DeepSeek Harness 引擎（server/dsh/），
-// 默认 pi 引擎。同一 wire 协议，前端无感知（ready/health 携带 engine 字段）。
-import { DshAgentService } from "./dsh/dsh-agent-service.js";
-
-/** dispatch 表所需的方法契约（pi 的 ClientSession 与 dsh 的 DshClientSession
- *  都结构兼容；dsh 引擎对不支持的功能做简化实现）。 */
-
-/** TerminalManager 的 dispatch 面（两个引擎共用同一实现类）。 */
-export interface TerminalManagerLike {
-	create(
-		id: string,
-		cwd: string,
-		cols: number,
-		rows: number,
-		fallbackCwd: string,
-		title?: string,
-		opts?: { forceBash?: boolean; locale?: string },
-	): unknown;
-	input(id: string, data: string): void;
-	resize(id: string, cols: number, rows: number): void;
-	kill(id: string): void;
-	rename(id: string, title: string): void;
-	runCommand(id: string, command: CommandDef, cols: number, rows: number, fallbackCwd: string): unknown;
-}
-
-export interface DispatchSession {
-	cwd: string;
-	prompt(text: string, attachments?: PromptAttachment[], queue?: boolean): Promise<void>;
-	/** Remove one queued prompt text (steer/followUp) — the ✕ on a pending bubble. */
-	removeQueued(kind: "steer" | "followUp", text: string): void;
-	abort(): Promise<void>;
-	abortBash(): Promise<void>;
-	/** 手动重试上次失败的模型调用（自动重试次数用完、已停止标红后）。 */
-	retryLast(): Promise<void>;
-	killBackgroundServer(port?: number, taskId?: string): Promise<boolean>;
-	killAllBackgroundServers(): Promise<string[]>;
-	listBgServers(): Promise<void>;
-	newChat(cwd?: string | null): Promise<boolean>;
-	editMessage(messageId: string, text: string, attachments?: PromptAttachment[]): Promise<void>;
-	cycleModel(): Promise<void>;
-	cycleThinking(): void;
-	flushSnapshot(forceFull?: boolean): void;
-	pushSlashCommands(): Promise<void>;
-	refreshSessions(cwd?: string): Promise<void>;
-	pushProjects(): Promise<void>;
-	removeProject(path: string): Promise<void>;
-	deleteSession(path: string): Promise<void>;
-	renameSession(path: string, name: string): Promise<void>;
-	renameConversation(id: string, name: string): Promise<void>;
-	dismissConversation(id: string, withFinishedSubagents?: boolean, force?: boolean): Promise<void>;
-	dismissFinishedSubagents(parentId?: string): Promise<void>;
-	switchSession(path: string): Promise<void>;
-	switchConversation(id: string): Promise<void>;
-	listFiles(path?: string): Promise<void>;
-	searchFiles(query: string, reqId: number): Promise<void>;
-	searchSessions(query: string, reqId: number): Promise<void>;
-	scmQuery(
-		kind: "status" | "history" | "filediff" | "commit",
-		reqId: number,
-		opts?: { path?: string; hash?: string },
-	): Promise<void>;
-	readFile(path: string): Promise<void>;
-	writeFile(path: string, text: string): Promise<void>;
-	uploadFile(dirPath: string, name: string, data: string): Promise<void>;
-	listModels(): Promise<void>;
-	setModel(modelId: string): Promise<void>;
-	setThinking(level: string): void;
-	setCwd(path: string): Promise<void>;
-	completePath(path: string): Promise<void>;
-	makeDir(path: string): Promise<void>;
-	checkUpdate(): Promise<void>;
-	checkUpdatesAll(force?: boolean): Promise<void>;
-	resolveDialog(id: number, value: string | boolean | null): void;
-	installPiAgent(): Promise<void>;
-	setProviderApiKey(provider: string, apiKey: string): Promise<void>;
-	clearProviderApiKey(provider: string): Promise<void>;
-	listModelsConfig(): Promise<void>;
-	reloadModelsConfig(): Promise<void>;
-	saveModelConfig(providerId: string, config: unknown): Promise<void>;
-	deleteModelConfig(providerId: string): Promise<void>;
-	listProviders(): Promise<void>;
-	listProviderKeys(): void;
-	addProviderKey(provider: string, apiKey: string, name?: string): Promise<void>;
-	activateProviderKey(provider: string, keyName: string): Promise<void>;
-	removeProviderKey(provider: string, keyName: string): Promise<void>;
-	fetchModelsList(reqId: number, baseUrl: string, apiKey?: string, authHeader?: boolean, api?: string): Promise<void>;
-	refreshProviderModels(providerId: string, reqId: number): Promise<void>;
-	cloneProvider(provider: string, reqId: number): Promise<void>;
-	getTerminalManager(conversationId?: string): TerminalManagerLike | undefined;
-	getTerminalCwd(conversationId?: string): string;
-	listCommands(): Promise<void>;
-	saveCommands(commands: CommandDef[]): Promise<void>;
-	setGoal(goal: string, opts?: { reviewModel?: string; maxRounds?: number; locked?: boolean }): Promise<void>;
-	clearGoal(): Promise<void>;
-	startGoalWizard(text: string, opts?: { wizardModel?: string; maxRounds?: number; locked?: boolean }): Promise<void>;
-	setGoalPrefs(opts?: { reviewModel?: string; maxRounds?: number; locked?: boolean }): Promise<void>;
-	pushSettings(): void;
-	setSettings(partial: {
-		promptMode?: "append" | "replace";
-		customSystemPrompt?: string;
-		promptTemplate?: string;
-		promptOverrides?: Record<string, string>;
-		disabledSkills?: string[];
-		disabledExtensions?: string[];
-		disabledPlugins?: string[];
-		terminalToolsEnabled?: boolean;
-		terminalBash?: boolean;
-		terminalBashIdleMs?: number;
-		editSoftEnabled?: boolean;
-		thinkingWrap?: boolean;
-		toolsWrap?: boolean;
-		visionBridgeEnabled?: boolean;
-		visionBridgeModel?: string | null;
-		visionBridgePromptMode?: "append" | "replace";
-		visionBridgePrompt?: string;
-		reviewPrompt?: string;
-		reviewDisabledSkills?: string[];
-	}): Promise<void>;
-	reloadExtensions(): Promise<void>;
-	/** DSH engine only: list/rescan <dataDir>/dsh-patches user patch files. */
-	listDshPatches?(): Promise<void>;
-	rescanDshPatches?(): Promise<void>;
-	/** DSH engine only: answer a model ask_user_question dialog. */
-	answerQuestion?(
-		id: string,
-		answers: { id: string; selected: string[]; custom?: string }[],
-		cancelled?: boolean,
-	): Promise<void>;
-	savePreset(name: string): Promise<void>;
-	applyPreset(name: string): Promise<void>;
-	deletePreset(name: string): Promise<void>;
-	/** Upsert 一个子代理模板（全局共享）。 */
-	saveSubagentTemplate(template: UiSubagentTemplate): Promise<void>;
-	/** 当前客户端的服务端语言（issue #91 v2：归一化 UI 代码，zh/EN/ja/…）。 */
-	getLang(): string;
-	/** Browser UI locale report (hello.locale / set_locale) — persist per
-	 *  client and refresh lang-aware prompts (streaming-safe). */
-	setLocale(locale: string): Promise<void>;
-	/** 删除一个子代理模板。 */
-	deleteSubagentTemplate(name: string): Promise<void>;
-	emitNotice(level: "info" | "warning" | "error", text: string, textEn?: string): void;
-	activeConversations(): number;
-	pendingMessages(): number;
-}
-
-/** 引擎无关的服务接口（index.ts attach 流程 + 插件扩展点所需）。 */
-export interface EngineService {
-	attach(clientId: string, send: (msg: ServerMessage) => void): Promise<DispatchSession>;
-	detach(clientId: string, send: (msg: ServerMessage) => void): void;
-	get(clientId: string): DispatchSession | undefined;
-	disposeAll(): Promise<void>;
-	noteSocketOpen(): void;
-	noteSocketClose(): void;
-	isQuiesced(): boolean;
-	quiesce(): void;
-	unquiesce(): void;
-	quiesceInfo(): { quiesced: boolean; quiescedSince?: number };
-	serviceStatus(): {
-		pid: number;
-		version: string;
-		cwd: string;
-		quiesced: boolean;
-		quiescedSince?: number;
-		connectedClients: number;
-		activeConversations: number;
-		pendingMessages: number;
-		service: UiServiceInfo | null;
-	};
-	activeConversations(): number;
-	pendingMessages(): number;
-	applyPluginAgentTools(): void;
-	applyPluginCommandCatalog(): void;
-	refreshBackgroundServers(): void;
-	/** Browser UI locale report (hello.locale / set_locale) — persist per
-	 *  client and refresh lang-aware prompts (streaming-safe). */
-	setLocale(clientId: string, locale: string): Promise<void>;
-	onQuit?: (() => boolean) | undefined;
-	onToolEvent?:
-		| ((ev: {
-				phase: "start" | "end";
-				toolName: string;
-				conversationId: string;
-				durationMs?: number;
-				isError?: boolean;
-		  }) => void)
-		| undefined;
-	/** 运行轨迹事件转发（pi 引擎发射；dsh 引擎暂不发射，插件收不到即无轨迹）。 */
-	onRunEvent?: ((ev: PluginRunEvent) => void) | undefined;
-	/** 对话切换通知（切历史会话/切 running 对话/新对话/切项目，pi 引擎）。 */
-	onConversationChanged?: (() => void) | undefined;
-	/** 当前打开对话的快照（pi 引擎；dsh 引擎无此方法，插件回退空态）。 */
-	readConversationForPlugins?: (() => PluginConversationSnapshot | null) | undefined;
-	pluginToolsProvider?: (() => unknown[]) | undefined;
-	pluginCommandsProvider?: (() => unknown[]) | undefined;
-	pluginBgTasksProvider?: (() => BgServer[]) | undefined;
-	pluginStopBgTask?: ((taskId: string) => boolean) | undefined;
-	onClientCwdChanged?: ((cwd: string) => void) | undefined;
-}
-
-const service: EngineService =
-	ENGINE === "dsh"
-		? new DshAgentService(CWD, join(DATA_DIR, "client-state.json"), DATA_DIR, getAgentDir())
-		: new AgentService(
-				CWD,
-				// Per-client persisted UI state: last-used workspace + recent projects.
-				join(DATA_DIR, "client-state.json"),
-			);
-
-// Server-string tables (issue #91 v2): packs' `serverStrings` sections feed
-// pick() lookup for non-zh/en UI languages (missing key → English fallback).
-loadServerStrings(DATA_DIR);
-// Optional UI plugins (<dataDir>/plugins/<id>/): scanned on every client
-// attach so freshly dropped plugins appear without a server restart.
-const pluginMgr = new PluginManager(DATA_DIR, CWD, join(pkgRoot, "plugins", "catalog.json"));
-// MCP 工具桥：读取 <dataDir>/mcp.json 启动外部 MCP 服务器（stdio），把它们的
-// 工具并入与插件工具相同的 customTools 管线；单服务器失败不炸进程。
-const mcpBridge = new McpBridge(DATA_DIR, (...a) => console.log("[mcp]", ...a));
-void mcpBridge.load().then(() => {
-	if (mcpBridge.getTools().length) service.applyPluginAgentTools();
-});
-// 插件扩展点：SDK 工具执行事件（bash/读文件等 start+end）转发给已注册的插件。
-service.onToolEvent = (ev) => pluginMgr.emitToolEvent(ev);
-service.onRunEvent = (ev) => pluginMgr.emitRunEvent(ev);
-// 插件扩展点：对话切换通知（轨迹视图切会话后即重拉；dsh 引擎暂无）。
-service.onConversationChanged = () => pluginMgr.emitConversationChanged();
-// 插件扩展点：当前打开对话的快照（轨迹视图直接显示打开对话的时间线；
-// dsh 引擎无此方法时回退 null，插件显示空态）。
-pluginMgr.conversationProvider = () => service.readConversationForPlugins?.() ?? null;
-// 插件扩展点：插件注册的 AI 工具（registerAgentTool）+ MCP 桥工具 → 会话创建时
-// 带上 + 变化时动态注入/移除已有会话。
-service.pluginToolsProvider = () => [...pluginMgr.getAgentTools(), ...mcpBridge.getTools()];
-pluginMgr.onAgentToolsChanged = () => service.applyPluginAgentTools();
-// 插件扩展点：插件斜杠命令（registerCommand）→ 命令选择器目录 + prompt 拦截执行。
-pluginMgr.onCommandsChanged = () => service.applyPluginCommandCatalog();
-service.pluginCommandsProvider = () => pluginMgr.listCommands();
-// 插件扩展点：插件常驻后台任务（registerBackgroundTask）→ 并入「后台任务」面板。
-pluginMgr.onBgTasksChanged = () => service.refreshBackgroundServers();
-service.pluginBgTasksProvider = () => pluginMgr.bgTasks();
-service.pluginStopBgTask = (taskId) => pluginMgr.stopPluginBgTask(taskId);
-// 插件宿主工作区实时跟随当前项目：任意客户端 set_cwd 成功后同步给
-// PluginManager，编辑器等工作区跟随型插件随即切根（详见 plugins.ts notifyCwd）。
-service.onClientCwdChanged = (cwd) => pluginMgr.notifyCwd(cwd);
+const service = new AgentService(
+	CWD,
+	// Per-client persisted UI state: last-used workspace + recent projects.
+	join(DATA_DIR, "client-state.json"),
+);
 
 // ---------------------------------------------------------------------------
 // Self-update
@@ -1015,11 +635,6 @@ wss.on("connection", (ws) => {
 		ws.send(wire);
 	};
 
-	// Plugins broadcast to every open socket; unregister on close below.
-	// Plugins broadcast to every open socket; unregister on close below. The
-	// cid getter lets plugins target THIS socket via host.sendTo(clientId).
-	const removePluginSender = pluginMgr.addSender(send, () => clientId);
-
 	const dispatch = (msg: ClientMessage): void => {
 		if (!clientId) {
 			pending.push(msg);
@@ -1057,7 +672,7 @@ wss.on("connection", (ws) => {
 				void cs.retryLast();
 				break;
 			case "kill_background_server":
-				void cs.killBackgroundServer(msg.port, msg.taskId);
+				void cs.killBackgroundServer(msg.port);
 				break;
 			case "kill_background_servers":
 				void cs.killAllBackgroundServers();
@@ -1074,8 +689,7 @@ wss.on("connection", (ws) => {
 						send({
 							type: "notice",
 							level: "error",
-							text: `无法打开文件夹选择器：${err.message}`,
-							textEn: `Could not open folder picker: ${err.message}`,
+							text: `Could not open folder picker: ${err.message}`,
 						});
 					});
 				break;
@@ -1118,10 +732,7 @@ wss.on("connection", (ws) => {
 				void cs.renameConversation(msg.id, msg.name);
 				break;
 			case "dismiss_conversation":
-				void cs.dismissConversation(msg.id, msg.withFinishedSubagents, msg.force);
-				break;
-			case "dismiss_finished_subagents":
-				void cs.dismissFinishedSubagents(msg.parentId);
+				void cs.dismissConversation(msg.id, msg.force);
 				break;
 			case "switch_session":
 				void cs.switchSession(msg.path);
@@ -1171,22 +782,11 @@ wss.on("connection", (ws) => {
 			case "set_cwd":
 				void cs.setCwd(msg.path);
 				break;
-			case "set_locale":
-				// UI language report — per-client persist + lang-aware prompt
-				// refresh (streaming-safe). Engine-agnostic via DispatchSession.
-				void service.setLocale(clientId, msg.locale);
-				break;
 			case "complete_path":
 				void cs.completePath(msg.path);
 				break;
 			case "make_dir":
 				void cs.makeDir(msg.path);
-				break;
-			case "check_update":
-				void cs.checkUpdate();
-				break;
-			case "check_updates_all":
-				void cs.checkUpdatesAll(msg.force === true);
 				break;
 			case "restart_service": {
 				// Same effect as `pi-web-ui server restart`: this process exits and its
@@ -1197,17 +797,14 @@ wss.on("connection", (ws) => {
 					send({
 						type: "notice",
 						level: "error",
-						text: "当前实例不是由 pi-web-ui 服务启动的（前台运行），无法自动重启；请在终端里重启，或先用 pi-web-ui server install 安装服务。",
-						textEn:
-							"This instance runs in the foreground, not as a pi-web-ui service — nothing would bring it back. Restart it in its terminal, or install the service with `pi-web-ui server install`.",
+						text: "This instance runs in the foreground, not as a pi-web-ui service — nothing would bring it back. Restart it in its terminal, or install the service with `pi-web-ui server install`.",
 					});
 					break;
 				}
 				send({
 					type: "notice",
 					level: "info",
-					text: "正在重启服务…页面会在服务恢复后自动重连。",
-					textEn: "Restarting the service… this page reconnects once it is back.",
+					text: "Restarting the service… this page reconnects once it is back.",
 				});
 				// Let the notice (and this socket's backlog) flush before we go down.
 				setTimeout(() => void scheduleQuit(), 400);
@@ -1264,15 +861,7 @@ wss.on("connection", (ws) => {
 			case "terminal_create": {
 				const tm = cs.getTerminalManager(msg.conversationId);
 				if (tm)
-					tm.create(
-						msg.terminalId,
-						msg.cwd,
-						msg.cols,
-						msg.rows,
-						cs.getTerminalCwd(msg.conversationId),
-						msg.title,
-						msg.locale ? { locale: msg.locale } : undefined,
-					);
+					tm.create(msg.terminalId, msg.cwd, msg.cols, msg.rows, cs.getTerminalCwd(msg.conversationId), msg.title);
 				break;
 			}
 			case "terminal_input":
@@ -1302,120 +891,36 @@ wss.on("connection", (ws) => {
 			case "save_commands":
 				void cs.saveCommands(msg.commands);
 				break;
-			case "set_goal":
-				void cs.setGoal(msg.goal, {
-					reviewModel: msg.reviewModel,
-					maxRounds: msg.maxRounds,
-					locked: msg.locked,
-				});
-				break;
-			case "clear_goal":
-				void cs.clearGoal();
-				break;
-			case "start_goal_wizard":
-				void cs.startGoalWizard(msg.text, {
-					wizardModel: msg.wizardModel,
-					maxRounds: msg.maxRounds,
-					locked: msg.locked,
-				});
-				break;
-			case "set_goal_prefs":
-				void cs.setGoalPrefs({
-					reviewModel: msg.reviewModel,
-					maxRounds: msg.maxRounds,
-					locked: msg.locked,
-				});
-				break;
 			case "get_settings":
 				cs.pushSettings();
 				break;
 			case "set_settings":
-				void (cs as unknown as { setSettings: (p: Record<string, unknown>) => Promise<void> }).setSettings({
+				void cs.setSettings({
 					promptMode: msg.promptMode,
 					customSystemPrompt: msg.customSystemPrompt,
-					promptTemplate: (msg as { promptTemplate?: string }).promptTemplate,
-					promptOverrides: (msg as { promptOverrides?: Record<string, string> }).promptOverrides,
+					promptTemplate: msg.promptTemplate,
+					promptOverrides: msg.promptOverrides,
 					disabledSkills: msg.disabledSkills,
 					disabledExtensions: msg.disabledExtensions,
 					disabledAgentTools: msg.disabledAgentTools,
-					disabledPlugins: msg.disabledPlugins,
 					terminalToolsEnabled: msg.terminalToolsEnabled,
 					terminalBash: msg.terminalBash,
 					terminalBashIdleMs: msg.terminalBashIdleMs,
-					editSoftEnabled: (msg as { editSoftEnabled?: boolean }).editSoftEnabled,
-					questionnaireEnabled: (msg as { questionnaireEnabled?: boolean }).questionnaireEnabled,
-					goalModeEnabled: (msg as { goalModeEnabled?: boolean }).goalModeEnabled,
+					questionnaireEnabled: msg.questionnaireEnabled,
 					thinkingWrap: msg.thinkingWrap,
 					toolsWrap: msg.toolsWrap,
-					skillsFullText: (msg as { skillsFullText?: string[] }).skillsFullText,
-					visionBridgeEnabled: msg.visionBridgeEnabled,
-					visionBridgeModel: msg.visionBridgeModel,
-					visionBridgePromptMode: msg.visionBridgePromptMode,
-					visionBridgePrompt: msg.visionBridgePrompt,
-					subagentDefaultModel: (msg as { subagentDefaultModel?: string | null }).subagentDefaultModel,
-					retryMaxAttempts: (msg as { retryMaxAttempts?: number }).retryMaxAttempts,
-					reviewPrompt: msg.reviewPrompt,
-					reviewDisabledSkills: msg.reviewDisabledSkills,
-					markersEnabled: (msg as { markersEnabled?: boolean }).markersEnabled,
-					disabledMarkers: (msg as { disabledMarkers?: string[] }).disabledMarkers,
-					quickPhrases: (msg as { quickPhrases?: string[] }).quickPhrases,
-					quickPhrasesEnabled: (msg as { quickPhrasesEnabled?: boolean }).quickPhrasesEnabled,
-					quickPhrasesSeeded: (msg as { quickPhrasesSeeded?: boolean }).quickPhrasesSeeded,
+					skillsFullText: msg.skillsFullText,
+					retryMaxAttempts: msg.retryMaxAttempts,
 				});
 				break;
 			case "extensions_reload":
 				void cs.reloadExtensions();
 				break;
-			case "plugin_message":
-				pluginMgr.handleMessage(msg.pluginId, msg.payload, clientId ?? undefined);
-				break;
-			case "plugin_settings": {
-				const r = pluginMgr.savePluginSettings(msg.pluginId, msg.values ?? {}, () => cs?.getLang() ?? "en");
-				if (r.error) {
-					cs?.emitNotice("error", `插件设置保存失败：${r.error}`, `Failed to save plugin settings: ${r.error}`);
-				} else {
-					cs?.emitNotice("info", "插件设置已保存", "Plugin settings saved");
-				}
-				break;
-			}
-			case "plugins_reload":
-				void pluginMgr.reload(() => cs?.getLang() ?? "en").then(() => pluginMgr.pushToAll());
-				break;
-			case "plugin_catalog_add": {
-				const r = pluginMgr.addCatalogEntry(msg.entry ?? {}, () => cs?.getLang() ?? "en");
-				if (r.error) {
-					cs?.emitNotice("error", `添加到插件列表失败：${r.error}`, `Failed to add to plugin list: ${r.error}`);
-				} else {
-					cs?.emitNotice("info", "已添加到插件列表", "Added to the plugin list");
-				}
-				break;
-			}
-			case "plugin_catalog_remove": {
-				const r = pluginMgr.removeCatalogEntry(msg.id, () => cs?.getLang() ?? "en");
-				if (r.error) {
-					cs?.emitNotice("error", `从插件列表移除失败：${r.error}`, `Failed to remove from plugin list: ${r.error}`);
-				} else {
-					cs?.emitNotice("info", "已从插件列表移除", "Removed from the plugin list");
-				}
-				break;
-			}
-			case "dsh_patches_list":
-				void cs.listDshPatches?.();
-				break;
-			case "dsh_patches_rescan":
-				void cs.rescanDshPatches?.();
-				break;
 			case "question_answer":
-				void cs.answerQuestion?.(msg.id, msg.answers, msg.cancelled);
+				void cs.answerQuestion(msg.id, msg.answers, msg.cancelled);
 				break;
 			case "save_preset":
 				void cs.savePreset(msg.name);
-				break;
-			case "save_subagent_template":
-				void cs.saveSubagentTemplate(msg.template);
-				break;
-			case "delete_subagent_template":
-				void cs.deleteSubagentTemplate(msg.name);
 				break;
 			case "apply_preset":
 				void cs.applyPreset(msg.name);
@@ -1448,7 +953,6 @@ wss.on("connection", (ws) => {
 						clientId: cid,
 						serverVersion: VERSION,
 						protocolVersion: PROTOCOL_VERSION,
-						engine: ENGINE,
 						// This package's own version. `serverVersion` is the pi SDK's,
 						// and the client used to learn ours from the update check —
 						// which a managed instance never runs.
@@ -1457,39 +961,7 @@ wss.on("connection", (ws) => {
 						tabs: TABS ? [...TABS] : undefined,
 						service: SERVICE_INFO ?? undefined,
 					});
-					// Plugin catalog: re-scan + activate new dirs on every attach so
-					// freshly dropped plugins show up without a server restart.
-					pluginMgr
-						.ensureLoaded(() => service.get(cid)?.getLang() ?? "en")
-						.then((plugins) => {
-							if (closed) return;
-							send({ type: "plugins", plugins, epoch: pluginMgr.epoch });
-							// 插件市场列表（可一键安装的清单）随附推一次。
-							send({
-								type: "plugin_catalog",
-								entries: pluginMgr.catalog(),
-								epoch: pluginMgr.catalogEpochValue,
-							});
-							// 让各插件向新接入的客户端推送自身初始状态（onAttach 钩子）——
-							// 插件不要依赖客户端挂载后自己拉（见 plugins.ts onAttach 注释）。
-							pluginMgr.notifyAttach(cid);
-							// 插件命令可能在本客户端 attach 过程中才注册（首载竞态）——
-							// 重推一次目录，保证选择器完整。
-							service.applyPluginCommandCatalog();
-							// 插件清单【先于】快照推送：前端渲染历史消息前就拿到 renderer
-							// 注册表（plugin-fence.ts），`` ```lang `` 围栏才能立即命中插件；
-							// 否则消息先落成普通代码块，清单后到也不会重渲。
-							cs.flushSnapshot();
-						})
-						.catch(() => {
-							if (closed) return;
-							// ensureLoaded 失败（如磁盘读错）不能卡死快照——前端 30s 无消息
-							// 会重连，重连又失败会陷入循环。至少把状态推下去。
-							cs.flushSnapshot();
-						});
-					// hello may carry the UI locale — persist it before replaying
-					// anything queued during startup (issue #91).
-					if (msg.locale) void service.setLocale(cid, msg.locale);
+					cs.flushSnapshot();
 					// Replay anything that arrived while the session was starting.
 					const queued = pending;
 					pending = [];
@@ -1512,8 +984,7 @@ wss.on("connection", (ws) => {
 					send({
 						type: "notice",
 						level: "error",
-						text: `会话初始化失败：${(err as Error).message}`,
-						textEn: `Failed to initialize session: ${(err as Error).message}`,
+						text: `Failed to initialize session: ${(err as Error).message}`,
 					});
 				});
 			return;
@@ -1526,7 +997,6 @@ wss.on("connection", (ws) => {
 		service.noteSocketClose();
 		closed = true;
 		pending = [];
-		removePluginSender();
 		if (snapshotRetryTimer) {
 			clearTimeout(snapshotRetryTimer);
 			snapshotRetryTimer = null;
@@ -1584,8 +1054,6 @@ async function shutdown(): Promise<void> {
 	console.log("\nshutting down…");
 	clearInterval(heartbeatTimer);
 	stopControl();
-	pluginMgr.dispose();
-	mcpBridge.dispose();
 	await service.disposeAll();
 	wss.close();
 	httpServer.close();

@@ -67,7 +67,7 @@ const check = (name, ok, extra = "") => {
 };
 
 try {
-	execSync("npm run build:server", { cwd: REPO_ROOT, stdio: "ignore" });
+	if (!process.env.PI_WEB_SKIP_TEST_BUILD) execSync("npm run build:server", { cwd: REPO_ROOT, stdio: "ignore" });
 } catch {
 	console.error("server build failed");
 	process.exit(1);

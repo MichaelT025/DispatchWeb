@@ -11,12 +11,10 @@ import type { ServerLang } from "./i18n.js";
 import { countLines, decodeText, looksLikeText, sniffImageMime } from "./text-sniff.js";
 import { saveUpload, uploadsRoot } from "./uploads.js";
 import { isAbsoluteWirePath, wireToAbs } from "./files-service.js";
-import { buildVisionBridgePrompt, findVisionModels, transcribeImages } from "./vision-bridge.js";
 import type { ClientSettings } from "./client-state.js";
 
 /** 跨快照的视觉转写缓存：批次 hash（名称 + base64 头 + 提示词）→ 转写文本。
  *  编辑重问重发相同图片不再重复耗视觉 token。进程级共享即可。 */
-const visionBridgeCache = new Map<string, string>();
 
 /** "provider/id" 解析；非法格式返回 null。 */
 export function parseModelSpec(spec?: string | null): {
@@ -205,100 +203,11 @@ export async function buildAttachmentMessages(
 	/** Transcript per attachment index (filled below, keyed by bridgedImages idx). */
 	const bridgeTranscripts = new Map<number, string>();
 	if (bridgedImages.length > 0) {
-		if (!ctx.settings.visionBridgeEnabled) {
-			ctx.emit({
-				type: "notice",
-				level: "warning",
-				text: `当前模型（${mainModel?.name ?? mainModel?.id ?? "未知"}）不支持识图，且视觉桥已在设置中关闭：图片将原样发送、可能被忽略。`,
-				textEn: `Current model (${mainModel?.name ?? mainModel?.id ?? "unknown"}) cannot see images and the vision bridge is off in settings: images will be sent as-is and may be ignored.`,
-			});
-		} else {
-			const visionModels = findVisionModels(ctx.session.modelRuntime);
-			// Preferred model from settings ("provider/id") — validated to exist
-			// and actually accept images; falls back to the first auto-detected.
-			let chosen = visionModels[0] ?? null;
-			const pref = ctx.settings.visionBridgeModel;
-			if (pref) {
-				const spec = parseModelSpec(pref);
-				if (spec) {
-					const pm = ctx.session.modelRuntime.getModel(spec.provider, spec.id);
-					if (pm?.input?.includes("image")) {
-						chosen = {
-							provider: spec.provider,
-							id: spec.id,
-							label: `${pm.name ?? pm.id} (${spec.provider})`,
-						};
-					}
-				}
-			}
-			if (!chosen) {
-				ctx.emit({
-					type: "notice",
-					level: "warning",
-					text: `当前模型（${mainModel?.name ?? mainModel?.id ?? "未知"}）不支持识图，且未找到可用的视觉模型：图片将原样发送、可能被忽略。在模型配置里添加任意支持图片的模型（如 qwen-vl、GLM-4V、Gemini）即可自动启用视觉桥转写。`,
-					textEn: `Current model (${mainModel?.name ?? mainModel?.id ?? "unknown"}) cannot see images and no vision model is available: images will be sent as-is and may be ignored. Add any vision-capable model (e.g. qwen-vl, GLM-4V, Gemini) in model settings to enable vision-bridge transcription.`,
-				});
-			} else {
-				// Batch hash so re-sending identical images (edit & re-ask) reuses
-				// the transcript instead of re-burning tokens on the vision API.
-				// issue #91：转写提示词按客户端 UI 语言选用（英文默认），语言进缓存键。
-				const vLang = ctx.getLang?.() ?? "en";
-				// The active transcription prompt is part of the key: changing
-				// the custom prompt must invalidate cached transcripts made with
-				// the old prompt.
-				const batchHash =
-					bridgedImages.map((b) => `${b.att.name ?? "img"}:${b.raw.slice(0, 48)}`).join("|") +
-					"::" +
-					buildVisionBridgePrompt(ctx.settings.visionBridgePromptMode, ctx.settings.visionBridgePrompt, vLang) +
-					"::" +
-					vLang;
-				let transcript = visionBridgeCache.get(batchHash);
-				if (transcript === undefined) {
-					ctx.emit({
-						type: "notice",
-						level: "info",
-						text: `当前模型不支持识图，正在用视觉桥（${chosen.label}）转写 ${bridgedImages.length} 张图片…`,
-						textEn: `Current model cannot see images; transcribing ${bridgedImages.length} image(s) via the vision bridge (${chosen.label})…`,
-					});
-					try {
-						const chosenModel = ctx.session.modelRuntime.getModel(chosen.provider, chosen.id);
-						transcript = await transcribeImages(
-							ctx.session.modelRuntime,
-							bridgedImages.map((b) => ({
-								data: b.raw,
-								mimeType: b.mimeType,
-								name: b.att.name,
-							})),
-							{
-								model: chosenModel ?? undefined,
-								systemPrompt: buildVisionBridgePrompt(
-									ctx.settings.visionBridgePromptMode,
-									ctx.settings.visionBridgePrompt,
-									vLang,
-								),
-								lang: vLang,
-							},
-						);
-						visionBridgeCache.set(batchHash, transcript);
-						ctx.emit({
-							type: "notice",
-							level: "info",
-							text: `✅ 图片已由视觉桥转写完成（${chosen.label}）`,
-							textEn: `✅ Images transcribed by the vision bridge (${chosen.label})`,
-						});
-					} catch (err) {
-						transcript = "";
-						ctx.emit({
-							type: "notice",
-							level: "error",
-							text: `图片转写失败（${chosen.label}）：${(err as Error).message}。图片将原样发送、可能被忽略。`,
-							textEn: `Image transcription failed (${chosen.label}): ${(err as Error).message}. Images will be sent as-is and may be ignored.`,
-						});
-					}
-				}
-				for (const b of bridgedImages) bridgeTranscripts.set(b.idx, transcript ?? "");
-			}
-		}
+		ctx.emit({
+			type: "notice",
+			level: "warning",
+			text: `Current model (${mainModel?.name ?? mainModel?.id ?? "unknown"}) cannot see images: images will be sent as-is and may be ignored.`,
+		});
 	}
 	/** Cap for reading a file in "lines" mode (selected slice is inlined). */
 	const MAX_LINES_READ_BYTES = 2 * 1024 * 1024;
@@ -315,8 +224,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "error",
-					text: `图片数据为空，已跳过`,
-					textEn: `Image data is empty, skipped`,
+					text: `Image data is empty, skipped`,
 				});
 				continue;
 			}
@@ -324,8 +232,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `图片过大已跳过（>2MB）：${att.name ?? "粘贴图片"}`,
-					textEn: `Image too large, skipped (>2MB): ${att.name ?? "pasted image"}`,
+					text: `Image too large, skipped (>2MB): ${att.name ?? "pasted image"}`,
 				});
 				continue;
 			}
@@ -385,8 +292,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "error",
-					text: `文件数据为空，已跳过`,
-					textEn: `File data is empty, skipped`,
+					text: `File data is empty, skipped`,
 				});
 				continue;
 			}
@@ -394,8 +300,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `文件过大已跳过（>20MB）：${att.name ?? "上传文件"}`,
-					textEn: `File too large, skipped (>20MB): ${att.name ?? "uploaded file"}`,
+					text: `File too large, skipped (>20MB): ${att.name ?? "uploaded file"}`,
 				});
 				continue;
 			}
@@ -430,8 +335,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `无法恢复已上传文件（路径不在本客户端上传目录）：${att.name ?? att.uploadPath}`,
-					textEn: `Cannot restore uploaded file (outside this client upload dir): ${att.name ?? att.uploadPath}`,
+					text: `Cannot restore uploaded file (outside this client upload dir): ${att.name ?? att.uploadPath}`,
 				});
 				continue;
 			}
@@ -442,8 +346,7 @@ export async function buildAttachmentMessages(
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `无法恢复已上传文件（已被清理或不可读）：${att.name ?? att.uploadPath}`,
-					textEn: `Cannot restore uploaded file (cleaned up or unreadable): ${att.name ?? att.uploadPath}`,
+					text: `Cannot restore uploaded file (cleaned up or unreadable): ${att.name ?? att.uploadPath}`,
 				});
 				continue;
 			}
@@ -459,8 +362,7 @@ export async function buildAttachmentMessages(
 			ctx.emit({
 				type: "notice",
 				level: "warning",
-				text: `附件路径超出工作区：${att.path}`,
-				textEn: `Attachment path is outside the workspace: ${att.path}`,
+				text: `Attachment path is outside the workspace: ${att.path}`,
 			});
 			continue;
 		}
@@ -475,8 +377,7 @@ export async function buildAttachmentMessages(
 			ctx.emit({
 				type: "notice",
 				level: "error",
-				text: `附件不存在：${att.path}`,
-				textEn: `Attachment does not exist: ${att.path}`,
+				text: `Attachment does not exist: ${att.path}`,
 			});
 			continue;
 		}
@@ -506,8 +407,7 @@ export async function buildAttachmentMessages(
 			ctx.emit({
 				type: "notice",
 				level: "warning",
-				text: `跳过非文件附件：${att.path}`,
-				textEn: `Skipped non-file attachment: ${att.path}`,
+				text: `Skipped non-file attachment: ${att.path}`,
 			});
 			continue;
 		}
@@ -576,8 +476,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `图片附件过大已跳过（>200KB）：${att.path}`,
-					textEn: `Image attachment too large, skipped (>200KB): ${att.path}`,
+					text: `Image attachment too large, skipped (>200KB): ${att.path}`,
 				});
 				continue;
 			}
@@ -650,8 +549,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `行范围无效，已改为仅引用：${att.path}`,
-					textEn: `Invalid line range, switched to reference-only: ${att.path}`,
+					text: `Invalid line range, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -660,8 +558,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `文件过大，已改为仅引用：${att.path}`,
-					textEn: `File too large, switched to reference-only: ${att.path}`,
+					text: `File too large, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -671,8 +568,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `二进制文件已改为仅引用：${att.path}`,
-					textEn: `Binary file, switched to reference-only: ${att.path}`,
+					text: `Binary file, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -687,8 +583,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `选中行超出文件范围，已改为仅引用：${att.path}`,
-					textEn: `Selected lines out of range, switched to reference-only: ${att.path}`,
+					text: `Selected lines out of range, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -724,8 +619,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `文件过大，已改为仅引用：${att.path}`,
-					textEn: `File too large, switched to reference-only: ${att.path}`,
+					text: `File too large, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -735,8 +629,7 @@ ${transcript}
 				ctx.emit({
 					type: "notice",
 					level: "warning",
-					text: `二进制文件已改为仅引用：${att.path}`,
-					textEn: `Binary file, switched to reference-only: ${att.path}`,
+					text: `Binary file, switched to reference-only: ${att.path}`,
 				});
 				out.push(makeReference());
 				continue;
@@ -755,8 +648,7 @@ ${transcript}
 			ctx.emit({
 				type: "notice",
 				level: "warning",
-				text: `二进制文件已跳过（仅引用路径）：${att.path}`,
-				textEn: `Binary file skipped (path referenced only): ${att.path}`,
+				text: `Binary file skipped (path referenced only): ${att.path}`,
 			});
 			out.push(makeReference());
 			continue;

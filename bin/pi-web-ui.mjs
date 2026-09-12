@@ -3,15 +3,13 @@
  * pi-web-ui CLI.
  *
  *   pi-web-ui                              启动生产服务器（前台，Ctrl+C 停止，自动打开浏览器）
- *   pi-web-ui --engine dsh --port 9000 --cwd /path    同上，覆盖引擎/端口/工作目录/数据目录
+ *   pi-web-ui --port 9000 --cwd /path      同上，覆盖端口/工作目录/数据目录
  *   pi-web-ui --no-browser                 启动但不自动打开浏览器
  *   pi-web-ui --version | --help
  *   pi-web-ui server install [选项]         安装系统服务（开机自启）并启动
  *   pi-web-ui server shortcut [选项]        在桌面创建「一键启动」图标（启动服务并打开浏览器）
  *   pi-web-ui server uninstall [选项]       卸载系统服务（同时移除桌面图标）
  *   pi-web-ui server start|stop|restart|status [选项]
- *   pi-web-ui install <源> [选项]           安装 GitHub 上的界面插件（见下方「界面插件」）
- *   pi-web-ui plugins / uninstall <id>      列出 / 卸载界面插件
  *
  * 系统服务：
  *   - macOS   → launchd 用户代理，label 默认 com.xingshuyin.pi-web-ui
@@ -22,32 +20,23 @@
  *              %APPDATA%\pi-web-ui\
  *
  * 环境变量（flag 优先，环境变量后备）：PI_WEB_PORT / PI_WEB_CWD / PI_WEB_DATA_DIR /
- * PI_WEB_ENGINE / PI_WEB_HOST / PI_CODING_AGENT_DIR；token 仅环境变量，不走命令行。
+ * PI_WEB_HOST / PI_CODING_AGENT_DIR；token 仅环境变量，不走命令行。
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
 import { get as httpGet } from "node:http";
 import {
-	ensureBackup as ensurePluginBackup,
-	restoreBackup as restorePluginBackup,
-	checkPluginUpdates,
-	resolveRemoteSha,
-} from "../dist/server/plugin-updater.js";
-import {
 	chmodSync,
 	copyFileSync,
-	cpSync,
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	realpathSync,
 	readFileSync,
-	readdirSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir, userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { homedir, userInfo } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
@@ -62,72 +51,11 @@ try {
 	// version is best-effort — the server itself doesn't need it
 }
 
-/** Detect if the user prefers Chinese locale: POSIX env vars win, then Intl API fallback. */
-function isZhLang() {
-	const env = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || "";
-	if (env.startsWith("zh")) return true;
-	if (!env) {
-		try {
-			return Intl.DateTimeFormat().resolvedOptions().locale.startsWith("zh");
-		} catch {
-			/* ignore */
-		}
-	}
-	return false;
-}
-
-const HELP_ZH = `pi-web-ui v${pkg.version} — web chat for the pi coding agent
-
-用法:
-  pi-web-ui                               启动服务器（前台，Ctrl+C 停止，自动打开浏览器）
-  pi-web-ui --engine dsh --port 9000 --cwd /path      启动并指定引擎 / 端口 / 工作目录 / 数据目录
-  pi-web-ui --no-browser                  启动但不自动打开浏览器
-  pi-web-ui server install [选项]         安装系统服务（开机自启）并启动
-  pi-web-ui server shortcut [选项]        在桌面创建「一键启动」图标（启动服务并打开浏览器）
-  pi-web-ui server uninstall [选项]       卸载系统服务（同时移除桌面图标）
-  pi-web-ui server start|stop|restart|status [选项]
-  pi-web-ui server quiesce [选项]          进入排空模式：拒绝新的对话/消息/编辑，存量运行继续跑完
-  pi-web-ui server unquiesce [选项]        解除排空模式，恢复接收新工作
-  pi-web-ui --version / --help
-
-server 选项:
-  --port <n>        端口（默认 8787，或 $PI_WEB_PORT）
-  --cwd <dir>       工作目录（默认 $PI_WEB_CWD 或用户主目录；前台启动默认当前目录）
-  --data-dir <dir>  会话数据目录（默认 <cwd>/.pi-web）
-  --engine <pi|dsh> 智能体引擎（默认 $PI_WEB_ENGINE 或 pi）
-  --host <addr>     监听地址（默认 $PI_WEB_HOST 或 127.0.0.1；0.0.0.0 供局域网/容器）
-  --agent-dir <dir> pi 配置目录（默认 $PI_CODING_AGENT_DIR 或 ~/.pi/agent）
-  --name <name>     服务名（默认 pi-web-ui；macOS 的 launchd label
-                    为 com.xingshuyin.pi-web-ui，自定义名时为 com.<name>.server）
-  --print           只打印将生成的配置文件，不实际安装
-
-平台: macOS → launchd 用户代理 · Linux → systemd · Windows → 登录自启 Run 键
-      （HKCU 写入无需管理员；wscript 隐藏启动无黑窗；stop 停止，uninstall 移除）
-快捷方式: Windows → 桌面 .lnk · macOS → 桌面 .command 启动器 · Linux → 桌面 .desktop 图标
-
-界面插件（安装到 <data-dir>/plugins/，服务运行中刷新浏览器即生效）:
-  pi-web-ui install <源>            从 GitHub 安装界面插件
-  pi-web-ui uninstall <id>          卸载已安装的界面插件
-  pi-web-ui plugins                 列出已安装的界面插件
-
-  源写法: owner/repo · https://github.com/owner/repo · 本地目录路径
-          URL 带 /tree/<分支>/<子目录> 可指定分支与仓库内子目录；任意写法
-          末尾加 #<分支或tag> 也可指定分支（如 owner/repo#v1.2）
-  install 选项: --name <id> 自定义插件目录名（默认取仓库名）
-                --data-dir <dir> 数据目录（默认 ~/.pi-web）
-                --force 目标已存在时覆盖
-
-环境变量（flag 优先，环境变量后备）:
-  PI_WEB_PORT / PI_WEB_CWD / PI_WEB_DATA_DIR / PI_WEB_ENGINE / PI_WEB_HOST /
-  PI_CODING_AGENT_DIR。
-  鉴权口令 PI_WEB_TOKEN：仅环境变量（不走命令行，避免被 ps 看到），需要时手动加入服务配置。
-`;
-
-const HELP_EN = `pi-web-ui v${pkg.version} — web chat for the pi coding agent
+const HELP = `pi-web-ui v${pkg.version} — PiAstra web UI for the pi coding agent
 
 Usage:
   pi-web-ui                               Start server (foreground, Ctrl+C to stop, auto-opens browser)
-  pi-web-ui --engine dsh --port 9000 --cwd /path      Start with engine/port/cwd/data-dir overrides
+  pi-web-ui --port 9000 --cwd /path        Start with port/cwd/data-dir overrides
   pi-web-ui --no-browser                   Start without auto-opening browser
   pi-web-ui server install [options]       Install system service (autostart on boot) and launch it
   pi-web-ui server shortcut [options]      Create desktop "one-click start" icon
@@ -141,7 +69,6 @@ Server options:
   --port <n>        Port (default 8787, or $PI_WEB_PORT)
   --cwd <dir>       Working directory (default $PI_WEB_CWD or home dir; foreground uses current dir)
   --data-dir <dir>  Session data directory (default <cwd>/.pi-web)
-  --engine <pi|dsh> Agent engine (default $PI_WEB_ENGINE or pi)
   --host <addr>     Listen address (default $PI_WEB_HOST or 127.0.0.1; 0.0.0.0 for LAN/containers)
   --agent-dir <dir> pi config directory (default $PI_CODING_AGENT_DIR or ~/.pi/agent)
   --name <name>     Service name (default pi-web-ui; macOS launchd label is
@@ -152,25 +79,10 @@ Platforms: macOS → launchd user agent · Linux → systemd · Windows → Logo
            (HKCU, no admin needed; wscript hidden launch, no black window)
 Shortcuts: Windows → desktop .lnk · macOS → desktop .command · Linux → desktop .desktop
 
-UI plugins (installed into <data-dir>/plugins/; refresh browser to activate while running):
-  pi-web-ui install <source>          Install a UI plugin from GitHub
-  pi-web-ui uninstall <id>            Uninstall a UI plugin
-  pi-web-ui plugins                   List installed UI plugins
-
-  Source formats: owner/repo · https://github.com/owner/repo · local directory path
-                  URL with /tree/<branch>/<subdir> to specify branch and sub-directory;
-                  append #<branch-or-tag> to any source to pin a branch (e.g. owner/repo#v1.2)
-  install options: --name <id>   Custom plugin directory name (default: repo name)
-                   --data-dir <dir>  Data directory (default: ~/.pi-web)
-                   --force       Overwrite if target already exists
-
 Environment variables (flag takes precedence, env var as fallback):
-  PI_WEB_PORT / PI_WEB_CWD / PI_WEB_DATA_DIR / PI_WEB_ENGINE / PI_WEB_HOST /
-  PI_CODING_AGENT_DIR
+  PI_WEB_PORT / PI_WEB_CWD / PI_WEB_DATA_DIR / PI_WEB_HOST / PI_CODING_AGENT_DIR
   Auth token PI_WEB_TOKEN: env var only (not on command line, to avoid ps exposure)
 `;
-
-const HELP = isZhLang() ? HELP_ZH : HELP_EN;
 
 /** Minimum Node required by the pi SDK (its dist uses `import … with { type: "json" }`). */
 const NODE_MIN = [22, 19, 0];
@@ -215,7 +127,6 @@ function parseFlags(argv) {
 		cwd: undefined,
 		dataDir: undefined,
 		name: undefined,
-		engine: undefined,
 		host: undefined,
 		agentDir: undefined,
 		print: false,
@@ -248,9 +159,6 @@ function parseFlags(argv) {
 				break;
 			case "--data-dir":
 				opts.dataDir = take("--data-dir");
-				break;
-			case "--engine":
-				opts.engine = take("--engine");
 				break;
 			case "--host":
 				opts.host = take("--host");
@@ -345,10 +253,6 @@ async function startForeground(opts) {
 	if (opts.port) process.env.PI_WEB_PORT = opts.port;
 	if (opts.cwd) process.env.PI_WEB_CWD = resolve(opts.cwd);
 	if (opts.dataDir) process.env.PI_WEB_DATA_DIR = resolve(opts.dataDir);
-	if (opts.engine) {
-		if (opts.engine !== "pi" && opts.engine !== "dsh") fail(`无效引擎: ${opts.engine}（仅支持 pi / dsh）`);
-		process.env.PI_WEB_ENGINE = opts.engine;
-	}
 	if (opts.host) process.env.PI_WEB_HOST = opts.host;
 	if (opts.agentDir) process.env.PI_CODING_AGENT_DIR = resolve(opts.agentDir);
 	const url = `http://localhost:${effectivePort(opts)}`;
@@ -623,8 +527,8 @@ function buildWinHiddenVbs(ps1Path) {
  * -WindowStyle Hidden so nothing flashes on double-click.
  */
 function installWinShortcut(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
-	const env = serviceEnv(port, cwd, dataDir, engine, host, agentDir);
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
+	const env = serviceEnv(port, cwd, dataDir, host, agentDir);
 	const url = `http://localhost:${port}`;
 	const ps1Path = winShortcutPs1Path(name);
 	const ps1 = buildWinShortcutPs1(env, cwd, name, url, winLogPath(name), winPidFilePath(name));
@@ -712,13 +616,13 @@ if [ -n "\${SERVER_PID:-}" ]; then wait "$SERVER_PID"; fi
 }
 
 function installMacShortcut(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
 	const url = `http://localhost:${port}`;
 	const script = buildMacShortcut(
 		serviceLabel(name),
 		launchAgentPlist(name),
 		url,
-		serviceEnv(port, cwd, dataDir, engine, host, agentDir),
+		serviceEnv(port, cwd, dataDir, host, agentDir),
 	);
 	const path = join(homedir(), "Desktop", SHORTCUT_MAC_NAME);
 	if (opts.print) {
@@ -770,7 +674,7 @@ if [ -n "\${SERVER_PID:-}" ]; then wait "$SERVER_PID"; fi
 }
 
 function installLinuxShortcut(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
 	const url = `http://localhost:${port}`;
 	const scriptDir = join(homedir(), ".local", "share", "pi-web-ui");
 	const scriptPath = join(scriptDir, `${name}-start.sh`);
@@ -1015,14 +919,12 @@ function serviceOptions(opts) {
 		dataDir = resolve(process.env.PI_WEB_DATA_DIR);
 	}
 	// 引擎/监听地址/agent 配置目录：flag 优先，环境变量后备（token 不走命令行，仅环境变量）。
-	const engine = opts.engine ?? process.env.PI_WEB_ENGINE ?? "pi";
-	if (engine !== "pi" && engine !== "dsh") fail(`无效引擎: ${engine}（仅支持 pi / dsh）`);
 	const host = opts.host ?? process.env.PI_WEB_HOST;
 	const agentDir = opts.agentDir ? resolve(opts.agentDir) : process.env.PI_CODING_AGENT_DIR;
-	return { name, port, cwd, dataDir, engine, host, agentDir };
+	return { name, port, cwd, dataDir, host, agentDir };
 }
 
-function serviceEnv(port, cwd, dataDir, engine, host, agentDir, service = {}) {
+function serviceEnv(port, cwd, dataDir, host, agentDir, service = {}) {
 	const env = {
 		PI_WEB_PORT: port,
 		PI_WEB_CWD: cwd,
@@ -1045,17 +947,16 @@ function serviceEnv(port, cwd, dataDir, engine, host, agentDir, service = {}) {
 	if (!isWin && process.env.LANG) env.LANG = process.env.LANG;
 	if (!isWin && process.env.LC_ALL) env.LC_ALL = process.env.LC_ALL;
 	if (dataDir) env.PI_WEB_DATA_DIR = dataDir;
-	if (engine === "dsh") env.PI_WEB_ENGINE = "dsh"; // 仅非默认引擎才烘焙，保持服务单元简洁
 	if (host) env.PI_WEB_HOST = host;
 	if (agentDir) env.PI_CODING_AGENT_DIR = agentDir;
 	return env;
 }
 
 function installLaunchd(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
 	const label = serviceLabel(name);
 	const plist = launchAgentPlist(name);
-	const content = buildPlist(label, cwd, serviceEnv(port, cwd, dataDir, engine, host, agentDir, { name }));
+	const content = buildPlist(label, cwd, serviceEnv(port, cwd, dataDir, host, agentDir, { name }));
 	if (opts.print) {
 		console.log(`# ${plist}\n${content}`);
 		return;
@@ -1078,8 +979,8 @@ function installLaunchd(opts) {
 }
 
 function installSystemd(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
-	const content = buildUnit(cwd, serviceEnv(port, cwd, dataDir, engine, host, agentDir, { name }));
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
+	const content = buildUnit(cwd, serviceEnv(port, cwd, dataDir, host, agentDir, { name }));
 	const unitPath = systemdUnitPath(name);
 	if (opts.print) {
 		console.log(`# ${unitPath}\n${content}`);
@@ -1127,8 +1028,8 @@ function uninstallSystemd(opts) {
 }
 
 function installWindows(opts) {
-	const { name, port, cwd, dataDir, engine, host, agentDir } = serviceOptions(opts);
-	const env = serviceEnv(port, cwd, dataDir, engine, host, agentDir, { name });
+	const { name, port, cwd, dataDir, host, agentDir } = serviceOptions(opts);
+	const env = serviceEnv(port, cwd, dataDir, host, agentDir, { name });
 	const ps1Path = winPs1Path(name);
 	const vbsPath = winVbsPath(name);
 	const pidPath = winPidFilePath(name);
@@ -1429,349 +1330,6 @@ function controlService(action, opts) {
 	fail(`不支持的系统服务平台: ${process.platform}（仅 macOS / Linux / Windows）`);
 }
 
-// ---------------------------------------------------------------------------
-// 界面插件管理（<dataDir>/plugins/，从 GitHub 安装）
-// ---------------------------------------------------------------------------
-
-/** 合法插件 id（同 server/plugins.ts 的 ID_RE）。 */
-const PLUGIN_ID_RE = /^[A-Za-z0-9_-]+$/;
-
-const PLUGIN_HELP = `用法:
-  pi-web-ui install <源> [选项]     安装 GitHub 上的界面插件
-  pi-web-ui uninstall <id> [选项]   卸载已安装的界面插件
-  pi-web-ui plugins [选项]          列出已安装的界面插件
-
-源写法（任选其一）:
-  owner/repo                                        简写
-  https://github.com/owner/repo                     完整 URL（.git 可省）
-  https://github.com/o/r/tree/dev/sub/dir           指定分支 + 仓库内子目录
-  以上任意写法末尾加 #分支或tag                      指定分支/tag（如 owner/repo#v1.2）
-  /path/to/plugin-dir                               本地目录直接安装（开发调试用）
-
-install 选项:
-  --name <id>       插件目录名/id（默认取仓库名或 manifest.id，仅限字母数字-_）
-  --data-dir <dir>  数据目录（默认 ~/.pi-web 或 $PI_WEB_DATA_DIR）
-  --force           目标目录已存在时覆盖（覆盖前自动备份旧版本）
-
-plugins 选项:
-  --check-updates   逐个对比最近安装版本与远端 HEAD，列出可更新插件
-  --rollback <id>   回滚到最近一份更新前备份（<dataDir>/plugin-backups/）
-`;
-
-function pluginDataDir(opts) {
-	return resolve(opts.dataDir ?? process.env.PI_WEB_DATA_DIR ?? join(homedir(), ".pi-web"));
-}
-
-/** 解析安装源为 { owner, repo, ref, subpath, cloneUrl } 或本地路径；非法输入直接退出。 */
-function parsePluginSource(rawSpec) {
-	let spec = rawSpec.trim();
-	let ref;
-	const hash = spec.indexOf("#");
-	if (hash >= 0) {
-		ref = spec.slice(hash + 1).trim();
-		if (!ref) fail(`无效的源 "${rawSpec}"：# 后缺少分支/tag 名`);
-		spec = spec.slice(0, hash).replace(/\/+$/, "");
-	}
-	// ssh 形式转 https 拉取（不要求本机配 ssh key）；URL 去掉协议前缀统一按路径段解析
-	const ssh = spec.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
-	if (ssh) [, , spec] = ssh;
-	else {
-		const url = spec.match(/^https?:\/\/(?:www\.)?github\.com\/(.+?)(?:\.git)?\/?$/i);
-		if (url) [, spec] = url;
-	}
-	const segs = spec.split("/").filter(Boolean);
-	if (segs.length < 2) fail(`无法识别的插件源 "${rawSpec}"\n${PLUGIN_HELP}`);
-	for (const s of segs) {
-		if (s === "." || s === "..") fail(`无效的源 "${rawSpec}"：路径段不能是 . 或 ..`);
-	}
-	const [owner, repo] = segs;
-	let subpath;
-	if (segs[2] === "tree" || segs[2] === "blob") {
-		if (!ref && segs.length > 3) ref = segs[3];
-		subpath = segs.slice(4).join("/") || undefined;
-	} else if (segs.length > 2) {
-		subpath = segs.slice(2).join("/"); // owner/repo/sub/dir —— 子目录写法
-	}
-	return { owner, repo, ref, subpath, cloneUrl: `https://github.com/${owner}/${repo}.git` };
-}
-
-/** 把仓库拉到 tmpDir 并返回检出根目录。优先 git clone --depth 1，失败回退 codeload tarball + 系统 tar。 */
-async function acquireRepo(src, tmpDir) {
-	const dst = join(tmpDir, "src");
-	const hasGit = spawnSync("git", ["--version"], { stdio: "ignore", timeout: 10_000 }).status === 0;
-	if (hasGit) {
-		const args = ["clone", "--depth", "1", "--single-branch"];
-		if (src.ref) args.push("--branch", src.ref);
-		args.push(src.cloneUrl, dst);
-		console.log(`· git clone --depth 1 ${src.cloneUrl}${src.ref ? ` (${src.ref})` : ""}`);
-		const res = spawnSync("git", args, {
-			stdio: "inherit",
-			env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" },
-			timeout: 300_000,
-		});
-		if (res.status === 0 && existsSync(dst)) return dst;
-		console.log("· git clone 失败，回退到 tarball 直连下载…");
-	}
-	const url = `https://codeload.github.com/${src.owner}/${src.repo}/tar.gz/${src.ref || "HEAD"}`;
-	console.log(`· 下载 ${url}`);
-	// 注意：这里不用 fail()/process.exit —— async 上下文里还有未关闭的 socket 时
-	// 直接退出会触发 Windows libuv "UV_HANDLE_CLOSING" 断言崩溃；改为 throw，
-	// 由 pluginInstallCmd 捕获后设 exitCode 让事件循环自然排空。
-	let res;
-	try {
-		res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
-	} catch (err) {
-		throw new Error(`下载失败：${err?.message ?? err}\n  请检查网络/代理后重试。`);
-	}
-	if (!res.ok)
-		throw new Error(
-			`下载失败 HTTP ${res.status}：${url}` +
-				(res.status === 404
-					? "\n  仓库/分支不存在，或为私有仓库（私有仓库请先在本机配置好 git 凭据再重试，会优先走 git clone）。"
-					: ""),
-		);
-	writeFileSync(join(tmpDir, "src.tar.gz"), Buffer.from(await res.arrayBuffer()));
-	const extractTo = join(tmpDir, "tar");
-	mkdirSync(extractTo, { recursive: true });
-	// 相对路径解压：win32 的 GNU tar 会把 "C:\..." 里的 C: 当远程主机（Cannot connect to C:）
-	const tarRes = spawnSync("tar", ["-xzf", "src.tar.gz", "-C", "tar"], {
-		cwd: tmpDir,
-		stdio: "inherit",
-	});
-	if (tarRes.status !== 0) fail("tar 解压失败（可重试，或手动下载 release 包解压）");
-	const entries = readdirSync(extractTo);
-	if (entries.length !== 1) fail("tarball 解压结果异常（顶层应只有一个目录）");
-	return join(extractTo, entries[0]);
-}
-
-/** 在检出树里找包含 manifest.json 的目录（深度 ≤3，跳过 .git/node_modules）。 */
-function findManifestDirs(root) {
-	const hits = [];
-	const walk = (dir, depth) => {
-		if (existsSync(join(dir, "manifest.json"))) {
-			hits.push(dir);
-			return; // 目录本身是插件就不再往下搜嵌套插件
-		}
-		if (depth >= 3) return;
-		for (const ent of readdirSync(dir, { withFileTypes: true })) {
-			if (!ent.isDirectory() || ent.name === ".git" || ent.name === "node_modules") continue;
-			walk(join(dir, ent.name), depth + 1);
-		}
-	};
-	walk(root, 0);
-	return hits;
-}
-
-/** 定位插件根目录：显式子路径 > 根目录 manifest > 全树搜索（唯一命中才继续）。 */
-function locatePluginRoot(checkout, subpath, repoLabel) {
-	if (subpath) {
-		const dir = join(checkout, ...subpath.split("/"));
-		if (!existsSync(join(dir, "manifest.json"))) fail(`子目录 "${subpath}" 里没有 manifest.json`);
-		return dir;
-	}
-	if (existsSync(join(checkout, "manifest.json"))) return checkout;
-	const hits = findManifestDirs(checkout);
-	if (hits.length === 0) fail(`"${repoLabel}" 里没找到 manifest.json —— 不是 pi-web-ui 界面插件`);
-	if (hits.length > 1)
-		fail(
-			`${repoLabel} 里有多个插件（多个 manifest.json），请用子目录写法指定其中一个:\n  ` +
-				hits.map((h) => `${repoLabel}/${relative(checkout, h).split(/[\\/]/).join("/")}`).join("\n  "),
-		);
-	console.log(`· 插件位于子目录: ${relative(checkout, hits[0]).split(/[\\/]/).join("/")}`);
-	return hits[0];
-}
-
-async function pluginInstallCmd(argv) {
-	const { opts, positionals } = parseFlags(argv);
-	if (opts.help) {
-		console.log(PLUGIN_HELP);
-		return;
-	}
-	if (positionals.length !== 1)
-		fail(`用法: pi-web-ui install <源> [--name <id>] [--data-dir <dir>] [--force]\n${PLUGIN_HELP}`);
-	const rawSpec = positionals[0];
-	const pluginsDir = join(pluginDataDir(opts), "plugins");
-	// 本地目录直接装（离线开发调试），否则从 GitHub 拉取
-	const localCandidate = resolve(rawSpec.replace(/^file:\/\//, ""));
-	const isLocal = existsSync(localCandidate);
-	const src = isLocal ? null : parsePluginSource(rawSpec);
-	const tmp = mkdtempSync(join(tmpdir(), "pi-web-ui-plugin-"));
-	let backupTs = null;
-	try {
-		let checkout;
-		try {
-			checkout = isLocal ? localCandidate : await acquireRepo(src, tmp);
-		} catch (err) {
-			console.error(`✖ ${err?.message ?? err}`);
-			process.exitCode = 1;
-			return;
-		}
-		const repoLabel = isLocal ? localCandidate : `${src.owner}/${src.repo}`;
-		const pluginRoot = locatePluginRoot(checkout, src?.subpath, repoLabel);
-		let manifest;
-		try {
-			manifest = JSON.parse(readFileSync(join(pluginRoot, "manifest.json"), "utf8"));
-		} catch (err) {
-			fail(`manifest.json 不是合法 JSON：${err?.message ?? err}`);
-		}
-		// 默认 id：子目录名 > 仓库名 > 本地目录名
-		const sourceName = src?.subpath ? src.subpath.split("/").pop() : (src?.repo ?? localCandidate.split(/[\\/]/).pop());
-		const fallbackId =
-			String(manifest.id ?? sourceName)
-				.replace(/[^A-Za-z0-9_-]/g, "-")
-				.replace(/^-+|-+$/g, "") || "plugin";
-		const id = opts.name ?? fallbackId;
-		if (!PLUGIN_ID_RE.test(id)) fail(`非法插件 id "${id}"（仅限字母数字-_，可用 --name <id> 自定义）`);
-		const target = join(pluginsDir, id);
-		let prevConfig = null;
-		const CONFIG_NAME = "config.json";
-		if (existsSync(target)) {
-			if (!opts.force) fail(`插件目录已存在：${target}\n  加 --force 覆盖，或用 --name <id> 换个名字。`);
-			// 更新前备份旧版本（<dataDir>/plugin-backups/<id>-<ts>/，保留最近 3 份），
-			// 失败时自动回滚。备份与安装同 filter：不带 .git/node_modules。
-			backupTs = ensurePluginBackup(pluginDataDir(opts), id, { source: rawSpec });
-			// 插件凭据/配置不因升级丢失：先取出旧 config.json，拷完新文件后原样放回
-			try {
-				prevConfig = readFileSync(join(target, CONFIG_NAME), "utf8");
-			} catch {
-				/* 无配置文件 */
-			}
-			rmSync(target, { recursive: true, force: true });
-		}
-		mkdirSync(target, { recursive: true });
-		try {
-			cpSync(pluginRoot, target, {
-				recursive: true,
-				filter: (s) => !/(^|[\\/])(\.git|node_modules)([\\/]|$)/.test(s),
-			});
-		} catch (err) {
-			// 拷贝失败 → 有备份则自动回滚，保持旧版本可用
-			if (backupTs && restorePluginBackup(pluginDataDir(opts), id)) {
-				fail(`插件更新失败：${err?.message ?? err}\n  已自动回滚到更新前版本。`);
-			}
-			fail(`插件更新失败：${err?.message ?? err}\n  （无可用备份，请重新 install --force）`);
-		}
-		if (prevConfig !== null && !existsSync(join(target, CONFIG_NAME))) {
-			writeFileSync(join(target, CONFIG_NAME), prevConfig);
-		}
-		// 记录安装来源：设置面板「更新」按钮据此重跑同一条安装命令（--force 覆盖）。
-		try {
-			writeFileSync(join(target, ".pi-source.json"), JSON.stringify({ source: rawSpec }, null, 2) + "\n");
-		} catch {
-			/* 尽力而为：没有来源信息只是不显示更新按钮 */
-		}
-		// 记录本次安装的远端 sha（git ls-remote HEAD，离线也支持本地 git 源）：
-		// 供 `pi-web-ui plugins --check-updates` 对比更新。失败静默（无 sha = 保守可更新）。
-		try {
-			const sha = await resolveRemoteSha(rawSpec);
-			if (sha) writeFileSync(join(target, ".pi-git-sha"), sha + "\n");
-		} catch {
-			/* 尽力而为 */
-		}
-		console.log(
-			`✔ 已安装插件 ${id}${manifest.name && manifest.name !== id ? `（${manifest.name}）` : ""}${manifest.version ? ` v${manifest.version}` : ""}`,
-		);
-		if (manifest.description) console.log(`  ${manifest.description}`);
-		console.log(`  位置: ${target}`);
-		console.log(`  生效: 服务运行中刷新浏览器即可加载；未运行则下次启动生效。卸载: pi-web-ui uninstall ${id}`);
-	} finally {
-		rmSync(tmp, { recursive: true, force: true });
-	}
-}
-
-function pluginUninstallCmd(argv) {
-	const { opts, positionals } = parseFlags(argv);
-	if (opts.help || positionals.length !== 1) {
-		console.log(PLUGIN_HELP);
-		if (!opts.help) process.exit(1);
-		return;
-	}
-	const id = positionals[0];
-	if (!PLUGIN_ID_RE.test(id)) fail(`非法插件 id: ${id}`);
-	const target = join(pluginDataDir(opts), "plugins", id);
-	if (!existsSync(target)) fail(`未安装插件 "${id}"（pi-web-ui plugins 查看已装列表）`);
-	rmSync(target, { recursive: true, force: true });
-	console.log(`✔ 已卸载插件 ${id} —— 运行中的服务刷新浏览器后消失。`);
-}
-
-function pluginListCmd(argv) {
-	const { opts, positionals } = parseFlags(argv);
-	if (opts.help) {
-		console.log(PLUGIN_HELP);
-		return;
-	}
-	const dataDir = pluginDataDir(opts);
-	// --rollback <id>：回滚到最近一份更新前备份
-	if (opts.rollback) {
-		const id = String(opts.rollback);
-		if (!PLUGIN_ID_RE.test(id)) fail(`非法插件 id: ${id}`);
-		const target = join(dataDir, "plugins", id);
-		if (!existsSync(target)) fail(`未安装插件 "${id}"（pi-web-ui plugins 查看已装列表）`);
-		const ts = restorePluginBackup(dataDir, id);
-		if (!ts) fail(`插件 "${id}" 没有更新备份（从未覆盖安装 / 备份已用完）`);
-		console.log(`✔ 已回滚插件 ${id} 到 ${ts} 的快照 —— 运行中的服务刷新浏览器后生效。`);
-		return;
-	}
-	// --check-updates：对比各插件记录的最后安装 sha 与远端 HEAD（git ls-remote）
-	if (opts.checkUpdates) {
-		return checkUpdatesCmd(dataDir).then(() => {});
-	}
-	const pluginsDir = join(dataDir, "plugins");
-	const rows = [];
-	let names = [];
-	try {
-		names = readdirSync(pluginsDir).sort();
-	} catch {
-		/* 目录不存在 = 未安装任何插件 */
-	}
-	for (const n of names) {
-		if (!PLUGIN_ID_RE.test(n)) continue;
-		try {
-			const m = JSON.parse(readFileSync(join(pluginsDir, n, "manifest.json"), "utf8"));
-			rows.push(
-				`  ${n.padEnd(24)} ${[m.name, m.version ? `v${m.version}` : "", m.description].filter(Boolean).join("  ")}`,
-			);
-		} catch {
-			continue; // 坏目录跳过
-		}
-	}
-	if (rows.length === 0) {
-		console.log(`尚未安装任何界面插件（目录: ${pluginsDir}）\n安装示例: pi-web-ui install owner/repo`);
-		return;
-	}
-	console.log(`已安装的界面插件（${pluginsDir}）:\n${rows.join("\n")}`);
-}
-
-async function checkUpdatesCmd(dataDir) {
-	console.log("检查界面插件更新（git ls-remote 对比最近安装版本）…\n");
-	let rows;
-	try {
-		rows = await checkPluginUpdates(dataDir);
-	} catch (err) {
-		fail(`更新检查失败：${err?.message ?? err}`);
-	}
-	if (rows.length === 0) {
-		console.log(`尚未安装任何带来源记录的界面插件（目录: ${join(dataDir, "plugins")}）`);
-		return;
-	}
-	let any = false;
-	for (const r of rows) {
-		const label = r.name && r.name !== r.id ? `${r.id}（${r.name}）` : r.id;
-		if (r.updatable) {
-			console.log(
-				`  🔄 ${label}${r.version ? ` v${r.version}` : ""}  可更新（已装 ${r.localSha ?? "未知"} → 远端 ${r.remoteSha}）`,
-			);
-			console.log(`     更新: pi-web-ui install ${r.source} --name ${r.id} --force`);
-			any = true;
-		} else if (r.remoteSha) {
-			console.log(`  ✓ ${label}${r.version ? ` v${r.version}` : ""}  已是最新（${r.remoteSha}）`);
-		} else {
-			console.log(`  ? ${label}  ${r.error ?? "无法检查"}（来源: ${r.source}）`);
-		}
-	}
-	if (!any) console.log("\n全部插件均为最新版本。");
-}
-
 async function serverCmd(argv) {
 	const { opts, positionals } = parseFlags(argv);
 	if (opts.help) {
@@ -1863,18 +1421,6 @@ async function main() {
 	}
 	if (first === "server") {
 		await serverCmd(argv.slice(1));
-		return;
-	}
-	if (first === "install") {
-		await pluginInstallCmd(argv.slice(1));
-		return;
-	}
-	if (first === "uninstall") {
-		pluginUninstallCmd(argv.slice(1));
-		return;
-	}
-	if (first === "plugins" || first === "plugin") {
-		pluginListCmd(argv.slice(1));
 		return;
 	}
 	// One-shot server with optional --port/--cwd/--data-dir overrides.

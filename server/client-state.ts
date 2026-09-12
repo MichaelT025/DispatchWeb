@@ -51,30 +51,8 @@ export interface ClientSettings {
 	terminalBashIdleMs: number;
 	/** Agent 工具禁用名单（统一开关，见 tool-manager.ts；live 生效无需 reload）。 */
 	disabledAgentTools: string[];
-	/** edit_soft 工具开关（遗留别名，兼容旧客户端/旧存档；以 disabledAgentTools 为准同步）。 */
-	editSoftEnabled: boolean;
 	/** 问卷提问开关（默认开；关 → 不弹对话框且 ask_user_question 工具同步禁用。不进预设）。 */
 	questionnaireEnabled: boolean;
-	/** 目标模式（目标条 + 调研向导 + 审查循环）总开关（默认开）。关 → 目标条
-	 *  隐藏、无法设目标/启动调研/触发审查。纯运行开关，不进预设、不需 reload。 */
-	goalModeEnabled: boolean;
-	/** Vision bridge on/off (default on). Off → images are sent as-is. */
-	visionBridgeEnabled: boolean;
-	/** Preferred vision model as "provider/id", or null = auto-detect first. */
-	visionBridgeModel: string | null;
-	/** Vision-bridge transcription prompt mode: append to the built-in default
-	 *  prompt, or replace it entirely (same semantics as promptMode). */
-	visionBridgePromptMode: PromptMode;
-	/** Custom vision-bridge transcription prompt text (empty = built-in default). */
-	visionBridgePrompt: string;
-	/** Extra instructions appended to the built-in goal-review prompt. */
-	reviewPrompt: string;
-	/** Skills disabled only for the isolated goal-reviewer. */
-	reviewDisabledSkills: string[];
-	/** Installed UI plugins hidden in the settings panel (UI-only toggle).
-	 *  Optional: presets deliberately do NOT capture it (same as the
-	 *  vision-bridge prefs) — applying a preset keeps the current toggles. */
-	disabledPlugins?: string[];
 	/** 思考块默认折叠与否（默认关 = 折叠；开 = 始终完整展开并自动换行，流式推理
 	 *  也实时可见）。纯 UI 偏好，与视觉桥 / disabledPlugins 一样不进预设。 */
 	thinkingWrap: boolean;
@@ -84,35 +62,16 @@ export interface ClientSettings {
 	 *  （oh-my-pi 式全文注入；单文件 8KB、总量 32KB 封顶，超限回落名录）。
 	 *  进预设；逐 run 实时读取，改动下一轮即生效。 */
 	skillsFullText: string[];
-	/** 子代理默认模型 ("provider/id")；null/未设 = 跟随主对话当前模型。不改会话右侧栏的模型。 */
-	subagentDefaultModel?: string | null;
 	/** 大模型 API 出错自动重试次数（默认 6；0 = 失败即停）。SDK
 	 *  settings.retry.maxRetries 的按客户端覆盖（SDK 默认 3），经
 	 *  applyOverrides 注入各会话的 SettingsManager（session.reload()
 	 *  会重读磁盘，需重放）。 */
 	retryMaxAttempts: number;
-	/** 输入框上方的快捷短语（点击即发送）。纯 UI 偏好，不进预设、不需 reload。 */
-	quickPhrases: string[];
-	quickPhrasesEnabled: boolean;
 }
 
 /** A named combo of prompt + skill/extension toggles the user can re-apply.
- *  Vision-bridge prefs are intentionally NOT part of a preset — they stay
- *  whatever the user currently has set when a preset is applied. */
-export interface SettingsPreset extends Omit<
-	ClientSettings,
-	| "visionBridgeEnabled"
-	| "visionBridgeModel"
-	| "visionBridgePromptMode"
-	| "visionBridgePrompt"
-	| "questionnaireEnabled"
-	| "goalModeEnabled"
-	| "thinkingWrap"
-	| "toolsWrap"
-	| "subagentDefaultModel"
-	| "quickPhrases"
-	| "quickPhrasesEnabled"
-> {
+ *  UI-only prefs are intentionally NOT part of a preset. */
+export interface SettingsPreset extends Omit<ClientSettings, "questionnaireEnabled" | "thinkingWrap" | "toolsWrap"> {
 	name: string;
 }
 
@@ -166,39 +125,11 @@ export function isExtensionDisabled(
 	return disabled.some((d) => keys.includes(d));
 }
 
-/** Whether an extension is covered by an ENABLED whitelist (any identity
- *  match). Empty whitelist = not whitelisting = everything allowed. Used by
- *  subagent templates（白名单语义：模板勾选 = 子代理只加载这些扩展）。 */
-export function isExtensionEnabled(
-	e: {
-		sourceInfo?: { origin?: string; source?: string; path?: string };
-		path: string;
-	},
-	enabled: readonly string[],
-): boolean {
-	if (enabled.length === 0) return true;
-	const keys = extensionKeyCandidates(e);
-	return enabled.some((d) => keys.includes(d));
-}
-
-export interface MarkerSettings {
-	markersEnabled: boolean;
-	disabledMarkers: string[];
-}
-
 export interface ClientState {
 	/** Absolute path of the workspace this client last used. */
 	lastCwd?: string;
 	/** Workspaces this client opened before, most recent first (capped at 30). */
 	projects: { path: string; lastUsed: number }[];
-	/** Last-used goal / review preferences (model choice, max rounds, locked) so
-	 *  they survive a reload — "全局记忆". maxRounds: 0 means unlimited. The model
-	 *  choice is shared by both the goal-reviewer and the goal-wizard. */
-	goalPrefs?: {
-		reviewModel: string | null;
-		maxRounds: number;
-		locked: boolean;
-	};
 	/** Settings-panel state (system prompt mode/text + disabled skills/
 	 *  extensions) so toggles survive a reload. */
 	settings?: ClientSettings;
@@ -224,13 +155,6 @@ export interface ClientState {
 	 *  Together with projectProviderKeys it makes the whole {model, key} pair
 	 *  project-bound, so switching back restores both right away. */
 	projectModels?: Record<string, string>;
-	/** 内置标记工具开关（全局 + 按 marker 禁用）。 */
-	markers?: MarkerSettings;
-	/** Browser UI locale code as reported by hello/set_locale (e.g. "zh",
-	 *  "en", "ja"). Server resolves it via resolveServerLang (non-zh →
-	 *  English default, issue #91) for tool return values / AI prompts.
-	 *  Missing = never reported → English. */
-	locale?: string;
 }
 
 /**
@@ -321,40 +245,6 @@ export class ClientStateStore {
 		return this.load()[clientId]?.removedProjects ?? [];
 	}
 
-	/** Last-used goal/review prefs for a client, or undefined if never set. */
-	getGoalPrefs(clientId: string): ClientState["goalPrefs"] {
-		const s = this.load()[clientId];
-		if (!s?.goalPrefs) return undefined;
-		return {
-			reviewModel: s.goalPrefs.reviewModel ?? null,
-			maxRounds: s.goalPrefs.maxRounds ?? 0,
-			locked: s.goalPrefs.locked ?? true,
-		};
-	}
-
-	/** Persist the client's UI locale code (hello/set_locale; best-effort). */
-	saveLocale(clientId: string, locale: string): void {
-		const code = locale.trim().slice(0, 16);
-		if (!code) return;
-		const all = this.load();
-		const state = (all[clientId] ??= { projects: [] });
-		if (state.locale === code) return;
-		state.locale = code;
-		this.save();
-	}
-
-	/** Persist the client's goal/review preferences (model choice, rounds, lock). */
-	saveGoalPrefs(clientId: string, prefs: ClientState["goalPrefs"]): void {
-		const all = this.load();
-		const state = (all[clientId] ??= { projects: [] });
-		state.goalPrefs = {
-			reviewModel: prefs?.reviewModel ?? null,
-			maxRounds: prefs?.maxRounds ?? 0,
-			locked: prefs?.locked ?? true,
-		};
-		this.save();
-	}
-
 	/** Remember conversations that were still streaming at shutdown (best-
 	 *  effort; called during the graceful-shutdown path). */
 	saveInterrupted(clientId: string, list: { title: string; cwd: string; at: number }[]): void {
@@ -409,29 +299,14 @@ export class ClientStateStore {
 					: (stored?.terminalToolsEnabled ?? false),
 			terminalBash: stored?.terminalBash ?? false,
 			terminalBashIdleMs: stored?.terminalBashIdleMs ?? 15_000,
-			editSoftEnabled:
-				stored?.disabledAgentTools !== undefined
-					? deriveLegacy(legacyToDisabled(stored)).editSoftEnabled
-					: (stored?.editSoftEnabled ?? false),
 			questionnaireEnabled:
 				stored?.disabledAgentTools !== undefined
 					? deriveLegacy(legacyToDisabled(stored)).questionnaireEnabled
 					: (stored?.questionnaireEnabled ?? true),
-			goalModeEnabled: stored?.goalModeEnabled ?? true,
 			thinkingWrap: stored?.thinkingWrap ?? false,
 			toolsWrap: stored?.toolsWrap ?? true,
 			skillsFullText: normalizeSkillList(stored?.skillsFullText),
-			visionBridgeEnabled: stored?.visionBridgeEnabled ?? true,
-			visionBridgeModel: stored?.visionBridgeModel ?? null,
-			visionBridgePromptMode: stored?.visionBridgePromptMode === "replace" ? "replace" : "append",
-			visionBridgePrompt: stored?.visionBridgePrompt ?? "",
-			subagentDefaultModel: stored?.subagentDefaultModel ?? null,
 			retryMaxAttempts: normalizeRetryMaxAttempts(stored?.retryMaxAttempts),
-			quickPhrases: stored?.quickPhrases ?? [],
-			quickPhrasesEnabled: stored?.quickPhrasesEnabled ?? true,
-			reviewPrompt: stored?.reviewPrompt ?? "",
-			reviewDisabledSkills: stored?.reviewDisabledSkills ?? [],
-			disabledPlugins: stored?.disabledPlugins ?? [],
 		};
 	}
 
@@ -451,25 +326,13 @@ export class ClientStateStore {
 			terminalToolsEnabled: settings.terminalToolsEnabled ?? cur.terminalToolsEnabled ?? false,
 			terminalBash: settings.terminalBash ?? cur.terminalBash ?? false,
 			terminalBashIdleMs: settings.terminalBashIdleMs ?? cur.terminalBashIdleMs ?? 15_000,
-			editSoftEnabled: settings.editSoftEnabled ?? cur.editSoftEnabled ?? false,
 			questionnaireEnabled: settings.questionnaireEnabled ?? cur.questionnaireEnabled ?? true,
-			goalModeEnabled: settings.goalModeEnabled ?? cur.goalModeEnabled ?? true,
 			thinkingWrap: settings.thinkingWrap ?? cur.thinkingWrap ?? false,
 			toolsWrap: settings.toolsWrap ?? cur.toolsWrap ?? true,
 			skillsFullText: normalizeSkillList(settings.skillsFullText ?? cur.skillsFullText),
-			visionBridgeEnabled: settings.visionBridgeEnabled ?? cur.visionBridgeEnabled ?? true,
-			visionBridgeModel: settings.visionBridgeModel ?? cur.visionBridgeModel ?? null,
-			subagentDefaultModel: settings.subagentDefaultModel ?? cur.subagentDefaultModel ?? null,
 			retryMaxAttempts: normalizeRetryMaxAttempts(
 				settings.retryMaxAttempts ?? cur.retryMaxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS,
 			),
-			visionBridgePromptMode: settings.visionBridgePromptMode ?? cur.visionBridgePromptMode ?? "append",
-			visionBridgePrompt: settings.visionBridgePrompt ?? cur.visionBridgePrompt ?? "",
-			reviewPrompt: settings.reviewPrompt ?? cur.reviewPrompt ?? "",
-			reviewDisabledSkills: settings.reviewDisabledSkills ?? cur.reviewDisabledSkills ?? [],
-			disabledPlugins: settings.disabledPlugins ?? cur.disabledPlugins ?? [],
-			quickPhrases: settings.quickPhrases ?? cur.quickPhrases ?? [],
-			quickPhrasesEnabled: settings.quickPhrasesEnabled ?? cur.quickPhrasesEnabled ?? true,
 		};
 		this.save();
 	}
@@ -478,9 +341,6 @@ export class ClientStateStore {
 	getPresets(_clientId: string): SettingsPreset[] {
 		return (this.load()[ClientStateStore.GLOBAL_SETTINGS_KEY]?.presets ?? []).map((p) => ({
 			...p,
-			// Older client-state files predate review settings.
-			reviewPrompt: p.reviewPrompt ?? "",
-			reviewDisabledSkills: p.reviewDisabledSkills ?? [],
 			// Older presets predate the configurable retry count.
 			retryMaxAttempts: normalizeRetryMaxAttempts(p.retryMaxAttempts),
 		}));
@@ -595,49 +455,6 @@ export class ClientStateStore {
 		if (!map || !(cwd in map)) return;
 		delete map[cwd];
 		if (Object.keys(map).length === 0) delete all[clientId]!.projectModels;
-		this.save();
-	}
-
-	/** 全局「快捷短语已 seed」标记（非 per-clientId）。
-	 *
-	 * 为什么全局：clientId 存 sessionStorage（每标签页独立、关浏览器即失），按
-	 * clientId 记 seed 会在每次新会话生成新 clientId 时误判为「从未 seed」，导致
-	 * 用户删掉的默认短语又被填回默认。seed 只需一次（首次见空列表），之后即为用户
-	 * 数据，增删改/恢复默认/关闭都走设置面板。存服务端而非浏览器 localStorage，
-	 * 任何浏览器/标签页/清缓存都不受影响。 */
-	getQuickPhrasesSeeded(): boolean {
-		const meta = this.load()[ClientStateStore.GLOBAL_SETTINGS_KEY] as { quickPhrasesSeeded?: boolean } | undefined;
-		return !!meta?.quickPhrasesSeeded;
-	}
-
-	markQuickPhrasesSeeded(): void {
-		const all = this.load();
-		const meta = (all[ClientStateStore.GLOBAL_SETTINGS_KEY] ??= { projects: [] }) as {
-			projects: unknown[];
-			quickPhrasesSeeded?: boolean;
-		};
-		if (meta.quickPhrasesSeeded) return;
-		meta.quickPhrasesSeeded = true;
-		this.save();
-	}
-
-	/** 内置标记工具开关（全局共享同一套 + 按 marker 禁用）。 */
-	getMarkerSettings(_clientId: string): MarkerSettings {
-		const s = this.load()[ClientStateStore.GLOBAL_SETTINGS_KEY]?.markers;
-		return {
-			markersEnabled: s?.markersEnabled ?? true,
-			disabledMarkers: s?.disabledMarkers ?? [],
-		};
-	}
-
-	saveMarkerSettings(_clientId: string, settings: Partial<MarkerSettings>): void {
-		const all = this.load();
-		const state = (all[ClientStateStore.GLOBAL_SETTINGS_KEY] ??= { projects: [] });
-		const cur = state.markers ?? { markersEnabled: true, disabledMarkers: [] };
-		state.markers = {
-			markersEnabled: settings.markersEnabled ?? cur.markersEnabled ?? true,
-			disabledMarkers: settings.disabledMarkers ?? cur.disabledMarkers ?? [],
-		};
 		this.save();
 	}
 }

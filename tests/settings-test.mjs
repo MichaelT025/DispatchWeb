@@ -11,7 +11,7 @@
 // skill/extension toggle round-trip (see settings-live flow in git history).
 // Usage: npm run build && node settings-test.mjs [port]
 import WebSocket from "ws";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -19,13 +19,16 @@ import { spawn } from "node:child_process";
 const PORT = Number(process.argv[2] || 8931);
 const DATA_DIR = mkdtempSync(join(tmpdir(), "pi-web-set-test-"));
 console.log("data-dir:", DATA_DIR);
+const WORK_DIR = join(DATA_DIR, "work");
+mkdirSync(WORK_DIR);
+writeFileSync(join(WORK_DIR, "AGENTS.md"), "# CI project context\nUse the fixture instructions.\n");
 
 const server = spawn(process.execPath, ["dist/server/index.js"], {
 	env: {
 		...process.env,
 		PI_WEB_PORT: String(PORT),
 		PI_WEB_DATA_DIR: DATA_DIR,
-		PI_WEB_CWD: process.cwd(),
+		PI_WEB_CWD: WORK_DIR,
 		PI_CODING_AGENT_DIR: join(DATA_DIR, "agent"),
 	},
 	stdio: ["ignore", "pipe", "pipe"],
@@ -112,9 +115,7 @@ try {
 			st0.settings.promptTemplate === "" &&
 			typeof st0.settings.promptOverrides === "object" &&
 			typeof st0.settings.promptSourceDefaults === "object" &&
-			typeof st0.settings.effectiveSystemPrompt === "string" &&
-			typeof st0.settings.visionBridgeDefaultPrompt === "string" &&
-			st0.settings.visionBridgeDefaultPrompt.length > 0,
+			typeof st0.settings.effectiveSystemPrompt === "string",
 	);
 	console.log(`  skills=${st0.settings.skills.length} extensions=${st0.settings.extensions.length}`);
 

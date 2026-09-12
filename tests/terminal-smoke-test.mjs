@@ -172,7 +172,7 @@ async function main() {
 	// -- folder attachment: a directory is accepted (not skipped as a non-file) --
 	// Full end-to-end (the <folder path> card in the transcript) requires a real
 	// model turn; here we verify the server takes the folder branch instead of
-	// the old "跳过非文件附件" skip path, and that no path error is emitted.
+	// the old "Skipped non-file attachment" skip path, and that no path error is emitted.
 	{
 		const { mkdirSync } = await import("node:fs");
 		mkdirSync(join(workdir, "subdir"), { recursive: true });
@@ -184,12 +184,9 @@ async function main() {
 		await sleep(1500);
 		check(
 			"folder not skipped as a non-file attachment",
-			!notices.some((t) => t.includes("跳过非文件附件") && t.includes("subdir")),
+			!notices.some((t) => t.includes("Skipped non-file attachment") && t.includes("subdir")),
 		);
-		check(
-			"no attachment error for the folder",
-			!notices.some((t) => t.includes("附件") && t.includes("subdir") && t.includes("失败")),
-		);
+		check("no attachment error for the folder", !notices.some((t) => t.includes("Attachment") && t.includes("subdir")));
 	}
 
 	// -- persisted sessions: shared pi session files appear in the list --------
@@ -199,7 +196,7 @@ async function main() {
 		const { homedir } = await import("node:os");
 		const { writeFileSync, mkdirSync } = await import("node:fs");
 		const safePath = `--${workdir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-		const tuiDir = join(homedir(), ".pi", "agent", "sessions", safePath);
+		const tuiDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "sessions", safePath);
 		const tuiFile = join(tuiDir, "2026-08-04T00-00-00-000Z_tui-smoke-test.jsonl");
 		mkdirSync(tuiDir, { recursive: true });
 		writeFileSync(
@@ -342,7 +339,7 @@ async function main() {
 	await sleep(500);
 	check(
 		"run_command enforces terminal limit",
-		notices.some((text) => text.includes("终端数量已达上限")),
+		notices.some((text) => text.includes("Terminal limit reached")),
 	);
 	for (const id of capIds) send({ type: "terminal_kill", terminalId: id });
 
@@ -385,7 +382,7 @@ async function main() {
 		await sleep(400);
 		check(
 			"terminal_create + run_command both reject an invalid id",
-			notices.slice(before).filter((n) => n.includes("终端名称无效")).length >= 2,
+			notices.slice(before).filter((n) => n.includes("Invalid terminal name")).length >= 2,
 		);
 	}
 
@@ -416,7 +413,7 @@ async function main() {
 		await sleep(400);
 		check(
 			"run_command of an exited id at the cap is rejected",
-			notices.slice(before).some((n) => n.includes("终端数量已达上限")),
+			notices.slice(before).some((n) => n.includes("Terminal limit reached")),
 		);
 		for (const id of histIds) send({ type: "terminal_kill", terminalId: id });
 		send({ type: "terminal_kill", terminalId: "hist-fill" });

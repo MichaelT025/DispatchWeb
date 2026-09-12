@@ -15,7 +15,6 @@
 // wholesale (no union merge / no stale built-in leftovers).
 import "./patch-remote-catalog.js";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, rmSync, statSync, mkdirSync, watch } from "node:fs";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
@@ -39,38 +38,19 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { BgServerTracker } from "./bg-servers.js";
-import {
-	checkAll as checkAllUpdates,
-	collectTargets,
-	compareVersions as compareSemver,
-	type UpdateItem,
-} from "./update-check.js";
-import { hasActiveSubagentRun, hasPendingWaitSubscription, shouldRetainActive } from "./wait-subscription-scan.js";
 import { removeFirstOccurrence } from "./queue-utils.js";
-import type {
-	PluginAgentTool,
-	PluginCommandDef,
-	PluginConversationSnapshot,
-	PluginRunEvent,
-	PluginToolEvent,
-} from "./plugins.js";
-import { syncPluginToolsIntoSession } from "./plugins.js";
 import { SettingsService } from "./settings-service.js";
-import { GoalService } from "./goal-service.js";
-import { MarkerService } from "./marker-service.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
 import { ModelAdminService } from "./model-admin.js";
 import { FilesService, MACHINE_ROOT, workspacePath } from "./files-service.js";
 import {
 	isExtensionDisabled,
-	isExtensionEnabled,
 	normalizeRetryMaxAttempts,
 	normalizeSkillList,
 	type PromptMode,
 	ClientStateStore,
 } from "./client-state.js";
-import { bilingual, pick, resolveServerLang, type ServerLang } from "./i18n.js";
-import { SubagentTemplatesStore, pickTemplatePrompt, type SubagentTemplate } from "./subagent-templates.js";
+import { resolveServerLang, type ServerLang } from "./i18n.js";
 
 import {
 	applyHeadTail,
@@ -84,21 +64,9 @@ import {
 	ASK_USER_QUESTION_TOOL_NAME,
 	effectiveDisabledAgentTools,
 	isTerminalGuidanceOn,
-	MARKERS_LIST_TOOL_NAME,
 } from "./tool-manager.js";
-import { ConversationStatuses, WebUIContext, mockThemeProxy, type StatusEntry } from "./webui-context.js";
+import { ConversationStatuses, WebUIContext, type StatusEntry } from "./webui-context.js";
 import { decodeText } from "./text-sniff.js";
-import { makeEditSoftTool } from "./edit-soft-tool.js";
-import {
-	collectSubagentDescendantIds,
-	makeSubagentTools,
-	subagentTitle,
-	withSubagentOwner,
-	type SubagentSnapshot,
-	type SubagentState,
-	type SubagentToolHost,
-} from "./subagents.js";
-import { makeDelegateTaskTool } from "./delegate-task.js";
 import { buildAttachmentMessages } from "./attachments.js";
 import {
 	BUILTIN_SOUL,
@@ -109,10 +77,8 @@ import {
 	type PromptComposerInputs,
 } from "./prompt-composer.js";
 import type {
-	BgServer,
 	CommandDef,
 	ConversationSummary,
-	GoalStatus,
 	MessageAnchor,
 	ProjectSummary,
 	QuestionAnswer,
@@ -122,7 +88,6 @@ import type {
 	UiQuestion,
 	UiServiceInfo,
 	UiState,
-	UiSubagentTemplate,
 } from "./protocol.js";
 import { launchOrigin, toServiceInfo } from "./launch-origin.js";
 import {
@@ -314,54 +279,12 @@ export function makeAdaptiveBashTool(
 }
 
 /**
- * 任务列表只读查询工具（todo_list）— 读操作仍走真工具。
- */
-function makeMarkersListTool(
-	getActiveId: () => string,
-	markerSvc: {
-		describe: (id: string, tool: string, inc?: boolean) => string;
-		getRawState: (id: string, ns: string) => unknown;
-	},
-): ToolDefinition {
-	return {
-		name: MARKERS_LIST_TOOL_NAME,
-		label: "List marker state",
-		description:
-			"Read-only query of inline marker state. All WRITE operations must use inline markers ([[todo:new:...]] etc.) in the reply body — never use this tool for writes.\n只读查询内联标记状态。状态【写】操作请一律用内联标记（[[todo:new:...]] 等）写在回答正文里，不要调用本工具做写操作。",
-		parameters: Type.Object({
-			action: Type.Unsafe<string>({ enum: ["list"] }),
-			tool: Type.Optional(Type.Literal("todo")),
-			includeDeleted: Type.Optional(
-				Type.Boolean({
-					description:
-						"Whether to include deleted tasks (tombstones, todo only).\n是否包含已删除任务（tombstone，仅 todo）。",
-				}),
-			),
-		}),
-		execute: async (_id: string, params: unknown) => {
-			const p = params as { action: string; tool?: string; includeDeleted?: boolean };
-			const convId = getActiveId();
-			const text = markerSvc.describe(convId, "todo", !!p.includeDeleted);
-			const state = markerSvc.getRawState(convId, "todo") as { tasks: unknown[]; nextId: number } | undefined;
-			const visible = (state?.tasks ?? []).filter(
-				(t: unknown) => p.includeDeleted || (t as { status: string }).status !== "deleted",
-			);
-			return {
-				content: [{ type: "text", text }],
-				details: { action: "list", todos: visible, nextId: state?.nextId },
-			} as never;
-		},
-	} as unknown as ToolDefinition;
-}
-
-/**
- * 标准 pi 引擎的 ask_user_question 工具：模型调用时把问题桥到浏览器（复用 DSH
- * 引擎的 question_pending/question_answer 协议，前端 DshQuestionDialog 富渲染），
- * 阻塞 agent 循环直到用户在浏览器回答或取消。
+ * ask_user_question tool: bridges a model question to the browser
+ * (question_pending/question_answer, rendered by QuestionDialog) and blocks
+ * the agent loop until the user answers or cancels.
  *
- * 标准 SDK 没有内建 ask_user_question，故由 pi-web-ui 以 customTool 注册（与
- * bash/edit 同机制）。DSH 引擎走 goal-rpc 的 userQuestions provider，两者互不
- * 冲突（各引擎各走各的）。
+ * The SDK has no built-in ask_user_question, so pi-web-ui registers one as a
+ * customTool (same mechanism as bash/edit).
  *
  * askUser 签名带 {aborted} 快照而非完整 AbortSignal：customTool 的 execute 信号
  * 服务于整个 agent 生命周期，这里按「已中止即拒绝」的最小语义处理，避免与其它
@@ -397,19 +320,11 @@ export function makeAskUserQuestionTool(
 		label: "Ask the user",
 		description:
 			"Ask the user focused questions to pin down ambiguous requirements. Use for clarifying the task, confirming decisions, or getting preferences. Each question renders a browser dialog with markdown/HTML rich text; options may carry a `preview`. Submit or cancel to resume.",
-		promptSnippet: bilingual(
+		promptSnippet:
 			"ask the user focused questions to clarify ambiguous requirements (browser dialog with options/preview)",
-			"向用户提问以澄清含糊的需求（浏览器对话框，支持选项/预览）",
-		),
 		promptGuidelines: [
-			bilingual(
-				"When requirements are ambiguous, use ask_user_question to ask the user instead of guessing; prefer multiple-choice options, each option may carry a preview",
-				"需求含糊时用 ask_user_question 向用户提问而不是猜测；优先给多选选项，选项可带 preview 预览",
-			),
-			bilingual(
-				"A cancelled question comes back as a tool error — respect it and continue without re-asking immediately",
-				"用户取消提问会以工具错误返回——尊重取消决定，不要马上重复追问",
-			),
+			"When requirements are ambiguous, use ask_user_question to ask the user instead of guessing; prefer multiple-choice options, each option may carry a preview",
+			"A cancelled question comes back as a tool error — respect it and continue without re-asking immediately",
 		],
 		parameters: Type.Object({
 			questions: Type.Array(QuestionSchema, { description: "Questions to ask the user" }),
@@ -440,53 +355,6 @@ export function makeAskUserQuestionTool(
 				content: [{ type: "text", text: lines.join("\n") }],
 				details: { answers },
 			} as never;
-		},
-	} as unknown as ToolDefinition;
-}
-
-/**
- * 插件结构化工具 → SDK ToolDefinition。
- * execute 返回值宽容处理：{content,details} 原样收编；字符串/对象包成文本块。
- */
-function pluginToolToDefinition(tool: PluginAgentTool): ToolDefinition {
-	const normalize = (
-		result: unknown,
-	): {
-		content: Array<{ type: "text"; text: string }>;
-		details?: unknown;
-	} => {
-		if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
-			return result as {
-				content: Array<{ type: "text"; text: string }>;
-				details?: unknown;
-			};
-		}
-		const text = typeof result === "string" ? result : JSON.stringify(result ?? null, null, 2);
-		return { content: [{ type: "text", text }] };
-	};
-	return {
-		name: tool.name,
-		label: tool.label ?? tool.name,
-		description: tool.description,
-		promptSnippet: tool.promptSnippet,
-		promptGuidelines: tool.promptGuidelines,
-		parameters: (tool.parameters ?? {
-			type: "object",
-			properties: {},
-		}) as ToolDefinition["parameters"],
-		execute: async (
-			toolCallId: string,
-			params: Record<string, unknown>,
-			signal: AbortSignal | undefined,
-			onUpdate: ((partial: unknown) => void) | undefined,
-		) => {
-			const raw = await tool.execute(
-				toolCallId,
-				params as Record<string, unknown>,
-				signal,
-				onUpdate ? (partial) => onUpdate(normalize(partial) as never) : undefined,
-			);
-			return normalize(raw) as never;
 		},
 	} as unknown as ToolDefinition;
 }
@@ -535,18 +403,6 @@ function extractPartialText(partial: unknown): string | null {
 	return null;
 }
 
-function extractAssistantTextFromContent(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter(
-			(c): c is { type: string; text: string } =>
-				(c as { type?: string }).type === "text" && typeof (c as { text?: string }).text === "string",
-		)
-		.map((c) => c.text)
-		.join("\n");
-}
-
 export { workspacePath };
 // ---------------------------------------------------------------------------
 // Per-client persisted UI state (<dataDir>/client-state.json)
@@ -561,17 +417,6 @@ interface Conversation {
 	id: string;
 	/** Display title: first user prompt (truncated) or the default. */
 	title: string;
-	/** 这是子代理对话（左栏带「子代理」徽标；inMemory session，不进历史/resume）。 */
-	isSubagent: boolean;
-	/** 派发它的父对话 id（Running 面板嵌套用；顶层子代理为空）。 */
-	parentId?: string;
-	/** 子代理类型/角色展示名（explore/implement/review…）。 */
-	subagentType?: string;
-	/** 子代理最近一次运行报错的文本（快照 error 字段的只读缓存位），消息内容不变 /
-	 *  会话重建时保留，避免重复向主对话发 notice（subagentErrorNotified 是去重键）。 */
-	subagentError?: string;
-	/** 已就当前 subagentError 向主对话发过 notice 的错误文本（去重；文本变化时重置）。 */
-	subagentErrorNotified?: string;
 	runtime: AgentSessionRuntime;
 	session: AgentSession;
 	cwd: string;
@@ -596,13 +441,6 @@ interface Conversation {
 	/** Set once the stall notice has been sent for the current silent period;
 	 *  cleared on every SDK event and on each new prompt. */
 	stallNoticed: boolean;
-	/** Independent goal/review state for this conversation. */
-	goal: GoalStatus;
-	goalGeneration: number;
-	goalReviewGeneration: number;
-	/** Wizard execution is per conversation; dialog transport itself remains
-	 * client-wide because the browser can display one dialog at a time. */
-	wizardRunning: boolean;
 	/** Session event subscription — events are routed to THIS conversation. */
 	unsubscribe?: () => void;
 	/** Monotonic sequence for message_delta/tool_delta pushes of this conversation —
@@ -640,44 +478,10 @@ interface Conversation {
 	 *  压缩后 SDK getContextUsage() 故意报 null（压缩前的 usage 不可信），
 	 *  下轮模型响应前快照用此值回填并标 estimated；开始下一次压缩时清掉。 */
 	lastCompactionTokens?: number | null;
-	/** 下一轮 agent_start 消费的用户任务文本（prompt() 暂存，轨迹插件的 run_start 用；
-	 *  steer/内部续跑无暂存时为空，由插件回退为「继续执行」）。 */
-	pendingTask?: string;
 	/** tool_call watchdog timers keyed by toolCallId — a tool that runs past
 	 *  TOOL_WATCHDOG_TIMEOUT_MS gets the session aborted instead of hanging
 	 *  the conversation forever (the SDK bash tool has no default timeout). */
 	toolWatchdogs: Map<string, ReturnType<typeof setTimeout>>;
-}
-
-/** 轨迹事件 payload 封顶（可直接广播/持久化，不撑爆 storage.json）。 */
-const RUN_TASK_CAP = 500;
-const RUN_ARGS_CAP = 4000;
-const RUN_RESULT_CAP = 4000;
-
-function truncRun(s: string, cap: number): string {
-	return s.length <= cap ? s : `${s.slice(0, cap)}\n… [truncated]`;
-}
-
-/** 从 SDK tool result 里抠可读文本预览（text 块拼接，图片/二进制占位，封顶）。 */
-function previewToolResult(result: unknown): string {
-	try {
-		const content = (result as { content?: unknown })?.content;
-		if (Array.isArray(content)) {
-			const parts: string[] = [];
-			for (const c of content) {
-				if (c && typeof c === "object" && (c as { type?: unknown }).type === "text") {
-					parts.push(String((c as { text?: unknown }).text ?? ""));
-				} else {
-					parts.push("[…]");
-				}
-			}
-			return truncRun(parts.join("\n"), RUN_RESULT_CAP);
-		}
-		if (typeof result === "string") return truncRun(result, RUN_RESULT_CAP);
-		return truncRun(JSON.stringify(result ?? null), RUN_RESULT_CAP);
-	} catch {
-		return "[unserializable result]";
-	}
 }
 
 /** Hard cap on how long ONE tool call may run before the watchdog aborts the
@@ -830,11 +634,6 @@ export class ClientSession {
 	 *  the first conversation and reused by later ones. */
 	private sharedModelRuntime: Awaited<ReturnType<typeof createAgentSessionServices>>["modelRuntime"] | undefined;
 
-	// -----------------------------------------------------------------------
-	// Goal / review / wizard —— 自包含模块，见 goal-service.ts。每个对话有独立
-	// 的 GoalStatus，审查可并发；宿主回调在构造函数里接入。
-	// -----------------------------------------------------------------------
-	private readonly goalSvc: GoalService;
 	/** Settings-panel state (system prompt + disabled skills/extensions) —
 	 *  自包含模块，见 settings-service.ts。resource-loader overrides 在每次
 	 *  reload() 时读 current 的最新值，session.reload() 即可应用到运行中 runtime。 */
@@ -865,29 +664,7 @@ export class ClientSession {
 		emit: (msg) => this.emit(msg),
 		flushSnapshot: () => this.flushSnapshot(),
 		isDisposed: () => this.disposed,
-		// 插件注册的常驻任务（host.registerBackgroundTask）并入同一「后台任务」面板。
-		pluginTasks: () => this.pluginBgTasksProvider?.() ?? [],
 	});
-
-	/** index.ts 注入（经 AgentService 拷贝到每个新会话）：把 SDK 工具执行事件转发给
-	 *  插件（PluginManager.emitToolEvent）。未设置时不做任何事。 */
-	onToolEvent: ((ev: PluginToolEvent) => void) | undefined = undefined;
-	/** index.ts 注入：把运行轨迹事件转发给插件（PluginManager.emitRunEvent，
-	 *  轨迹视图插件靠它聚合时间线）。未设置时不做任何事。 */
-	onRunEvent: ((ev: PluginRunEvent) => void) | undefined = undefined;
-	/** index.ts 注入：当前打开对话变了（切历史会话/切 running 对话/新对话）时
-	 *  通知插件（PluginManager.emitConversationChanged）——轨迹视图靠它重拉。 */
-	onConversationChanged: (() => void) | undefined = undefined;
-	/** index.ts 注入：读取插件当前注册的 AI 工具（attach 时拷贝到每个新会话）。 */
-	pluginToolsProvider: (() => PluginAgentTool[]) | undefined = undefined;
-	/** index.ts 注入：读取插件当前注册的斜杠命令（目录展示 + prompt 拦截执行）。 */
-	pluginCommandsProvider: (() => PluginCommandDef[]) | undefined = undefined;
-	/** index.ts 注入：读取插件注册的常驻后台任务（并入 bg_servers 面板）。 */
-	pluginBgTasksProvider: (() => BgServer[]) | undefined = undefined;
-	/** index.ts 注入：停止插件任务（kill_background_server with taskId）。 */
-	pluginStopBgTask: ((taskId: string) => boolean) | undefined = undefined;
-	/** 上一轮注入会话的插件工具名集合（用于检测注销/移除）。 */
-	private appliedPluginToolNames = new Set<string>();
 
 	/** The active conversation (all session operations target it). */
 	private get conv(): Conversation {
@@ -999,173 +776,6 @@ export class ClientSession {
 		}
 	}
 
-	/** 创建子代理 conversation（inMemory runtime + 独立 terminals），listed 入左栏，
-	 *  并在其上触发一次完整回合。返回 convId（= 工具 runId）。
-	 *
-	 *  `model`（可选）："provider/id"，显式指定子代理模型。不传时由调用方决定是否
-	 *  回退到模板模型 / 设置面板默认模型；null = 跟随主对话当前模型（默认行为，
-	 *  runtime 重建时会继承共享 ModelRuntime 的当前默认）。 */
-	private async spawnSubagentConversation(
-		prompt: string,
-		type: string,
-		cwd: string,
-		apply?: SubagentTemplate,
-		model?: string | null,
-		parentId?: string,
-	): Promise<string> {
-		const conversationId = `sa-${randomUUID().slice(0, 8)}`;
-		const terminals = this.makeTerminalManager(conversationId, cwd);
-		const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, apply, conversationId), {
-			cwd,
-			agentDir: this.agentDir,
-			sessionManager: SessionManager.inMemory(cwd),
-		});
-		const conv = this.makeConversation(runtime, conversationId, terminals);
-		conv.isSubagent = true;
-		// 父对话 = 真正派发它的会话（按会话归属的 host 包装填入）。直接用 active
-		// 会错：后台对话运行时用户可能正看着别的项目对话，孩子会被记到无关
-		// 对话名下、沉到别的项目组底部（issue #95）。缺省才回退到 active。
-		conv.parentId = parentId ?? this.activeId ?? undefined;
-		conv.subagentType = type;
-		conv.listed = true;
-		conv.title = subagentTitle(prompt);
-		this.convs.set(conv.id, conv);
-		// 子代理不走 bindSession——这里同样注入面板的重试次数覆盖。
-		this.applyRetryOverrides();
-		// 扩展绑定（rpc 模式；uiContext 只给无害的 mock theme/status 槽，避免与主对话
-		// 的 widget 冲突。无 uiContext 时扩展的 ctx.ui.theme.fg 会打到 TUI 真 theme
-		// 代理上抛 "Theme not initialized"，每个扩展一条 error toast。）
-		try {
-			await conv.session.bindExtensions({
-				mode: "rpc",
-				uiContext: {
-					theme: mockThemeProxy,
-					setStatus: () => {},
-					setWidget: () => {},
-					notify: () => {},
-				} as never,
-				onError: (err) => this.emit({ type: "notice", level: "error", text: err.error, textEn: err.error }),
-			});
-		} catch {
-			// 绑定失败不阻断运行。
-		}
-		// 指定模型（显式 model 参数 → 模板 model → 设置面板默认）时，在首回合前
-		// 给子代理会话换模型；全都不给 = 跟随主对话：把发起会话当前的模型也
-		// 显式搬过来（新 runtime 的默认模型未必等于主对话刚选的模型）。
-		const resolvedModel =
-			model ?? (apply?.model?.trim() || null) ?? (this.settingsSvc.current.subagentDefaultModel || null);
-		const followModel = resolvedModel
-			? resolvedModel
-			: this.session.model
-				? `${this.session.model.provider}/${this.session.model.id}`
-				: null;
-		if (followModel) {
-			const slash = followModel.indexOf("/");
-			const m =
-				slash > 0 && slash < followModel.length - 1
-					? this.sharedModelRuntime?.getModel(followModel.slice(0, slash), followModel.slice(slash + 1))
-					: undefined;
-			if (m) {
-				try {
-					// 先恢复该 provider 的项目密钥（setModel 的鉴权检查要用），再换模型。
-					await this.restoreKeyForModel(followModel, cwd);
-					await conv.session.setModel(m);
-				} catch (err) {
-					// 换模型失败不阻断运行——沿用默认模型继续。
-					this.emit({
-						type: "notice",
-						level: "warning",
-						text: `子代理模型切换失败（将按默认模型运行）：${followModel}（${(err as Error).message}）`,
-						textEn: `Failed to set subagent model, running with default: ${followModel} (${(err as Error).message})`,
-					});
-				}
-			} else {
-				this.emit({
-					type: "notice",
-					level: "warning",
-					text: `子代理模型不存在，将按默认模型运行：${followModel}`,
-					textEn: `Subagent model not found, running with default: ${followModel}`,
-				});
-			}
-		}
-		// 触发回合（后台执行；失败转识为通知）。
-		void conv.session.sendUserMessage(prompt).catch((err) => {
-			this.emit({
-				type: "notice",
-				level: "error",
-				text: `子代理 ${conversationId} 启动失败: ${err instanceof Error ? err.message : String(err)}`,
-				textEn: `Subagent ${conversationId} failed to start: ${err instanceof Error ? err.message : String(err)}`,
-			});
-		});
-		this.emitConversations();
-		return conv.id;
-	}
-
-	private getSubagentSnapshot(convId: string): SubagentSnapshot | undefined {
-		const conv = this.convs.get(convId);
-		if (!conv?.isSubagent || !conv.session) return undefined;
-		return this.toSubagentSnapshot(conv);
-	}
-
-	private listSubagentSnapshots(): SubagentSnapshot[] {
-		return [...this.convs.values()]
-			.filter((c) => c.isSubagent)
-			.sort((a, b) => a.createdAt - b.createdAt)
-			.map((c) => this.toSubagentSnapshot(c));
-	}
-
-	private toSubagentSnapshot(conv: Conversation): SubagentSnapshot {
-		const streaming = conv.session.isStreaming;
-		const state: SubagentState = streaming ? "running" : "done";
-		let messageCount = 0;
-		try {
-			messageCount = conv.session.getSessionStats().totalMessages;
-		} catch {
-			// session being replaced — report defaults
-		}
-		const { error, canceled } = this.subagentRunOutcome(conv);
-		return {
-			convId: conv.id,
-			type: conv.subagentType ?? "general",
-			title: conv.title,
-			prompt: "",
-			state,
-			streaming,
-			error,
-			canceled,
-			messageCount,
-			model: conv.session.model?.id,
-			output: conv.session.getLastAssistantText() ?? "",
-		};
-	}
-
-	/** 子代理最近一次运行的结局：最后一条 assistant 消息的 errorMessage / stopReason。
-	 *  报错 > 中止 > 正常，三者互斥；无 assistant 消息时返回空。 */
-	private subagentRunOutcome(conv: Conversation): { error?: string; canceled?: boolean } {
-		// 自动重试等待期结局未定：瞬时 error 不算失败，避免向主对话误报
-		// 「子代理运行失败」（耗尽后 auto_retry_end 清旗，真正失败照常通知）。
-		if (conv.retryState) return {};
-		try {
-			const msgs = conv.session.agent.state.messages;
-			for (let i = msgs.length - 1; i >= 0; i--) {
-				const m = msgs[i];
-				if ((m as { role?: unknown }).role !== "assistant") continue;
-				const err = (m as { errorMessage?: unknown }).errorMessage;
-				if (typeof err === "string" && err.trim()) {
-					return { error: err.trim() };
-				}
-				const stop = (m as { stopReason?: unknown }).stopReason;
-				if (stop === "aborted" || stop === "cancelled") {
-					return { canceled: true };
-				}
-				break;
-			}
-		} catch {
-			// session being replaced — treat as no outcome yet
-		}
-		return {};
-	}
-
 	private emitTerminal(conversationId: string, msg: ServerMessage): void {
 		// Background conversations keep collecting output in their own PTY buffer.
 		// Do not stream it into the active xterm; push the retained window on switch.
@@ -1231,7 +841,6 @@ export class ClientSession {
 			terminalGuidance: isTerminalGuidanceOn(effectiveDisabledAgentTools(this.settingsSvc.current))
 				? TERMINAL_TOOLS_GUIDANCE
 				: "",
-			markersGuidance: this.markerSvc.buildGuidance(),
 			// issue #91：组合模板各来源段按客户端 UI 语言渲染（英文默认）。
 			lang: this.getLang(),
 			contextFiles: src.contextFiles,
@@ -1349,59 +958,6 @@ export class ClientSession {
 	 *  resolved lazily so switches don't have to re-register anything. */
 	private readonly convStatuses = new ConversationStatuses(() => this.activeId);
 
-	/**
-	 * 第一方子代理 host（见 subagents.ts 设计头注）。子代理 = 一个标记
-	 * isSubagent 的普通 Conversation：inMemory runtime（不落盘、不进
-	 * 历史/resume 列表）、listed=true 出现在左栏「运行的对话」并向用户可见——
-	 * 切换查看 / 输入补充（steer）/ 中止（abort）/ 移出全部复用现有对话机制。
-	 */
-	private subagentHost: SubagentToolHost = {
-		spawnSubagent: (prompt, type, cwd, templateName, model, parentId) => {
-			// 模板：存在且启用时应用；传了名字但不可用 → 抛错让工具转给 AI。
-			const tpl = templateName ? this.subagentTemplates.get(templateName) : undefined;
-			if (templateName && (!tpl || !tpl.enabled)) {
-				throw new Error(
-					pick(
-						this.getLang(),
-						`子代理模板不可用：${templateName}（不存在或已停用）`,
-						`Subagent template unavailable: ${templateName} (missing or disabled)`,
-						"agent.subagent.template.unavailable",
-						{ templateName: templateName },
-					),
-				);
-			}
-			// 模型优先级：显式 model 参数 > 模板自带模型 > 设置面板默认模型；都不给 = 跟随主对话。
-			return this.spawnSubagentConversation(prompt, type, cwd, tpl, model, parentId);
-		},
-		getSubagent: (convId) => this.getSubagentSnapshot(convId),
-		listSubagents: () => this.listSubagentSnapshots(),
-		steerSubagent: async (convId, message) => {
-			const conv = this.convs.get(convId);
-			if (!conv?.session) return;
-			await conv.session.sendUserMessage(message, conv.session.isStreaming ? { deliverAs: "steer" } : undefined);
-		},
-		stopSubagent: async (convId) => {
-			const conv = this.convs.get(convId);
-			if (conv && (conv.session.isStreaming || !conv.session.isIdle)) {
-				await this.interruptRun(
-					conv,
-					pick(this.getLang(), "用户停止子代理", "User stopped the subagent", "agent.subagent.stop.user"),
-				);
-			}
-		},
-		// issue #91：子代理工具返回按客户端 UI 语言出中英（英文默认）。
-		lang: () => this.getLang(),
-		// 只向 AI 暴露 enabled 的模板（停用的对 AI 不可见）。
-		listTemplates: () =>
-			this.subagentTemplates
-				.list()
-				.filter((t) => t.enabled)
-				.map((t) => ({ name: t.name, description: t.description, descriptionEn: t.descriptionEn, model: t.model })),
-		isTemplateUsable: (name) => {
-			const t = this.subagentTemplates.get(name);
-			return !!t && t.enabled;
-		},
-	};
 	private widgetsTimer: ReturnType<typeof setInterval> | null = null;
 	/** Model-stall watchdog interval (see startStallTimer). */
 	private stallTimer: ReturnType<typeof setInterval> | null = null;
@@ -1452,16 +1008,10 @@ export class ClientSession {
 	private gitDirtyTimer: ReturnType<typeof setTimeout> | null = null;
 	private watchTimer: ReturnType<typeof setTimeout> | null = null;
 
-	/** 子代理模板库（全局共享，<dataDir>/subagent-templates.json）。 */
-	private readonly subagentTemplates: SubagentTemplatesStore;
-	/** 内置标记服务（todo/notify/svc/rename 等，可全局/分组开关）。 */
-	private readonly markerSvc: MarkerService;
-
 	// -----------------------------------------------------------------------
-	// 用户提问桥（标准 pi 引擎的 ask_user_question customTool）：与 DSH 引擎的
-	// question_pending/question_answer 同协议。模型调 ask_user_question 工具 →
-	// 本桥发 question_pending 给浏览器 → 等 question_answer → resolve/reject
-	// 工具结果（agent 循环阻塞）。一次只展示一个提问（agent 阻塞在工具执行）。
+	// User question bridge (ask_user_question customTool): the model calls the
+	// tool → question_pending goes to the browser → wait for question_answer →
+	// resolve/reject the tool result (agent loop blocks). One question at a time.
 	// -----------------------------------------------------------------------
 	private questionSeq = 0;
 	/** 待答提问（id → 载荷 + resolve）。一次正常只有一个（agent 阻塞在工具执行）；
@@ -1476,85 +1026,28 @@ export class ClientSession {
 		this.cwd = cwd;
 		this.agentDir = agentDir;
 		this.stateStore = stateStore;
-		this.subagentTemplates = new SubagentTemplatesStore(join(stateStore.dataDir, "subagent-templates.json"));
-		this.markerSvc = new MarkerService({
+		this.settingsSvc = new SettingsService({
 			clientId,
 			stateStore,
-			emit: (msg) => this.emit(msg),
-			isDisposed: () => this.disposed,
-			getActiveConversationId: () => this.activeId,
-			getSessionManager: (id) => {
-				const c = this.convs.get(id);
-				return c
-					? (c.session.sessionManager as unknown as {
-							getBranch: () => unknown[];
-							appendCustomEntry?: (t: string, d: unknown) => unknown;
-						})
-					: undefined;
-			},
-			renameConversation: (convId, title) => {
-				// 复用现有重命名路径（内存标题 + 磁盘 session_info）
-				void this.renameConversation(convId, title);
-			},
-			// 标记 widget 合并进扩展 widget 里，跟随当前活动会话渲染（切换会话即刷新）。
-			refreshMarkers: () => this.webUi.refresh(),
-			// issue #91：标记引导/错误按客户端 UI 语言出中英（英文默认）。
-			lang: () => this.getLang(),
-		});
-		// 标记 widget 动态渲染「当前活动会话」的 todo/overlay：切换会话时只要刷新
-		// webUi（见 switchConversation/setCwd/newChat）就会显示对应会话的标记，
-		// 且与扩展 widget 合并下发、不会互相覆盖。
-		this.webUi.setDynamicWidget("markers", () => this.markerSvc.overlayLines(this.activeId));
-		this.settingsSvc = new SettingsService(
-			{
-				clientId,
-				stateStore,
-				emit: (msg) => this.emit(msg),
-				flushSnapshot: () => this.flushSnapshot(),
-				isDisposed: () => this.disposed,
-				getSession: () => this.session,
-				cwd: () => this.cwd,
-				agentDir: () => this.agentDir,
-				isStreaming: () => this.session.isStreaming,
-				reloadSession: async () => {
-					await this.session.reload();
-					// reload() 重读磁盘 settings.json，会丢掉内存 applyOverrides
-					// （含重试次数覆盖）——依次重放：重试覆盖 → 终端门控。
-					this.applyRetryOverrides();
-					// reload() 会把 custom 工具重新加回活跃集——重放终端开关。
-					this.applyToolGating(this.session);
-					await this.pushSlashCommands();
-				},
-				applyRetryOverrides: () => this.applyRetryOverrides(),
-				applyToolGating: () => this.applyToolGating(this.session),
-				promptSnapshot: () => this.promptSnapshot(),
-				getMarkerState: () => ({
-					markersEnabled: this.markerSvc.current.markersEnabled,
-					disabledMarkers: [...this.markerSvc.current.disabledMarkers],
-					markers: this.markerSvc.listForUi(),
-				}),
-			},
-			this.subagentTemplates,
-		);
-		this.goalSvc = new GoalService({
-			clientId,
-			agentDir,
-			stateStore,
-			webUi: this.webUi,
 			emit: (msg) => this.emit(msg),
 			flushSnapshot: () => this.flushSnapshot(),
 			isDisposed: () => this.disposed,
-			quiesceBlocked: () => this.quiesceBlocked(),
-			// issue #91：目标/审查文案按客户端 UI 语言出中英（英文默认）。
-			lang: () => this.getLang(),
-			// 目标模式总开关（设置面板「目标审查」页）：关 → 目标入口一律拒绝。
-			goalModeEnabled: () => this.settingsSvc.current.goalModeEnabled !== false,
-			activeConvId: () => this.activeId,
-			activeConv: () => this.conv,
-			getConv: (id) => this.convs.get(id),
+			getSession: () => this.session,
 			cwd: () => this.cwd,
-			reviewSettings: () => this.settingsSvc.reviewPrefs,
-			gitDiff: (dir) => this.gitDiff(dir),
+			agentDir: () => this.agentDir,
+			isStreaming: () => this.session.isStreaming,
+			reloadSession: async () => {
+				await this.session.reload();
+				// reload() 重读磁盘 settings.json，会丢掉内存 applyOverrides
+				// （含重试次数覆盖）——依次重放：重试覆盖 → 终端门控。
+				this.applyRetryOverrides();
+				// reload() 会把 custom 工具重新加回活跃集——重放终端开关。
+				this.applyToolGating(this.session);
+				await this.pushSlashCommands();
+			},
+			applyRetryOverrides: () => this.applyRetryOverrides(),
+			applyToolGating: () => this.applyToolGating(this.session),
+			promptSnapshot: () => this.promptSnapshot(),
 		});
 
 		this.modelAdmin = new ModelAdminService({
@@ -1579,7 +1072,7 @@ export class ClientSession {
 		const cs = new ClientSession(clientId, cwd, agentDir, stateStore);
 		const conversationId = cs.nextConversationId();
 		const terminals = cs.makeTerminalManager(conversationId, cwd);
-		const runtime = await createAgentSessionRuntime(cs.makeRuntimeFactory(terminals, undefined, conversationId), {
+		const runtime = await createAgentSessionRuntime(cs.makeRuntimeFactory(terminals, conversationId), {
 			cwd,
 			agentDir,
 			// Resume the most recent session for this project — the SDK default
@@ -1599,7 +1092,6 @@ export class ClientSession {
 					type: "notice",
 					level: d.type,
 					text: d.message,
-					textEn: d.message,
 				});
 			}
 		}
@@ -1614,15 +1106,8 @@ export class ClientSession {
 	 * (the model choice is client-wide), so later conversations reuse the
 	 * instance created with the first one.
 	 *
-	 * `apply`（可选）：子代理模板 —— 会话的 system prompt / 技能 / 扩展按模板
-	 * 应用（prompt replace/append + 白名单），其余（终端接管、Windows persona
-	 * 等）仍跟随主会话设置。undefined = 按主会话设置（普通对话/不选模板的子代理）。
 	 */
-	private makeRuntimeFactory(
-		terminals: TerminalManager,
-		apply?: SubagentTemplate,
-		ownerId?: string,
-	): CreateAgentSessionRuntimeFactory {
+	private makeRuntimeFactory(terminals: TerminalManager, ownerId?: string): CreateAgentSessionRuntimeFactory {
 		return async ({ cwd: effectiveCwd, sessionManager }) => {
 			const services = await createAgentSessionServices({
 				cwd: effectiveCwd,
@@ -1631,33 +1116,20 @@ export class ClientSession {
 				// 在每次 resourceLoader.reload() 时重放，且读取 this.settings 的当前
 				// 值——因此 session.reload() 即可让系统提示词 / 技能 / 插件开关生效，
 				// 新对话（新 runtime）也会自动带上当前设置。
-				// 子代理带模板（apply）时：prompt/skills/extensions 改读模板视图——
-				// replace 模式：无 SYSTEM.md 时把灵魂段替换为模板提示词（见下方
-				// pi-webui-persona 内联扩展）；有 SYSTEM.md 时仍由 systemPromptOverride
-				// 整体替换 base。append 模式把模板提示词追加到
-				// 末尾（此时主会话的自定义 prompt 不再叠加，角色由模板定义）；非空
-				// 白名单取代主会话开关（只启用这些），空白名单 = 跟随主会话。
 				resourceLoaderOptions: {
 					// 系统提示词 base：主会话（组合模板）恒返回 undefined → SDK 走默认分支，
 					// 工具列表/Guidelines/文档指引等自动段照常拼装；SYSTEM.md 内容仅在
-					// 此处捕获（lastBaseSystemPrompt）作 {{soul}} 自动内容。子代理模板
-					// replace 在存在 SYSTEM.md base 时整体替换该 base。
+					// 此处捕获（lastBaseSystemPrompt）作 {{soul}} 自动内容。
 					systemPromptOverride: (base?: string) => {
 						if (typeof base === "string" && base) {
 							this.lastBaseSystemPrompt = base;
-							if (apply && apply.promptMode === "replace" && pickTemplatePrompt(apply, this.getLang()).trim()) {
-								return pickTemplatePrompt(apply, this.getLang());
-							}
 						}
 						return undefined;
 					},
 					appendSystemPromptOverride: (base: string[]) => {
 						// 记录 SDK APPEND_SYSTEM.md base（composer {{append}} 自动内容）。
-						if (!apply) this.lastSdkAppendFiles = base.slice();
+						this.lastSdkAppendFiles = base.slice();
 						const out = [...base];
-						if (apply && apply.promptMode === "append" && pickTemplatePrompt(apply, this.getLang()).trim()) {
-							out.push(pickTemplatePrompt(apply, this.getLang()));
-						}
 						// 主会话自定义「追加」已并入组合模板的 {{append}} 覆盖，不再在此注入。
 						if (process.platform === "win32") {
 							// Windows 专属 persona：bash 工具跑 Git Bash 且无默认超时、终端
@@ -1671,36 +1143,21 @@ export class ClientSession {
 							// 组内工具全关时不注入（不教 AI 用不存在的工具）。
 							out.push(TERMINAL_TOOLS_GUIDANCE);
 						}
-						// bash 管道限制已并入 bash 工具自身的 description，不再作为独立提示段注入。
-						// 内置标记工具引导（按总开关/分组开关过滤）
-						const markerGuidance = this.markerSvc.buildGuidance();
-						if (markerGuidance) out.push(markerGuidance);
 						return out;
 					},
-					// 技能：模板非空白名单时只启用白名单里的；否则按主会话禁用集过滤。
+					// 技能：按主会话禁用集过滤。
 					skillsOverride: (res) => {
-						if (apply && apply.enabledSkills.length > 0) {
-							const set = new Set(apply.enabledSkills);
-							return { ...res, skills: res.skills.filter((s) => set.has(s.name)) };
-						}
 						return {
 							...res,
 							skills: res.skills.filter((s) => !this.settingsSvc.current.disabledSkills.includes(s.name)),
 						};
 					},
-					// 插件：模板非空扩展白名单时只加载白名单里的；否则按主会话禁用集过滤。
-					// 注意 SDK 在 extensionsOverride 之后才补 sourceInfo，包扩展此处只能靠路径
-					// 匹配 —— isExtensionDisabled / isExtensionEnabled 同时比对 npm:<pkg> 候选键。
+					// 扩展：按主会话禁用集过滤。注意 SDK 在 extensionsOverride 之后才补
+					// sourceInfo，包扩展此处只能靠路径匹配 —— isExtensionDisabled 同时比对
+					// npm:<pkg> 候选键。
 					extensionsOverride: (res) => {
-						// 自家内联扩展（灵魂替换）是基础设施，不参与白名单/禁用过滤。
+						// 自家内联扩展是基础设施，不参与禁用过滤。
 						const keepOwn = (e: { path: string }) => !e.path.startsWith(INLINE_PERSONA_EXT);
-						if (apply && apply.enabledExtensions.length > 0) {
-							const set = new Set(apply.enabledExtensions);
-							return {
-								...res,
-								extensions: res.extensions.filter((e) => keepOwn(e) || isExtensionEnabled(e, [...set])),
-							};
-						}
 						return {
 							...res,
 							extensions: res.extensions.filter(
@@ -1708,29 +1165,17 @@ export class ClientSession {
 							),
 						};
 					},
-					// 组合模板渲染（主会话）+ 模板灵魂替换（子代理）：before_agent_start 在每个
-					// agent run 前触发，SDK 此时已用最新工具/资源拼好基础提示词；若配置了模板或
-					// 覆盖，则用 composer 把 {{token}} 展开为各来源文本（工具列表/项目上下文/技能
-					// 等都取自本次 run 的 systemPromptOptions，永远最新）。
+					// 组合模板渲染：before_agent_start 在每个 agent run 前触发，SDK 此时已用
+					// 最新工具/资源拼好基础提示词；若配置了模板或覆盖，则用 composer 把
+					// {{token}} 展开为各来源文本（工具列表/项目上下文/技能等都取自本次 run
+					// 的 systemPromptOptions，永远最新）。
 					extensionFactories: [
 						{
 							name: "pi-webui-persona",
 							hidden: true,
 							factory: (pi) => {
 								pi.on("before_agent_start", (event) => {
-									// 子代理模板 replace（无 SYSTEM.md 时）：默认分支拼好的提示词里
-									// 把灵魂段换成模板提示词，自动段保留；SYSTEM.md 情形已在
-									// systemPromptOverride 整体替换，此处边界不存在会自然跳过。
-									if (apply) {
-										if (apply.promptMode !== "replace" || !pickTemplatePrompt(apply, this.getLang()).trim())
-											return undefined;
-										const boundary = event.systemPrompt.indexOf("\n\nAvailable tools:");
-										if (boundary === -1) return undefined;
-										const swapped =
-											pickTemplatePrompt(apply, this.getLang()).trimEnd() + event.systemPrompt.slice(boundary);
-										return swapped === event.systemPrompt ? undefined : { systemPrompt: swapped };
-									}
-									// 主会话：组合模板渲染（模板为空且无覆盖时返回 undefined = 用 SDK 默认）。
+									// 组合模板渲染（模板为空且无覆盖时返回 undefined = 用 SDK 默认）。
 									const opts = event.systemPromptOptions as
 										| {
 												cwd?: string;
@@ -1784,32 +1229,7 @@ export class ClientSession {
 						() => this.settingsSvc.current.terminalBash,
 					),
 					...makePersistentTerminalTools(terminals, effectiveCwd, () => this.getLang()),
-					// 不覆盖内置 edit 的独立宽松编辑工具（缩进不敏感匹配；开关看设置）。
-					makeEditSoftTool(effectiveCwd, () => this.getLang()),
-					// 插件注册的 AI 工具（创建时刻的实时快照；后续注册经
-					// refreshPluginTools 动态补入已有会话）。
-					...(this.pluginToolsProvider?.() ?? []).map(pluginToolToDefinition),
-					// 第一方子代理工具（spawn/get_result/steer/list/stop）。子代理会话
-					// 也注册了它们，因此可自然嵌套派发。host 按 ownerId 包装：子代理的
-					// 父对话 = 真正调用 spawn 的那个会话（本 runtime 所属会话），而不是
-					// 派发瞬间的 active——后台对话继续产出时用户可能已切到别的项目，用
-					// activeId 会把孩子记到无关会话名下、沉到别的组/底部（issue #95）。
-					// ownerId 即本 runtime 所属会话（创建时就已知，见各调用点），一身二任：
-					// spawn 的 parentId（子代理记到真正的派发会话名下）+ wait_all 的
-					// selfConvId（调用者自身永不计入等待，防 self-wait deadlock）。
-					...(ownerId
-						? makeSubagentTools(withSubagentOwner(this.subagentHost, ownerId), undefined, ownerId)
-						: makeSubagentTools(this.subagentHost)),
-					// 结构化派单（六段式 + 服务端校验；执行体复用子代理 spawn 通道）。
-					// owner 包装与上面同理：子代理记到真正的派发会话名下。
-					...(ownerId
-						? [makeDelegateTaskTool(withSubagentOwner(this.subagentHost, ownerId))]
-						: [makeDelegateTaskTool(this.subagentHost)]),
-					// 内置标记只读查询工具（todo/svc 状态查询，写操作走内联标记）。
-					makeMarkersListTool(() => this.activeId, this.markerSvc),
-					// 标准引擎的 ask_user_question：模型调用 → 浏览器富渲染问卷（复用 DSH
-					// 的 question_pending/question_answer 协议，前端 DshQuestionDialog）。
-					// DSH 引擎不经此（它走 goal-rpc 的 userQuestions provider）。
+					// ask_user_question: model call → questionnaire dialog in the browser.
 					makeAskUserQuestionTool(this, ownerId),
 				],
 			});
@@ -1823,12 +1243,6 @@ export class ClientSession {
 		};
 	}
 
-	/** Create independent goal state for one conversation. Preferences are
-	 * client-wide defaults, while goal text/review progress is not shared. */
-	private makeGoalStatus(): GoalStatus {
-		return this.goalSvc.makeGoalStatus();
-	}
-
 	/** Allocate a stable conversation id before constructing its runtime/tools. */
 	private nextConversationId(): string {
 		return `c${++this.convSeq}`;
@@ -1839,7 +1253,6 @@ export class ClientSession {
 		return {
 			id,
 			title: conversationTitle(runtime.session),
-			isSubagent: false,
 			runtime,
 			session: runtime.session,
 			cwd: runtime.cwd,
@@ -1851,10 +1264,6 @@ export class ClientSession {
 			lastActiveAt: Date.now(),
 			lastSdkEventAt: Date.now(),
 			stallNoticed: false,
-			goal: this.makeGoalStatus(),
-			goalGeneration: 0,
-			goalReviewGeneration: 0,
-			wizardRunning: false,
 			deltaSeq: 0,
 			terminals,
 			msgIds: new Map(),
@@ -1887,8 +1296,7 @@ export class ClientSession {
 		this.pendingNotices.push({
 			type: "notice",
 			level: "warning",
-			text: `上次服务重启时有 ${list.length} 个进行中的对话被中断：${names}。可在历史对话中恢复继续。`,
-			textEn: `${list.length} running conversation(s) were interrupted by the last restart: ${names}. Resume them from History.`,
+			text: `${list.length} running conversation(s) were interrupted by the last restart: ${names}. Resume them from History.`,
 		});
 	}
 
@@ -1913,9 +1321,6 @@ export class ClientSession {
 		// Reconnect: same for the slash-command catalog (the picker needs it even
 		// before the client asks).
 		void this.pushSlashCommands();
-		// Reconnect: push the remembered goal prefs (model choice, rounds cap,
-		// locked) so the goal bar restores them on reload — "全局记忆".
-		this.goalSvc.emitGoalStatus();
 		// Reconnect: push the settings panel state (prompt text/mode, skill &
 		// extension toggles, saved presets).
 		this.pushSettings();
@@ -1962,7 +1367,7 @@ export class ClientSession {
 			// chat's role can't overwrite the active footer.
 			uiContext: this.uiContextFor(conv.id),
 			onError: (err) => {
-				this.emit({ type: "notice", level: "error", text: err.error, textEn: err.error });
+				this.emit({ type: "notice", level: "error", text: err.error });
 			},
 		});
 		this.pushActiveStatuses();
@@ -2048,8 +1453,7 @@ export class ClientSession {
 					this.emit({
 						type: "notice",
 						level: "warning",
-						text: `对话「${conv.title}」已 ${mins} 分钟无任何响应，可能已失联（网络中断或服务端挂起）。可点击停止后重试。`,
-						textEn: `Conversation "${conv.title}" has been silent for ${mins} min — possibly disconnected (network or hung server). Stop it and retry.`,
+						text: `Conversation "${conv.title}" has been silent for ${mins} min — possibly disconnected (network or hung server). Stop it and retry.`,
 					});
 				}
 			}
@@ -2067,8 +1471,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: `工具执行超过 ${Math.round(TOOL_WATCHDOG_TIMEOUT_MS / 60_000)} 分钟，已自动终止（防止挂死）。可调整超时：环境变量 PI_WEB_TOOL_TIMEOUT_MS（毫秒）。`,
-				textEn: `Tool ran over ${Math.round(TOOL_WATCHDOG_TIMEOUT_MS / 60_000)} min and was auto-terminated (hang guard). Tune via PI_WEB_TOOL_TIMEOUT_MS (ms).`,
+				text: `Tool ran over ${Math.round(TOOL_WATCHDOG_TIMEOUT_MS / 60_000)} min and was auto-terminated (hang guard). Tune via PI_WEB_TOOL_TIMEOUT_MS (ms).`,
 			});
 			conv.toolStartTimes.delete(toolCallId);
 			// Abort the run (kills the process tree via the SDK's abort signal);
@@ -2094,70 +1497,6 @@ export class ClientSession {
 	private clearAllToolWatchdogs(conv: Conversation): void {
 		for (const t of conv.toolWatchdogs.values()) clearTimeout(t);
 		conv.toolWatchdogs.clear();
-	}
-
-	/** 发一条运行轨迹事件给插件（host.onRunEvent 订阅者，如轨迹视图插件）。
-	 *  异常隔离——序列化/插件坏了只记日志，绝不影响主流程。 */
-	private emitRun(conv: Conversation, ev: Omit<PluginRunEvent, "conversationId" | "at">): void {
-		if (!this.onRunEvent) return;
-		try {
-			this.onRunEvent({ ...ev, conversationId: conv.id, at: Date.now() });
-		} catch (err) {
-			console.error("[agent-service] onRunEvent failed:", err);
-		}
-	}
-
-	/** 当前打开对话变了 → 通知插件重拉（切历史会话/切 running 对话/新对话）。
-	 *  异常隔离——插件坏了只记日志，绝不影响切换流程。 */
-	private notifyConversationChanged(): void {
-		if (!this.onConversationChanged) return;
-		try {
-			this.onConversationChanged();
-		} catch (err) {
-			console.error("[agent-service] onConversationChanged failed:", err);
-		}
-	}
-
-	/** 插件用：本客户端最近活跃对话的快照（轨迹视图直接显示打开对话的时间线）。
-	 *  messages/streamingMessage 为引用稳定的只读缓存对象——调用方只读、不得修改。 */
-	readConversationForPlugins(): PluginConversationSnapshot | null {
-		try {
-			let target: Conversation | null = null;
-			for (const c of this.convs.values()) {
-				if (!target || c.lastActiveAt > target.lastActiveAt) target = c;
-			}
-			if (!target) return null;
-			const state = target.session.agent.state;
-			let stats: PluginConversationSnapshot["stats"] = {
-				totalMessages: 0,
-				tokens: { input: 0, output: 0, total: 0 },
-				cost: 0,
-			};
-			try {
-				const s = target.session.getSessionStats();
-				stats = { totalMessages: s.totalMessages, tokens: s.tokens, cost: s.cost };
-			} catch {
-				/* stats 尽力而为 */
-			}
-			let streamingMessage: UiMessage | null = null;
-			try {
-				streamingMessage = state.streamingMessage ? serializeStreamingMessage(state.streamingMessage) : null;
-			} catch {
-				/* 尽力而为 */
-			}
-			return {
-				conversationId: target.id,
-				title: target.title,
-				at: target.lastActiveAt,
-				isStreaming: target.session.isStreaming,
-				messages: this.messagesOf(target),
-				streamingMessage,
-				stats,
-			};
-		} catch (err) {
-			console.error("[agent-service] readConversationForPlugins failed:", err);
-			return null;
-		}
 	}
 
 	private onEvent(conv: Conversation, event: AgentSessionEvent): void {
@@ -2193,26 +1532,6 @@ export class ClientSession {
 				if (event.toolName !== ASK_USER_QUESTION_TOOL_NAME) {
 					this.armToolWatchdog(conv, event.toolCallId);
 				}
-				// 插件扩展点：工具开始执行（异常由 emitToolEvent 隔离）。
-				this.onToolEvent?.({
-					phase: "start",
-					toolName: event.toolName,
-					conversationId: conv.id,
-					toolCallId: event.toolCallId,
-				});
-				// 轨迹事件：带参数预览（JSON 封顶；超大参数只记截断）。
-				let argsText = "null";
-				try {
-					argsText = truncRun(JSON.stringify(event.args ?? null), RUN_ARGS_CAP);
-				} catch {
-					argsText = "[unserializable args]";
-				}
-				this.emitRun(conv, {
-					type: "tool_start",
-					toolCallId: event.toolCallId,
-					toolName: event.toolName,
-					argsText,
-				});
 				break;
 			}
 			case "tool_execution_end": {
@@ -2223,24 +1542,6 @@ export class ClientSession {
 				// ports, then diff against the pre-run snapshot and record them.
 				if (event.toolName === "bash") void this.bg.trackAfterBash();
 				const durationMs = startedAt !== undefined ? Date.now() - startedAt : undefined;
-				// 插件扩展点：工具结束执行（带耗时与错误标志）。
-				this.onToolEvent?.({
-					phase: "end",
-					toolName: event.toolName,
-					conversationId: conv.id,
-					toolCallId: event.toolCallId,
-					...(durationMs !== undefined ? { durationMs } : {}),
-					isError: event.isError,
-				});
-				// 轨迹事件：带结果预览（封顶）+ 耗时/错误标志。
-				this.emitRun(conv, {
-					type: "tool_end",
-					toolCallId: event.toolCallId,
-					toolName: event.toolName,
-					resultText: previewToolResult(event.result),
-					...(durationMs !== undefined ? { durationMs } : {}),
-					isError: event.isError,
-				});
 				// The bash tool does not put its exit code in result.details — on
 				// failure it throws "Command exited with code N" and the agent
 				// wraps that into the error result text. Try details first (future
@@ -2310,15 +1611,13 @@ export class ClientSession {
 					this.emit({
 						type: "notice",
 						level: "error",
-						text: `压缩上下文失败：${event.errorMessage}`,
-						textEn: `Context compaction failed: ${event.errorMessage}`,
+						text: `Context compaction failed: ${event.errorMessage}`,
 					});
 				} else if (event.aborted) {
 					this.emit({
 						type: "notice",
 						level: "warning",
-						text: "压缩上下文已取消",
-						textEn: "Context compaction cancelled",
+						text: "Context compaction cancelled",
 					});
 				} else if (event.result) {
 					const { tokensBefore, estimatedTokensAfter } = event.result;
@@ -2328,8 +1627,7 @@ export class ClientSession {
 					this.emit({
 						type: "notice",
 						level: "info",
-						text: `上下文压缩完成：${tokensBefore.toLocaleString()} → ${after.toLocaleString()} tokens（摘要已插入消息区）`,
-						textEn: `Context compacted: ${tokensBefore.toLocaleString()} → ${after.toLocaleString()} tokens (summary inserted into the message list)`,
+						text: `Context compacted: ${tokensBefore.toLocaleString()} → ${after.toLocaleString()} tokens (summary inserted into the message list)`,
 					});
 				}
 				break;
@@ -2373,62 +1671,16 @@ export class ClientSession {
 					// 结束信号丢失等），清掉，否则横幅会卡住不消失。
 					conv.retryState = null;
 				}
-				// 轨迹事件：本轮结束（放最前——aborted 中断路径也会 break，
-				// 轨迹里必须留下「已停止」而不是凭空消失）。
-				try {
-					const lastAssistant = [...(event.messages as unknown[])].reverse().find((m) => {
-						const a = m as { role?: string; stopReason?: string };
-						return a.role === "assistant" && typeof a.stopReason === "string";
-					}) as { stopReason?: string } | undefined;
-					this.emitRun(
-						conv,
-						lastAssistant?.stopReason ? { type: "run_end", stopReason: lastAssistant.stopReason } : { type: "run_end" },
-					);
-				} catch {
-					/* 轨迹尽力而为 */
-				}
 				this.scheduleSessionsRefresh();
 				this.refreshConversationTitle(conv);
-				// 内联标记不在此兜底扫最后一条 assistant：每条气泡结束已走 message_end
-				// 即时解析（含中间文本块）；这里再扫会把最后一条标记重复执行（todo 重复建号）。
-
 				// Manual interrupt (Stop button / abort): the last assistant message
-				// carries stopReason "aborted". A half-finished run should NOT be
-				// reviewed (it would fail and inject a revision, only to be stopped
-				// again → an endless review loop). Clear the goal so the review loop
-				// stops too, then let the user give a fresh instruction.
+				// carries stopReason "aborted" — nothing to apply, let the user give a
+				// fresh instruction.
 				const aborted = (event.messages as unknown[]).some((m) => {
 					const a = m as { role?: string; stopReason?: string };
 					return a.role === "assistant" && a.stopReason === "aborted";
 				});
-				if (aborted) {
-					const stopNotice = this.goalSvc.onAgentEnd(conv, true);
-					if (stopNotice) {
-						this.emit({ type: "notice", level: "warning", text: stopNotice.text, textEn: stopNotice.textEn });
-					}
-					break;
-				}
-				// 子代理运行报错（provider 400 / 超时等）→ 通知主对话，让用户/AI 知道
-				// 拿回的结果可能是空或无意义的（否则子代理只是安静地停在「done」，
-				// 主对话永远收不到失败信号）。错误文本变化时允许再次通知（去重）。
-				if (conv.isSubagent) {
-					const { error } = this.subagentRunOutcome(conv);
-					if (error && error !== conv.subagentErrorNotified) {
-						conv.subagentError = error;
-						conv.subagentErrorNotified = error;
-						this.emit({
-							type: "notice",
-							level: "error",
-							text: `子代理 ${conv.id.slice(0, 8)}（${conv.subagentType ?? "general"}）运行失败：${error}`,
-							textEn: `Subagent ${conv.id.slice(0, 8)} (${conv.subagentType ?? "general"}) failed: ${error}`,
-						});
-					} else if (error) {
-						conv.subagentError = error;
-					}
-					this.emitConversations();
-				}
-				// Goal review hook lives in GoalService.onAgentEnd(conv, false).
-				this.goalSvc.onAgentEnd(conv, false);
+				if (aborted) break;
 				// Deferred settings reload: settings (system prompt / skills /
 				// extensions) changed while the run was streaming — applying now
 				// would have torn down the in-flight run.
@@ -2446,40 +1698,12 @@ export class ClientSession {
 				break;
 			}
 			case "message_end": {
-				// 轨迹事件：一条消息定稿（user/assistant 都收；custom display:false
-				// 的 serializeMessage 返回 null 时跳过）。
-				try {
-					const ui = serializeMessage(event.message as AgentMessage, 0);
-					if (ui) this.emitRun(conv, { type: "message", message: ui });
-				} catch {
-					/* 轨迹尽力而为 */
-				}
-				// 每条 assistant 气泡流式结束 → 立即解析其中的内联标记：每个气泡各自
-				// 每条 assistant 气泡流式结束 → 立即解析其中的内联标记：每个气泡各自
-				// 生效（不再等整轮 agent_end），同一轮里先前消息的标记也不再丢。
-				const mm = event.message as { role?: string; stopReason?: unknown; content?: unknown };
+				const mm = event.message as { role?: string; stopReason?: unknown };
 				if (mm?.role !== "assistant") break;
-				// 非 error 的 assistant 定稿 = 重试周期结束（与 SDK 重置
-				// _retryAttempt 的条件一致）：即使 auto_retry_end 丢失，横幅也不会卡住。
+				// A non-error assistant message ends the retry cycle (same condition
+				// the SDK uses to reset _retryAttempt) — the banner never gets stuck
+				// even if auto_retry_end is lost.
 				if (mm.stopReason !== "error") conv.retryState = null;
-				const text = extractAssistantTextFromContent(mm.content);
-				if (text && text.includes("[[")) void this.markerSvc.handleAssistantText(conv.id, text);
-				break;
-			}
-			case "agent_start": {
-				// 轨迹事件：新一轮开始（任务文本由 prompt() 暂存；steer/内部续跑
-				// 无暂存时省略，插件回退为「继续执行」）。
-				const task = conv.pendingTask;
-				conv.pendingTask = undefined;
-				this.emitRun(conv, task ? { type: "run_start", task } : { type: "run_start" });
-				break;
-			}
-			case "turn_start": {
-				this.emitRun(conv, { type: "turn_start" });
-				break;
-			}
-			case "turn_end": {
-				this.emitRun(conv, { type: "turn_end" });
 				break;
 			}
 			case "message_update": {
@@ -2971,11 +2195,6 @@ export class ClientSession {
 		}
 	}
 
-	/** Simple numeric semver compare: >0 means a newer than b. */
-	private static compareVersions(a: string, b: string): number {
-		return compareSemver(a, b);
-	}
-
 	/** Set by index.ts: called when /pi-web-ui:quit is invoked. */
 	onQuit: (() => boolean) | undefined = undefined;
 	/** 本客户端成功切换工作区（set_cwd）后触发，参数为新绝对路径。
@@ -2983,107 +2202,27 @@ export class ClientSession {
 	 *  工作区跟随型插件借此把根目录切到用户当前项目。 */
 	onCwdChanged: ((abs: string) => void) | undefined = undefined;
 
-	/** Ask the npm registry for the latest pi-web-ui version and report it. */
-	async checkUpdate(): Promise<void> {
-		const current = ClientSession.currentAppVersion();
-		try {
-			// Fetch the full package doc (not /latest): it carries the per-version
-			// publish timestamps so the UI can hint when a version was JUST
-			// published and the registry/CDN caches may not have caught up yet.
-			const res = await fetch("https://registry.npmjs.org/pi-web-ui", {
-				signal: AbortSignal.timeout(8_000),
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = (await res.json()) as {
-				"dist-tags"?: { latest?: string };
-				time?: Record<string, string>;
-			};
-			const latest = data["dist-tags"]?.latest ?? null;
-			const latestPublishedAt = latest && data.time ? (data.time[latest] ?? null) : null;
-			const upToDate = latest === null || ClientSession.compareVersions(current, latest) >= 0;
-			this.emit({
-				type: "update_status",
-				current,
-				latest,
-				latestPublishedAt,
-				upToDate,
-			});
-		} catch (err) {
-			this.emit({
-				type: "update_status",
-				current,
-				latest: null,
-				latestPublishedAt: null,
-				upToDate: false,
-				error: `检查更新失败：${(err as Error).message}`,
-			});
-		}
-	}
-
-	/** Cache window for the all-source check: 30 minutes. */
-	static UPDATE_ALL_CACHE_MS = 30 * 60_000;
-	private updatesAllCache: { at: number; items: UpdateItem[] } | null = null;
-
-	/**
-	 * All-source update check: pi-web-ui + the pi core + direct pi extensions
-	 * from the agent manifest (fallback: raw walk). Re-emits the cached list
-	 * within UPDATE_ALL_CACHE_MS; pass force=true (explicit refresh) to bypass.
-	 */
-	async checkUpdatesAll(force = false): Promise<void> {
-		if (!force && this.updatesAllCache && Date.now() - this.updatesAllCache.at < ClientSession.UPDATE_ALL_CACHE_MS) {
-			this.emit({
-				type: "update_status_all",
-				items: this.updatesAllCache.items,
-			});
-			return;
-		}
-		try {
-			const targets = collectTargets(this.agentDir, ClientSession.currentAppVersion());
-			const items = await checkAllUpdates(targets, undefined, () => this.getLang());
-			this.updatesAllCache = { at: Date.now(), items };
-			this.emit({ type: "update_status_all", items });
-		} catch (err) {
-			// checkAll degrades per-item; only local enumeration blowing up lands
-			// here — still report a usable (webui-only) error item.
-			const items: UpdateItem[] = [
-				{
-					name: "pi-web-ui",
-					kind: "webui",
-					current: ClientSession.currentAppVersion(),
-					latest: null,
-					latestPublishedAt: null,
-					upToDate: false,
-					error: `检查更新失败：${(err as Error).message}`,
-				},
-			];
-			this.emit({ type: "update_status_all", items });
-		}
-	}
-
 	async installPiAgent(): Promise<void> {
 		try {
 			mkdirSync(this.agentDir, { recursive: true });
 			this.emit({
 				type: "notice",
 				level: "info",
-				text: "正在安装 pi agent CLI（npm i -g @earendil-works/pi-coding-agent）…",
-				textEn: "Installing pi agent CLI (npm i -g @earendil-works/pi-coding-agent)…",
+				text: "Installing pi agent CLI (npm i -g @earendil-works/pi-coding-agent)…",
 			});
 			const { code, out } = await this.runAsync("npm", ["i", "-g", "@earendil-works/pi-coding-agent"], 180_000);
 			if (code === 0) {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: "✅ pi agent CLI 安装完成。填入 API 密钥即可开始，或在终端运行 pi 完成登录。",
-					textEn: "✅ pi agent CLI installed. Enter an API key to start, or run pi in a terminal to log in.",
+					text: "✅ pi agent CLI installed. Enter an API key to start, or run pi in a terminal to log in.",
 				});
 				this.emit({ type: "install_result", ok: true, detail: "" });
 			} else {
 				this.emit({
 					type: "notice",
 					level: "error",
-					text: `pi agent 安装失败（${code ?? "timeout"}）：${out.slice(0, 400)}`,
-					textEn: `pi agent install failed (${code ?? "timeout"}): ${out.slice(0, 400)}`,
+					text: `pi agent install failed (${code ?? "timeout"}): ${out.slice(0, 400)}`,
 				});
 				this.emit({
 					type: "install_result",
@@ -3095,8 +2234,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `pi agent 安装失败：${(err as Error).message}`,
-				textEn: `pi agent install failed: ${(err as Error).message}`,
+				text: `pi agent install failed: ${(err as Error).message}`,
 			});
 		}
 		// The CLI may just have landed on PATH (or the install may have failed) —
@@ -3151,8 +2289,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "info",
-				text: `已重命名当前会话为「${name}」`,
-				textEn: `Renamed current session to "${name}"`,
+				text: `Renamed current session to "${name}"`,
 			});
 			this.flushSnapshot();
 		},
@@ -3161,26 +2298,6 @@ export class ClientSession {
 			// /reload 同样重读磁盘 settings.json——重放重试覆盖 + 终端门控。
 			this.applyRetryOverrides();
 			this.applyToolGating(this.session);
-		},
-		pluginCommands: () => this.pluginCommandsProvider?.() ?? [],
-		execPluginCommand: async (name, args) => {
-			const def = this.pluginCommandsProvider?.().find((c) => c.name === name);
-			if (!def) return false;
-			try {
-				const result = await def.run(args, { clientId: this.clientId });
-				// 字符串返回值 → 通知条回显给发起人；富展示用 broadcast/sendTo。
-				if (typeof result === "string" && result.trim()) {
-					this.emit({ type: "notice", level: "info", text: result, textEn: result });
-				}
-			} catch (err) {
-				this.emit({
-					type: "notice",
-					level: "error",
-					text: `插件命令 /${name} 执行失败：${(err as Error).message}`,
-					textEn: `Plugin command /${name} failed: ${(err as Error).message}`,
-				});
-			}
-			return true;
 		},
 		onQuit: () => this.onQuit?.() ?? false,
 	});
@@ -3385,54 +2502,13 @@ export class ClientSession {
 		terminalToolsEnabled?: boolean;
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
-		editSoftEnabled?: boolean;
+		questionnaireEnabled?: boolean;
 		thinkingWrap?: boolean;
 		toolsWrap?: boolean;
-		visionBridgeEnabled?: boolean;
-		visionBridgeModel?: string | null;
-		visionBridgePromptMode?: PromptMode;
-		visionBridgePrompt?: string;
-		subagentDefaultModel?: string | null;
+		skillsFullText?: string[];
 		retryMaxAttempts?: number;
-		reviewPrompt?: string;
-		reviewDisabledSkills?: string[];
-		disabledPlugins?: string[];
-		markersEnabled?: boolean;
-		disabledMarkers?: string[];
-		quickPhrases?: string[];
-		quickPhrasesEnabled?: boolean;
 	}): Promise<void> {
-		const { markersEnabled, disabledMarkers, quickPhrasesSeeded, ...rest } = partial as {
-			markersEnabled?: boolean;
-			disabledMarkers?: string[];
-			quickPhrasesSeeded?: boolean;
-		} & typeof partial;
-		// 快捷短语「已 seed」是全局标记（非 per-clientId）：置位一次后永久生效。
-		if (quickPhrasesSeeded) this.stateStore.markQuickPhrasesSeeded();
-		let markerChanged = false;
-		if (markersEnabled !== undefined || disabledMarkers !== undefined) {
-			this.markerSvc.setAll({
-				...(markersEnabled !== undefined ? { markersEnabled } : {}),
-				...(disabledMarkers !== undefined ? { disabledMarkers } : {}),
-			});
-			markerChanged = true;
-		}
-		await this.settingsSvc.set(rest as never);
-		if (markerChanged) {
-			// 标记开关影响 system prompt 引导，需重载生效（流式中则延迟）
-			this.pushSettings();
-			this.flushSnapshot();
-			// 尝试立即重载，若流式中会由 SettingsService 延迟到 agent_end
-			if (!this.session.isStreaming) {
-				try {
-					await this.session.reload();
-					this.applyRetryOverrides();
-					this.applyToolGating(this.session);
-					await this.pushSlashCommands();
-					this.pushSettings();
-				} catch {}
-			}
-		}
+		await this.settingsSvc.set(partial);
 	}
 
 	/** Save the CURRENT settings as a named preset (overwrites if exists). */
@@ -3448,16 +2524,6 @@ export class ClientSession {
 	/** Remove a named preset. */
 	async deletePreset(name: string): Promise<void> {
 		return this.settingsSvc.deletePreset(name);
-	}
-
-	/** Upsert 一个子代理模板（全局共享）。 */
-	async saveSubagentTemplate(template: UiSubagentTemplate): Promise<void> {
-		return this.settingsSvc.saveTemplate(template);
-	}
-
-	/** 删除一个子代理模板。 */
-	async deleteSubagentTemplate(name: string): Promise<void> {
-		return this.settingsSvc.deleteTemplate(name);
 	}
 
 	/** Make settings effective in the running runtime（流式中则延迟到 agent_end）。 */
@@ -3479,50 +2545,14 @@ export class ClientSession {
 		if (active && active.session === session) this.flushSnapshot();
 	}
 
-	/** 把插件 AI 工具同步进一个已存在的会话（新增/更新/移除）。
-	 *  实际 diff 逻辑在 plugins.ts 的 syncPluginToolsIntoSession（可单测）。 */
-	private syncPluginTools(session: AgentSession): void {
-		try {
-			const defs = (this.pluginToolsProvider?.() ?? []).map(pluginToolToDefinition);
-			const next = syncPluginToolsIntoSession(
-				session as unknown as Parameters<typeof syncPluginToolsIntoSession>[0],
-				defs as unknown as Parameters<typeof syncPluginToolsIntoSession>[1],
-				this.appliedPluginToolNames,
-			);
-			if (next) this.appliedPluginToolNames = new Set(next);
-		} catch (err) {
-			console.error("[plugins] sync tools to session failed:", err);
-		}
-	}
-
-	/** index.ts 经 pluginMgr.onAgentToolsChanged 触发：把插件 AI 工具推入全部会话。 */
-	refreshPluginTools(): void {
-		for (const conv of this.convs.values()) this.syncPluginTools(conv.session);
-	}
-
 	private async applySettingsReload(): Promise<void> {
 		// 兼容旧入口：reload + 刷目录在宿主回调里完成
 		return this.settingsSvc.applyRuntime();
 	}
 
-	/** Server language for this client (issue #91): resolved LIVE from the
-	 *  persisted UI locale — "zh" only for zh*; everything else (including
-	 *  never-reported) is English. Per-call tool return values read this on
-	 *  every invocation, so they follow language switches with no rebuild. */
+	/** Server strings are English-only; kept as a hook for the lang plumbing. */
 	getLang(): ServerLang {
-		return resolveServerLang(this.stateStore.get(this.clientId).locale);
-	}
-
-	/** Persist the browser UI locale (hello.locale / set_locale) and refresh
-	 *  lang-aware prompt segments. Reuses the settings reload path, so it is
-	 *  streaming-safe (deferred to agent_end mid-run, same as settings). */
-	async setLocale(locale: string): Promise<void> {
-		const code = locale.trim().slice(0, 16);
-		if (!code) return;
-		const prev = this.getLang();
-		this.stateStore.saveLocale(this.clientId, code);
-		if (this.getLang() === prev) return; // same server language — nothing to re-render
-		await this.applySettingsReload();
+		return resolveServerLang();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -3539,9 +2569,7 @@ export class ClientSession {
 		this.emit({
 			type: "notice",
 			level: "error",
-			text: "服务器正在排空存量工作（quiesce），已拒绝新的对话/消息/编辑。存量运行会继续跑完；用 pi-web-ui server unquiesce 可恢复。",
-			textEn:
-				"Server is draining (quiesce) and rejected the new chat/message/edit. Existing runs continue; resume with pi-web-ui server unquiesce.",
+			text: "Server is draining (quiesce) and rejected the new chat/message/edit. Existing runs continue; resume with pi-web-ui server unquiesce.",
 		});
 		this.flushSnapshot();
 		return true;
@@ -3609,9 +2637,6 @@ export class ClientSession {
 			// even while quiesced. Everything that reaches the SDK is NEW work and
 			// is refused until admission reopens.
 			if (this.quiesceBlocked()) return;
-			// 轨迹用：暂存本轮任务文本，下一轮 agent_start 消费（steer/内部续跑
-			// 不经此处，届时 task 缺省，插件回退为「继续执行」）。
-			conv.pendingTask = text.trim() ? truncRun(text.trim(), RUN_TASK_CAP) : undefined;
 			// Name the conversation from its FIRST prompt immediately, before any
 			// await: the typed text IS the name. The `conv` reference was captured
 			// before the try block, so a concurrent switch/new_chat while prompt()
@@ -3662,8 +2687,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `提示发送失败：${(err as Error).message}`,
-				textEn: `Failed to send prompt: ${(err as Error).message}`,
+				text: `Failed to send prompt: ${(err as Error).message}`,
 			});
 		}
 		// The active conversation (captured at prompt start — see above) has been
@@ -3720,8 +2744,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: "对话正在生成中，无需重试",
-					textEn: "The conversation is still generating — no need to retry",
+					text: "The conversation is still generating — no need to retry",
 				});
 				return;
 			}
@@ -3729,8 +2752,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: "正在自动重试中，稍候即可",
-					textEn: "Auto-retry is in progress — please wait",
+					text: "Auto-retry is in progress — please wait",
 				});
 				return;
 			}
@@ -3753,13 +2775,10 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: "没有可重试的失败：上一轮没有报错结束",
-					textEn: "Nothing to retry: the last turn did not end with an error",
+					text: "Nothing to retry: the last turn did not end with an error",
 				});
 				return;
 			}
-			// 轨迹用：下一轮 agent_start 消费（否则插件回退为「继续执行」）。
-			conv.pendingTask = "手动重试上次失败的模型请求";
 			await s.sendCustomMessage(
 				{
 					customType: "manual-retry",
@@ -3781,8 +2800,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `手动重试失败：${(err as Error).message}`,
-				textEn: `Manual retry failed: ${(err as Error).message}`,
+				text: `Manual retry failed: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -3827,8 +2845,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "error",
-					text: `重新入队插队消息失败：${(err as Error).message}`,
-					textEn: `Failed to re-queue the steer message: ${(err as Error).message}`,
+					text: `Failed to re-queue the steer message: ${(err as Error).message}`,
 				});
 			}
 		}
@@ -3839,8 +2856,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "error",
-					text: `重新入队排队消息失败：${(err as Error).message}`,
-					textEn: `Failed to re-queue the queued message: ${(err as Error).message}`,
+					text: `Failed to re-queue the queued message: ${(err as Error).message}`,
 				});
 			}
 		}
@@ -3857,29 +2873,13 @@ export class ClientSession {
 		this.bg.push();
 	}
 
-	/** 插件设置保存结果等需要从 index.ts 发 notice 时用（emit 是私有的）。 */
-	emitNotice(level: "info" | "warning" | "error", text: string, textEn?: string): void {
-		this.emit({ type: "notice", level, text, textEn });
+	/** For index.ts paths that need to emit a notice (emit is private). */
+	emitNotice(level: "info" | "warning" | "error", text: string): void {
+		this.emit({ type: "notice", level, text });
 	}
 
 	/** Kill ONE background server (by port); returns whether anything was killed. */
-	/** Kill ONE background server (by port) OR a plugin task (by taskId). */
-	async killBackgroundServer(port: number | undefined, taskId?: string): Promise<boolean> {
-		if (taskId) {
-			// 插件任务：交给插件管理器 stop 回调（不杀进程树——任务在宿主进程内）。
-			const ok = this.pluginStopBgTask?.(taskId) ?? false;
-			if (!ok) {
-				this.emit({
-					type: "notice",
-					level: "info",
-					text: `后台任务「${taskId}」不存在或已结束`,
-					textEn: `Background task "${taskId}" does not exist or has ended`,
-				});
-			}
-			this.bg.push();
-			this.flushSnapshot();
-			return ok;
-		}
+	async killBackgroundServer(port: number | undefined): Promise<boolean> {
 		if (typeof port !== "number") return false;
 		return this.bg.killOne(port);
 	}
@@ -3898,8 +2898,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "info",
-				text: "当前没有正在运行的 bash 命令",
-				textEn: "No bash command is running",
+				text: "No bash command is running",
 			});
 			this.flushSnapshot();
 			return;
@@ -3909,8 +2908,7 @@ export class ClientSession {
 		this.emit({
 			type: "notice",
 			level: "info",
-			text: "已停止 bash 命令（对话继续）",
-			textEn: "Bash command stopped (conversation continues)",
+			text: "Bash command stopped (conversation continues)",
 		});
 		// 让 AI 明确知道是用户手动停止：sendUserMessage 触发下一轮，agent
 		// 会看到「命令被用户中止」而不是普通失败，并据此继续（不会困惑于
@@ -3957,8 +2955,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `中止失败：${(err as Error).message}`,
-				textEn: `Abort failed: ${(err as Error).message}`,
+				text: `Abort failed: ${(err as Error).message}`,
 			});
 		}
 		// 3) abort returned but no agent_end within the settle window → the
@@ -3982,7 +2979,7 @@ export class ClientSession {
 			this.clearAllToolWatchdogs(conv);
 			conv.toolStartTimes.clear();
 			await conv.runtime.dispose();
-			const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(conv.terminals, undefined, conv.id), {
+			const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(conv.terminals, conv.id), {
 				cwd: conv.cwd,
 				agentDir: this.agentDir,
 				sessionManager: SessionManager.continueRecent(conv.cwd),
@@ -3992,8 +2989,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: reason,
-				textEn: `${reason} (forced reset: run did not terminate)`,
+				text: `${reason} (forced reset: run did not terminate)`,
 			});
 			await this.bindSession();
 			this.emitConversations();
@@ -4002,8 +2998,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `强制中断失败：${(err as Error).message}`,
-				textEn: `Force-stop failed: ${(err as Error).message}`,
+				text: `Force-stop failed: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -4040,22 +3035,20 @@ export class ClientSession {
 		}
 		for (const conv of this.convs.values()) {
 			if (conv.id === this.activeId) continue;
-			if (conv.cwd === this.cwd && !conv.isSubagent && isBlank(conv)) {
+			if (conv.cwd === this.cwd && isBlank(conv)) {
 				await this.switchConversation(conv.id);
 				this.flushSnapshot();
 				return true;
 			}
 		}
 		// Cap is per project — conversations of other projects keep their own
-		// lists and don't consume this project's slots. Subagents don't count
-		// (inMemory 后台任务，不占位）。
-		const openInProject = [...this.convs.values()].filter((c) => c.cwd === this.cwd && !c.isSubagent).length;
+		// lists and don't consume this project's slots.
+		const openInProject = [...this.convs.values()].filter((c) => c.cwd === this.cwd).length;
 		if (openInProject >= MAX_OPEN_CONVERSATIONS) {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: `当前项目运行的对话已达上限（${MAX_OPEN_CONVERSATIONS} 个），请先打开某个对话并离开（不继续对话）以移出列表`,
-				textEn: `This project already has the max open conversations (${MAX_OPEN_CONVERSATIONS}). Open one and leave it (without continuing) to remove it from the list.`,
+				text: `This project already has the max open conversations (${MAX_OPEN_CONVERSATIONS}). Open one and leave it (without continuing) to remove it from the list.`,
 			});
 			return false;
 		}
@@ -4070,7 +3063,7 @@ export class ClientSession {
 		try {
 			const conversationId = this.nextConversationId();
 			const terminals = this.makeTerminalManager(conversationId, this.cwd);
-			const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, undefined, conversationId), {
+			const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, conversationId), {
 				cwd: this.cwd,
 				agentDir: this.agentDir,
 				sessionManager: SessionManager.create(this.cwd),
@@ -4096,20 +3089,16 @@ export class ClientSession {
 				}
 			}
 			this.emitConversations();
-			this.goalSvc.emitGoalStatus();
 			this.pushTerminals();
 			// The new runtime re-discovered skills/templates — refresh the catalog
 			// so the picker stops showing the previous runtime's list.
 			void this.pushSlashCommands();
-			// 新对话即当前打开 → 插件重拉（轨迹视图跟随）。
-			this.notifyConversationChanged();
 			ready = true;
 		} catch (err) {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `新建对话失败：${(err as Error).message}`,
-				textEn: `Failed to create chat: ${(err as Error).message}`,
+				text: `Failed to create chat: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -4120,9 +3109,6 @@ export class ClientSession {
 	 * The active conversation is being left (new_chat / switch_conversation /
 	 * set_cwd). Runs the running-list lifecycle:
 	 *
-	 * - 子代理豁免：活动的是子代理时永远保留（listed=true，返回 null）——点开
-	 *   查看后切走也不释放 runtime，后台任务继续跑、随时可点开看；清理走
-	 *   dismiss_conversation / dismiss_finished_subagents（用户显式动作）。
 	 * - still streaming → it becomes a background run: ensure it is listed;
 	 * - idle + listed + continued → keep it (the user did continue it);
 	 * - any retained terminal state → keep it listed until the terminals are closed;
@@ -4132,48 +3118,24 @@ export class ClientSession {
 	 */
 	private displaceActive(): Conversation | null {
 		const conv = this.conv;
-		// 子代理不受切换关闭影响（见上）。
-		if (conv.isSubagent) {
-			conv.listed = true;
-			return null;
-		}
-		// An isolated reviewer can keep working while the main session is idle;
-		// retain that conversation so its review is not disposed when the user
-		// switches away without sending another prompt.
-		// 同时检查磁盘上的未过期 wait-subscription 记录：后台子代理运行结束后
-		// 仍欠本会话一次唤醒回合；此时释放运行时会杀死 pi-subagents 扩展宿主，
-		// 唤醒永远无法送达（会话表现为无限期停摆）。保留是自限的：记录过期后
-		// 不再阻止释放。
-		// Also retain when a non-expired pi-subagents wait-subscription record
-		// exists on disk for this session: a finished background subagent run
-		// still owes this conversation a wake-up turn.
-		// 更靠前的阶段：run 本身还在 queued/running（workflow 编排中）时释放
-		// runtime 同样杀死扩展宿主并 abort 所有 live workflow controller，比
-		// wake 订阅早一步——磁盘 .active-runs marker + status.json 探测（pi-web-ui #52）。
-		// Retain while the session has active (queued/running) pi-subagents async
-		// runs on disk — the extension host would otherwise be torn down and its
-		// workflow controllers aborted mid-flight.
-		// Also retain a parent while any live first-party subagent conversation
-		// points at it: dropping an idle in-memory parent orphans the child row
-		// (the child vanishes from Running Chats with no result available).
-		const hasLiveChild = [...this.convs.values()].some((child) => child.parentId === conv.id);
-		const retained =
-			hasLiveChild ||
-			shouldRetainActive({
-				reviewing: conv.goal.reviewing,
-				wizardRunning: conv.wizardRunning,
-				streaming: conv.session.isStreaming,
-				openTerminals: conv.terminals.countLive(),
-				listed: conv.listed,
-				promptedSinceActive: conv.promptedSinceActive,
-				hasActiveSubagentRun: () => hasActiveSubagentRun({ sessionId: conv.session.sessionFile }),
-				hasPendingWake: () => hasPendingWaitSubscription({ sessionId: conv.session.sessionFile }),
-			});
-		if (retained) {
+		if (this.isRetained(conv)) {
 			conv.listed = true;
 			return null;
 		}
 		return conv;
+	}
+
+	/** Whether a conversation must keep its runtime alive when left behind. */
+	private isRetained(conv: Conversation): boolean {
+		let streaming = true;
+		try {
+			streaming = conv.session.isStreaming;
+		} catch {
+			// session being replaced — treat as running, never drop it
+		}
+		if (streaming) return true;
+		if (conv.terminals.countLive() > 0) return true;
+		return conv.listed && conv.promptedSinceActive;
 	}
 
 	/** Remove a conversation from the running list and free its runtime. The
@@ -4211,7 +3173,6 @@ export class ClientSession {
 		// role even though the tools/model belong to the new chat (issue #116).
 		this.pushActiveStatuses();
 		this.emitConversations();
-		this.goalSvc.emitGoalStatus();
 		this.pushTerminals();
 		// The switched-to conversation has its own runtime (own resource cache).
 		void this.pushSlashCommands();
@@ -4232,8 +3193,6 @@ export class ClientSession {
 			void this.listFiles(undefined);
 			void this.listCommands();
 		}
-		// 当前打开对话变了 → 插件重拉（轨迹视图切会话后即刷新，不等轮询）。
-		this.notifyConversationChanged();
 		this.flushSnapshot();
 	}
 
@@ -4243,16 +3202,8 @@ export class ClientSession {
 	 *  its project (see switchConversation). The client groups the list by cwd. */
 	private emitConversations(): void {
 		const conversations: ConversationSummary[] = [];
-		// Active parents are normally absent from Running. Keep them visible while
-		// listed subagents hang under them, so both rows remain clickable.
-		const visibleParents = new Set(
-			[...this.convs.values()]
-				.filter((conv) => conv.listed)
-				.map((conv) => conv.parentId)
-				.filter(Boolean),
-		);
 		for (const conv of this.convs.values()) {
-			if (!conv.listed && !visibleParents.has(conv.id)) continue;
+			if (!conv.listed) continue;
 			let messageCount = 0;
 			let isStreaming = false;
 			try {
@@ -4267,10 +3218,6 @@ export class ClientSession {
 				cwd: conv.cwd,
 				messageCount,
 				isStreaming,
-				isSubagent: !!conv.isSubagent,
-				// 子代理带 error 标记：左栏红点提示（普通对话不参与）。
-				...(conv.isSubagent ? this.subagentRunOutcome(conv) : {}),
-				parentId: conv.parentId,
 			});
 		}
 		this.emit({
@@ -4381,8 +3328,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "error",
-					text: "只能删除会话目录中的对话记录",
-					textEn: "Only transcripts inside the session directory can be deleted",
+					text: "Only transcripts inside the session directory can be deleted",
 				});
 				return;
 			}
@@ -4400,8 +3346,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "warning",
-					text: "该对话正在后台运行，请先停止或关闭该对话再删除",
-					textEn: "This conversation is still running — stop or close it before deleting",
+					text: "This conversation is still running — stop or close it before deleting",
 				});
 				return;
 			}
@@ -4433,9 +3378,6 @@ export class ClientSession {
 						type: "notice",
 						level: "warning",
 						text: stillRunning
-							? "对话仍在后台运行，已停止删除；请等待其结束后再删除"
-							: "未能切换到其他对话，已取消删除本次操作",
-						textEn: stillRunning
 							? "Conversation is still running in the background; delete aborted — wait for it to finish and retry"
 							: "Could not switch to another conversation; delete cancelled",
 					});
@@ -4463,8 +3405,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `删除会话失败：${(err as Error).message}`,
-				textEn: `Failed to delete session: ${(err as Error).message}`,
+				text: `Failed to delete session: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -4482,8 +3423,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "error",
-					text: "只能重命名会话目录中的对话记录",
-					textEn: "Only transcripts inside the session directory can be renamed",
+					text: "Only transcripts inside the session directory can be renamed",
 				});
 				return;
 			}
@@ -4497,8 +3437,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `重命名会话失败：${(err as Error).message}`,
-				textEn: `Failed to rename session: ${(err as Error).message}`,
+				text: `Failed to rename session: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -4530,8 +3469,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `重命名对话失败：${(err as Error).message}`,
-				textEn: `Failed to rename conversation: ${(err as Error).message}`,
+				text: `Failed to rename conversation: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -4549,46 +3487,17 @@ export class ClientSession {
 		if (changed) this.emitConversations();
 	}
 
-	/** Dismiss 口径的「已结束子代理」：非 streaming 且无保留态（存活终端/
-	 *  审查/后台唤醒等），与 dismissFinishedSubagents 的候选口径一致。 */
-	private isDismissableFinishedSubagent(conv: Conversation): boolean {
-		let streaming = true;
-		try {
-			streaming = conv.session.isStreaming;
-		} catch {
-			// 会话替换中——按运行中处理，绝不误删。
-		}
-		if (streaming) return false;
-		return !shouldRetainActive({
-			reviewing: conv.goal.reviewing,
-			wizardRunning: conv.wizardRunning,
-			streaming: false,
-			openTerminals: conv.terminals.countLive(),
-			listed: false,
-			promptedSinceActive: false,
-			hasActiveSubagentRun: () => hasActiveSubagentRun({ sessionId: conv.session.sessionFile }),
-			hasPendingWake: () => hasPendingWaitSubscription({ sessionId: conv.session.sessionFile }),
-		});
-	}
-
 	/** Dismiss a running conversation from the left-panel list without deleting its
 	 *  transcript file. Only idle (non-streaming) conversations that are not
-	 *  retained by terminal/wake/review state can be dismissed. The session stays
-	 *  in history and can be reopened.
-	 *
-	 *  withFinishedSubagents=true 时连带关闭该对话下已结束的子代理（传递后代，
-	 *  与 dismissFinishedSubagents 同口径；active 的子代理跳过）——只关不运行的：
-	 *  运行中的后代不受影响；关完后若还有后代剩下（运行中/保留中/active），父级
-	 *  暂留并提示。只有运行中的后代（无可关的）时拒绝。不传 + 存在已结束子代理
-	 *  后代时拒绝并提示（由前端确认框先问用户，避免静默 orphan）。 */
-	async dismissConversation(id: string, withFinishedSubagents?: boolean, force?: boolean): Promise<void> {
+	 *  retained by terminal state can be dismissed. The session stays in
+	 *  history and can be reopened. `force` aborts a running conversation first. */
+	async dismissConversation(id: string, force?: boolean): Promise<void> {
 		const conv = this.convs.get(id);
 		if (!conv) {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: "该对话不存在或已关闭",
-				textEn: "This conversation does not exist or is already closed",
+				text: "This conversation does not exist or is already closed",
 			});
 			return;
 		}
@@ -4597,9 +3506,6 @@ export class ClientSession {
 			this.emitConversations();
 			return;
 		}
-		// Streaming / retained conversations refuse dismissal — mirrors displaceActive retention.
-		// 运行中的子代理后代也阻止关闭（绝不连带 abort）；已结束的子代理后代：
-		// withFinishedSubagents 才连带，否则拒绝并提示（前端确认框先问用户）。
 		const isStreaming = (c: Conversation): boolean => {
 			try {
 				return c.session.isStreaming;
@@ -4607,31 +3513,15 @@ export class ClientSession {
 				return true;
 			}
 		};
-		const descendants = collectSubagentDescendantIds(
-			[...this.convs.values()].map((c) => ({ id: c.id, parentId: c.parentId, isSubagent: c.isSubagent })),
-			id,
-		)
-			.map((did) => this.convs.get(did))
-			.filter((c): c is Conversation => !!c);
 		if (force) {
-			await this.forceDismissConversation(conv, descendants, isStreaming);
+			await this.forceDismissConversation(conv, isStreaming);
 			return;
 		}
-		const runningKids = descendants.filter((c) => isStreaming(c));
-		// 父对话自身的保留态（流式/终端/审查/后台唤醒）——子代理后代另算。
-		const selfStreaming = (() => {
-			try {
-				return conv.session.isStreaming;
-			} catch {
-				return true;
-			}
-		})();
-		if (selfStreaming) {
+		if (isStreaming(conv)) {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: `对话「${conv.title}」仍在运行中，请先等待结束或点击停止后再移出`,
-				textEn: `Conversation "${conv.title}" is still running — wait for it to finish or press Stop before removing`,
+				text: `Conversation "${conv.title}" is still running — wait for it to finish or press Stop before removing`,
 			});
 			return;
 		}
@@ -4639,76 +3529,9 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: `对话「${conv.title}」还有未关闭的终端，请先关闭终端后再移出`,
-				textEn: `Conversation "${conv.title}" still has open terminals — close them before removing`,
+				text: `Conversation "${conv.title}" still has open terminals — close them before removing`,
 			});
 			return;
-		}
-		if (
-			shouldRetainActive({
-				reviewing: conv.goal.reviewing,
-				wizardRunning: conv.wizardRunning,
-				streaming: false,
-				openTerminals: 0,
-				listed: conv.listed,
-				promptedSinceActive: conv.promptedSinceActive,
-				hasActiveSubagentRun: () => hasActiveSubagentRun({ sessionId: conv.session.sessionFile }),
-				hasPendingWake: () => hasPendingWaitSubscription({ sessionId: conv.session.sessionFile }),
-			})
-		) {
-			this.emit({
-				type: "notice",
-				level: "warning",
-				text: `对话「${conv.title}」暂时无法移出（存在待处理的后台任务/审查）`,
-				textEn: `Conversation "${conv.title}" cannot be removed right now (pending background task/review)`,
-			});
-			return;
-		}
-		const finishedKids = descendants.filter(
-			(c) => c.listed && c.id !== this.activeId && this.isDismissableFinishedSubagent(c),
-		);
-		if (runningKids.length > 0 && finishedKids.length === 0) {
-			// 只有运行中的后代：连 flag 也变不出可关的，拒绝（绝不连带 abort）。
-			this.emit({
-				type: "notice",
-				level: "warning",
-				text: `对话「${conv.title}」还有 ${runningKids.length} 个运行中的子代理，请先等待结束或停止后再移出`,
-				textEn: `Conversation "${conv.title}" still has ${runningKids.length} running subagent(s) — wait for them to finish or stop them before removing`,
-			});
-			return;
-		}
-		if (finishedKids.length > 0 && !withFinishedSubagents) {
-			this.emit({
-				type: "notice",
-				level: "warning",
-				text: `对话「${conv.title}」下还有 ${finishedKids.length} 个已结束的子代理：连带关闭请确认，仅关闭父级请先在右键菜单清理子代理`,
-				textEn: `Conversation "${conv.title}" still has ${finishedKids.length} finished subagent(s): confirm to dismiss them together, or clear the subagents first (right-click menu) to dismiss only the parent`,
-			});
-			return;
-		}
-		// 只关不运行的：运行中的后代绝不连带 abort；关完后若还有后代剩下
-		// （运行中/保留中/active），父级暂留并提示。
-		let removedKids = 0;
-		for (const kid of finishedKids) {
-			if (kid.id === this.activeId) continue;
-			if (this.convs.get(kid.id) !== kid) continue;
-			this.removeConversation(kid.id);
-			removedKids++;
-		}
-		if (withFinishedSubagents && removedKids > 0) {
-			const remaining = descendants.filter((c) => this.convs.get(c.id) === c);
-			if (remaining.length > 0) {
-				const stillRunning = remaining.filter((c) => isStreaming(c)).length;
-				this.emit({
-					type: "notice",
-					level: "info",
-					text: `已关闭 ${removedKids} 个已结束的子代理，还有 ${remaining.length} 个子代理未关闭${stillRunning > 0 ? `（${stillRunning} 个运行中）` : ""}，父对话暂留`,
-					textEn: `Dismissed ${removedKids} finished subagent(s); ${remaining.length} subagent(s) remain${stillRunning > 0 ? ` (${stillRunning} running)` : ""}, keeping the parent`,
-				});
-				this.emitConversations();
-				this.flushSnapshot();
-				return;
-			}
 		}
 		// Dismissing the ACTIVE conversation: move active elsewhere first
 		// (another listed conversation, else a fresh chat), then remove.
@@ -4718,8 +3541,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "warning",
-					text: `当前对话「${conv.title}」暂时无法移出（无法创建接替对话）`,
-					textEn: `Cannot dismiss the active conversation "${conv.title}" right now (no replacement chat available)`,
+					text: `Cannot dismiss the active conversation "${conv.title}" right now (no replacement chat available)`,
 				});
 				this.emitConversations();
 				this.flushSnapshot();
@@ -4743,44 +3565,14 @@ export class ClientSession {
 		}
 		return this.activeId !== id;
 	}
-	/** 强行关闭：中止自身运行（如在跑）与全部子代理后代（运行中的也停），
-	 *  再整体移出；终端/审查/后台唤醒等保留态一并放行。active 的目标先让出
-	 *  active（vacateActive），active 的后代跳过、让出后再补移。 */
-	private async forceDismissConversation(
-		conv: Conversation,
-		descendants: Conversation[],
-		isStreaming: (c: Conversation) => boolean,
-	): Promise<void> {
+	/** Force dismiss: abort the run (if any), release terminal retention and
+	 *  remove. An active target is vacated first (vacateActive). */
+	private async forceDismissConversation(conv: Conversation, isStreaming: (c: Conversation) => boolean): Promise<void> {
 		const title = conv.title;
-		let stopped = 0;
-		for (const d of descendants) {
-			if (d.id === conv.id) continue;
-			if (this.convs.get(d.id) !== d) continue;
-			if (isStreaming(d)) {
-				try {
-					await this.subagentHost.stopSubagent(d.id);
-					stopped++;
-				} catch {
-					// best effort — removal below disposes the runtime anyway.
-				}
-			}
-		}
 		let selfAborted = false;
 		if (isStreaming(conv)) {
 			selfAborted = true;
-			await this.interruptRun(conv, "已强行关闭");
-		}
-		let removedKids = 0;
-		const deferred: Conversation[] = [];
-		for (const d of descendants) {
-			const cur = this.convs.get(d.id);
-			if (!cur || cur.id === conv.id) continue;
-			if (cur.id === this.activeId) {
-				deferred.push(cur);
-				continue;
-			}
-			this.removeConversation(cur.id);
-			removedKids++;
+			await this.interruptRun(conv, "Force-dismissed");
 		}
 		if (conv.id === this.activeId) {
 			const vacated = await this.vacateActive(conv.id);
@@ -4788,18 +3580,11 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "warning",
-					text: `对话「${title}」暂时无法强行关闭（无法创建接替对话）`,
-					textEn: `Cannot force-dismiss conversation "${title}" right now (no replacement chat available)`,
+					text: `Cannot force-dismiss conversation "${title}" right now (no replacement chat available)`,
 				});
 				this.emitConversations();
 				this.flushSnapshot();
 				return;
-			}
-		}
-		for (const d of deferred) {
-			if (this.convs.get(d.id) === d && d.id !== this.activeId) {
-				this.removeConversation(d.id);
-				removedKids++;
 			}
 		}
 		if (this.convs.get(conv.id) === conv && conv.id !== this.activeId) {
@@ -4807,139 +3592,11 @@ export class ClientSession {
 		}
 		this.emitConversations();
 		this.flushSnapshot();
-		const remaining = descendants.filter((c) => this.convs.get(c.id) === c).length;
 		this.emit({
 			type: "notice",
 			level: "info",
-			text: `已强行关闭对话「${title}」${removedKids > 0 ? `（含 ${removedKids} 个子代理）` : ""}${selfAborted ? "，本轮运行已中止" : ""}${stopped > 0 ? `，${stopped} 个运行中的子代理已中止` : ""}${remaining > 0 ? `；还有 ${remaining} 个子代理未关闭（已切为当前对话）` : ""}`,
-			textEn: `Force-dismissed conversation "${title}"${removedKids > 0 ? ` (incl. ${removedKids} subagent(s))` : ""}${selfAborted ? ", its run was aborted" : ""}${stopped > 0 ? `, ${stopped} running subagent(s) stopped` : ""}${remaining > 0 ? `; ${remaining} subagent(s) remain (now active)` : ""}`,
+			text: `Force-dismissed conversation "${title}"${selfAborted ? ", its run was aborted" : ""}`,
 		});
-	}
-	/** Bulk-dismiss finished subagents (left-panel right-click menu).
-	 *
-	 *  parentId omitted = every finished subagent in the running list;
-	 *  given = the transitive subagent descendants of that conversation
-	 *  (children, grandchildren, … — parentId chain followed recursively),
-	 *  plus the conversation itself when IT is a finished subagent.
-	 *  Finished = idle (not streaming, no retained terminal/review/wake
-	 *  state). Running ones are skipped, never aborted. Children are removed
-	 *  before parents so the "parent with live children refuses" guard in
-	 *  dismissConversation never blocks the batch. The active conversation is
-	 *  never removed. */
-	async dismissFinishedSubagents(parentId?: string): Promise<void> {
-		const root = parentId?.trim() ? parentId.trim() : undefined;
-		if (root && !this.convs.has(root)) {
-			this.emit({
-				type: "notice",
-				level: "warning",
-				text: "该对话不存在或已关闭",
-				textEn: "This conversation does not exist or is already closed",
-			});
-			return;
-		}
-		// Collect the subtree: every conversation whose parentId chain leads to
-		// root (or every subagent when root is omitted). Child-before-parent
-		// order via depth so parents become dismissable as children leave.
-		const depthOf = (id: string): number => {
-			let d = 0;
-			let cur = this.convs.get(id);
-			const seen = new Set<string>([id]);
-			while (cur?.parentId) {
-				if (seen.has(cur.parentId)) break;
-				seen.add(cur.parentId);
-				d++;
-				cur = this.convs.get(cur.parentId);
-				if (!cur) break;
-			}
-			return d;
-		};
-		const inScope = (conv: Conversation): boolean => {
-			if (!conv.isSubagent) return false;
-			if (conv.id === this.activeId) return false;
-			if (!conv.listed) return false;
-			if (!root) return true;
-			if (conv.id === root) return true;
-			let cur: Conversation | undefined = conv;
-			const seen = new Set<string>();
-			while (cur?.parentId) {
-				if (cur.parentId === root) return true;
-				if (seen.has(cur.parentId)) return false;
-				seen.add(cur.parentId);
-				cur = this.convs.get(cur.parentId);
-				if (!cur) return false;
-			}
-			return false;
-		};
-		const isStreaming = (conv: Conversation): boolean => {
-			try {
-				return conv.session.isStreaming;
-			} catch {
-				return true;
-			}
-		};
-		const candidates = [...this.convs.values()]
-			.filter(inScope)
-			// Running first would be pointless — drop streaming/retained up front.
-			.filter((conv) => !isStreaming(conv))
-			.filter(
-				(conv) =>
-					!shouldRetainActive({
-						reviewing: conv.goal.reviewing,
-						wizardRunning: conv.wizardRunning,
-						streaming: false,
-						openTerminals: conv.terminals.countLive(),
-						listed: false,
-						promptedSinceActive: false,
-						hasActiveSubagentRun: () => hasActiveSubagentRun({ sessionId: conv.session.sessionFile }),
-						hasPendingWake: () => hasPendingWaitSubscription({ sessionId: conv.session.sessionFile }),
-					}),
-			)
-			.sort((a, b) => depthOf(b.id) - depthOf(a.id));
-		if (candidates.length === 0) {
-			this.emit({
-				type: "notice",
-				level: "info",
-				text: "没有可关闭的已结束子代理",
-				textEn: "No finished subagents to dismiss",
-			});
-			return;
-		}
-		let removed = 0;
-		let skippedRunning = 0;
-		for (const conv of candidates) {
-			const cur = this.convs.get(conv.id);
-			if (!cur || cur.id === this.activeId) continue;
-			if (isStreaming(cur)) {
-				skippedRunning++;
-				continue;
-			}
-			// Re-check live children: earlier removals in this same batch may
-			// have cleared the guard; still-running children block the parent.
-			const liveChild = [...this.convs.values()].some((child) => child.parentId === cur.id && isStreaming(child));
-			if (liveChild) {
-				skippedRunning++;
-				continue;
-			}
-			this.removeConversation(cur.id);
-			removed++;
-		}
-		this.emitConversations();
-		this.flushSnapshot();
-		if (removed > 0) {
-			this.emit({
-				type: "notice",
-				level: "info",
-				text: `已关闭 ${removed} 个已结束的子代理${skippedRunning > 0 ? `（${skippedRunning} 个仍在运行，已跳过）` : ""}`,
-				textEn: `Dismissed ${removed} finished subagent(s)${skippedRunning > 0 ? ` (${skippedRunning} still running, skipped)` : ""}`,
-			});
-		} else {
-			this.emit({
-				type: "notice",
-				level: "info",
-				text: "没有可关闭的已结束子代理（剩余的仍在运行）",
-				textEn: "No finished subagents to dismiss (the rest are still running)",
-			});
-		}
 	}
 
 	/** Open a persisted session as the active conversation (from listSessions).
@@ -4971,23 +3628,18 @@ export class ClientSession {
 			const targetCwd = sessionManager.getCwd();
 			const conversationId = this.nextConversationId();
 			openedTerminals = this.makeTerminalManager(conversationId, targetCwd);
-			openedRuntime = await createAgentSessionRuntime(
-				this.makeRuntimeFactory(openedTerminals, undefined, conversationId),
-				{
-					cwd: targetCwd,
-					agentDir: this.agentDir,
-					sessionManager,
-				},
-			);
+			openedRuntime = await createAgentSessionRuntime(this.makeRuntimeFactory(openedTerminals, conversationId), {
+				cwd: targetCwd,
+				agentDir: this.agentDir,
+				sessionManager,
+			});
 
 			// Only displace the old active conversation after the replacement runtime
 			// is known-good. This keeps a failed history open entirely non-destructive.
 			const oldListed = this.conv.listed;
 			const displaced = this.displaceActive();
 			const openInProject =
-				[...this.convs.values()].filter((c) => c.cwd === targetCwd && !c.isSubagent).length +
-				1 -
-				(displaced?.cwd === targetCwd && !displaced?.isSubagent ? 1 : 0);
+				[...this.convs.values()].filter((c) => c.cwd === targetCwd).length + 1 - (displaced?.cwd === targetCwd ? 1 : 0);
 			if (openInProject > MAX_OPEN_CONVERSATIONS) {
 				// displaceActive() may have promoted a streaming conversation into the
 				// running list. Roll that presentation-only mutation back because no
@@ -5000,8 +3652,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "warning",
-					text: `当前项目运行的对话已达上限（${MAX_OPEN_CONVERSATIONS} 个），请先打开某个对话并离开（不继续对话）以移出列表`,
-					textEn: `This project already has the max open conversations (${MAX_OPEN_CONVERSATIONS}). Open one and leave it (without continuing) to remove it from the list.`,
+					text: `This project already has the max open conversations (${MAX_OPEN_CONVERSATIONS}). Open one and leave it (without continuing) to remove it from the list.`,
 				});
 				return;
 			}
@@ -5024,20 +3675,16 @@ export class ClientSession {
 			// Replay the resumed conversation's own statuses (role footer).
 			this.pushActiveStatuses();
 			this.emitConversations();
-			this.goalSvc.emitGoalStatus();
 			this.pushTerminals();
 			// The restored conversation has a fresh project-bound resource cache.
 			void this.pushSlashCommands();
-			// 切历史会话成功 → 插件重拉（轨迹视图立即显示该会话时间线）。
-			this.notifyConversationChanged();
 		} catch (err) {
 			openedTerminals?.killAll();
 			if (openedRuntime) await openedRuntime.dispose().catch(() => {});
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换会话失败：${(err as Error).message}`,
-				textEn: `Failed to switch session: ${(err as Error).message}`,
+				text: `Failed to switch session: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5090,8 +3737,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "warning",
-				text: "编辑内容为空，已取消",
-				textEn: "Edited content is empty — cancelled",
+				text: "Edited content is empty — cancelled",
 			});
 			this.flushSnapshot();
 			return;
@@ -5101,8 +3747,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: "找不到要编辑的消息（可能已被压缩或不在当前分支）",
-				textEn: "Message to edit not found (may have been compacted or is on another branch)",
+				text: "Message to edit not found (may have been compacted or is on another branch)",
 			});
 			this.flushSnapshot();
 			return;
@@ -5116,8 +3761,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: "已取消编辑重问",
-					textEn: "Edit-and-reask cancelled",
+					text: "Edit-and-reask cancelled",
 				});
 				this.flushSnapshot();
 				return;
@@ -5137,15 +3781,13 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "info",
-				text: "已从该问题重新提问（原对话保留在会话列表中）",
-				textEn: "Re-asked from that question (the original stays in the session list)",
+				text: "Re-asked from that question (the original stays in the session list)",
 			});
 		} catch (err) {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `编辑重问失败：${(err as Error).message}`,
-				textEn: `Edit-and-reask failed: ${(err as Error).message}`,
+				text: `Edit-and-reask failed: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5269,8 +3911,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换模型失败：${(err as Error).message}`,
-				textEn: `Failed to switch model: ${(err as Error).message}`,
+				text: `Failed to switch model: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5295,8 +3936,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "warning",
-					text: "请选择一个具体目录作为工作目录（此电脑本身不是目录）",
-					textEn: "Pick a concrete directory as the workspace (This PC itself is not a directory)",
+					text: "Pick a concrete directory as the workspace (This PC itself is not a directory)",
 				});
 				return;
 			}
@@ -5316,8 +3956,7 @@ export class ClientSession {
 				this.emit({
 					type: "notice",
 					level: "info",
-					text: `已在工作目录：${abs}`,
-					textEn: `Already in directory: ${abs}`,
+					text: `Already in directory: ${abs}`,
 				});
 				this.flushSnapshot();
 				return;
@@ -5345,21 +3984,18 @@ export class ClientSession {
 				// First visit to this project: resume its most recent session.
 				const conversationId = this.nextConversationId();
 				const terminals = this.makeTerminalManager(conversationId, abs);
-				const newRuntime = await createAgentSessionRuntime(
-					this.makeRuntimeFactory(terminals, undefined, conversationId),
-					{
-						cwd: abs,
-						agentDir: this.agentDir,
-						sessionManager: SessionManager.continueRecent(abs),
-					},
-				);
+				const newRuntime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, conversationId), {
+					cwd: abs,
+					agentDir: this.agentDir,
+					sessionManager: SessionManager.continueRecent(abs),
+				});
 				const conv = this.makeConversation(newRuntime, conversationId, terminals);
 				this.convs.set(conv.id, conv);
 				this.activeId = conv.id;
 				if (displaced) this.removeConversation(displaced.id);
 				for (const d of newRuntime.diagnostics) {
 					if (d.type !== "info") {
-						this.emit({ type: "notice", level: d.type, text: d.message, textEn: d.message });
+						this.emit({ type: "notice", level: d.type, text: d.message });
 					}
 				}
 				await this.bindSession();
@@ -5385,27 +4021,22 @@ export class ClientSession {
 			// own statuses so the role footer follows (issue #116).
 			this.pushActiveStatuses();
 			this.emitConversations();
-			this.goalSvc.emitGoalStatus();
 			// Skills / prompt templates are project-bound — refresh the catalog.
 			void this.pushSlashCommands();
 			this.emit({
 				type: "notice",
 				level: "info",
-				text: `已切换到工作目录：${abs}`,
-				textEn: `Switched to directory: ${abs}`,
+				text: `Switched to directory: ${abs}`,
 			});
 			void this.refreshSessions();
 			void this.listFiles(undefined);
 			// Commands are per-project (.pi/commands.json in the current cwd).
 			void this.listCommands();
-			// 切项目即换了当前打开对话 → 插件重拉。
-			this.notifyConversationChanged();
 		} catch (err) {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换工作目录失败：${(err as Error).message}`,
-				textEn: `Failed to switch directory: ${(err as Error).message}`,
+				text: `Failed to switch directory: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5444,8 +4075,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `获取模型列表失败：${(err as Error).message}`,
-				textEn: `Failed to fetch model list: ${(err as Error).message}`,
+				text: `Failed to fetch model list: ${(err as Error).message}`,
 			});
 		}
 	}
@@ -5453,50 +4083,6 @@ export class ClientSession {
 	// ---------------------------------------------------------------------------
 	// Goal / review
 	// ---------------------------------------------------------------------------
-
-	/** Goal family delegates to GoalService (see goal-service.ts). */
-	async setGoal(
-		goalText: string,
-		opts?: {
-			reviewModel?: string;
-			maxRounds?: number;
-			locked?: boolean;
-			autoStart?: boolean;
-		},
-	): Promise<void> {
-		return this.goalSvc.setGoal(goalText, opts);
-	}
-
-	async startGoalWizard(
-		text: string,
-		opts?: {
-			wizardModel?: string;
-			maxRounds?: number;
-			locked?: boolean;
-		},
-	): Promise<void> {
-		return this.goalSvc.startGoalWizard(text, opts);
-	}
-
-	async setGoalPrefs(opts?: { reviewModel?: string; maxRounds?: number; locked?: boolean }): Promise<void> {
-		return this.goalSvc.setGoalPrefs(opts);
-	}
-
-	async clearGoal(): Promise<void> {
-		return this.goalSvc.clearGoal();
-	}
-
-	/** Run a git diff (unstaged + staged) in a conversation's workspace, or
-	 * "" when not a repo. */
-	private async gitDiff(cwd: string): Promise<string> {
-		try {
-			const { code, out } = await this.runAsync("git", ["diff", "HEAD"], 10_000, cwd);
-			if (code !== 0) return "";
-			return out.slice(0, 60_000);
-		} catch {
-			return "";
-		}
-	}
 
 	/** Switch to a specific model by "provider/id" (e.g. "anthropic/claude-sonnet-5"). */
 	async setModel(modelId: string): Promise<void> {
@@ -5520,8 +4106,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换模型失败：${(err as Error).message}`,
-				textEn: `Failed to switch model: ${(err as Error).message}`,
+				text: `Failed to switch model: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5535,8 +4120,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换思考强度失败：${(err as Error).message}`,
-				textEn: `Failed to switch thinking level: ${(err as Error).message}`,
+				text: `Failed to switch thinking level: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5549,8 +4133,7 @@ export class ClientSession {
 			this.emit({
 				type: "notice",
 				level: "error",
-				text: `切换思考强度失败：${(err as Error).message}`,
-				textEn: `Failed to switch thinking level: ${(err as Error).message}`,
+				text: `Failed to switch thinking level: ${(err as Error).message}`,
 			});
 		}
 		this.flushSnapshot();
@@ -5558,22 +4141,22 @@ export class ClientSession {
 
 	/** Push the user command list (.pi/commands.json) to the client. */
 	async listCommands(): Promise<void> {
-		const { commands, path, warning, warningEn } = await loadCommands(this.cwd);
+		const { commands, path, warning } = await loadCommands(this.cwd);
 		if (warning) {
-			this.emit({ type: "notice", level: "warning", text: warning, textEn: warningEn });
+			this.emit({ type: "notice", level: "warning", text: warning });
 		}
 		this.emit({ type: "commands", commands, path });
 	}
 
 	/** Persist the user command list (.pi/commands.json). */
 	async saveCommands(commands: CommandDef[]): Promise<void> {
-		const { path, error, errorEn } = await saveCommandsFile(this.cwd, commands);
+		const { path, error } = await saveCommandsFile(this.cwd, commands);
 		if (error) {
-			this.emit({ type: "notice", level: "error", text: error, textEn: errorEn });
+			this.emit({ type: "notice", level: "error", text: error });
 			return;
 		}
 		this.emit({ type: "commands", commands, path });
-		this.emit({ type: "notice", level: "info", text: `命令已保存：${path}`, textEn: `Command saved: ${path}` });
+		this.emit({ type: "notice", level: "info", text: `Command saved: ${path}` });
 	}
 
 	async dispose(): Promise<void> {
@@ -5614,20 +4197,6 @@ export class ClientSession {
 }
 
 export class AgentService {
-	/** index.ts 注入：SDK 工具执行事件的插件转发钩子，attach 时拷贝到每个新会话。 */
-	onToolEvent: ((ev: PluginToolEvent) => void) | undefined = undefined;
-	/** index.ts 注入：运行轨迹事件的插件转发钩子，attach 时拷贝到每个新会话。 */
-	onRunEvent: ((ev: PluginRunEvent) => void) | undefined = undefined;
-	/** index.ts 注入：对话切换通知钩子，attach 时拷贝到每个新会话。 */
-	onConversationChanged: (() => void) | undefined = undefined;
-	/** index.ts 注入：读取插件当前注册的 AI 工具（attach 时拷贝到每个新会话）。 */
-	pluginToolsProvider: (() => PluginAgentTool[]) | undefined = undefined;
-	/** index.ts 注入：读取插件当前注册的斜杠命令（attach 时拷贝到每个新会话）。 */
-	pluginCommandsProvider: (() => PluginCommandDef[]) | undefined = undefined;
-	/** index.ts 注入：读取插件注册的常驻后台任务（并入 bg_servers 面板）。 */
-	pluginBgTasksProvider: (() => BgServer[]) | undefined = undefined;
-	/** index.ts 注入：停止插件任务（kill_background_server with taskId）。 */
-	pluginStopBgTask: ((taskId: string) => boolean) | undefined = undefined;
 	private clients = new Map<string, ClientSession>();
 	/** Quiesce (draining) state — the service refuses NEW work (prompts, forks,
 	 *  session resumes, new clients) so a deploy/upgrade/backup can stop cleanly
@@ -5688,20 +4257,6 @@ export class AgentService {
 		let n = 0;
 		for (const cs of this.clients.values()) n += cs.pendingMessages();
 		return n;
-	}
-
-	/** 插件用：全客户端最近活跃对话的快照（at 最大者即“当前打开的对话”）。 */
-	readConversationForPlugins(): PluginConversationSnapshot | null {
-		let best: PluginConversationSnapshot | null = null;
-		for (const cs of this.clients.values()) {
-			try {
-				const s = cs.readConversationForPlugins();
-				if (s && (!best || s.at > best.at)) best = s;
-			} catch {
-				/* 单客户端坏了不影响其他 */
-			}
-		}
-		return best;
 	}
 
 	/** index.ts calls this when a browser socket opens/closes. */
@@ -5777,8 +4332,7 @@ export class AgentService {
 					send({
 						type: "notice",
 						level: "info",
-						text: `已恢复上次的工作目录：${cwd}`,
-						textEn: `Restored the last working directory: ${cwd}`,
+						text: `Restored the last working directory: ${cwd}`,
 					});
 				}
 			}
@@ -5790,53 +4344,8 @@ export class AgentService {
 		cs.attachSink(send);
 		// Forward hooks (set once by index.ts) to every session.
 		cs.onQuit = this.onQuit;
-		cs.onToolEvent = this.onToolEvent;
-		cs.onRunEvent = this.onRunEvent;
-		cs.onConversationChanged = () => this.onConversationChanged?.();
-		cs.pluginToolsProvider = this.pluginToolsProvider;
-		cs.pluginCommandsProvider = this.pluginCommandsProvider;
-		cs.pluginBgTasksProvider = this.pluginBgTasksProvider;
-		cs.pluginStopBgTask = this.pluginStopBgTask;
 		cs.isQuiesced = () => this.quiesced;
-		// 插件宿主工作区跟随：初次接入也同步一次（恢复的 lastCwd 可能≠服务启动目录），
-		// notifyCwd 幂等去重；此后 set_cwd 成功时由 cs.onCwdChanged 继续驱动。
-		cs.onCwdChanged = (abs) => this.onClientCwdChanged?.(abs);
-		this.onClientCwdChanged?.(cs.cwd);
 		return cs;
-	}
-
-	/** 插件 AI 工具集合变化（注册/注销）时由 index.ts 触发：推送到所有客户端的全部会话。 */
-	applyPluginAgentTools(): void {
-		for (const cs of this.clients.values()) cs.refreshPluginTools();
-	}
-
-	/** Browser UI locale report (hello.locale / set_locale): persist per client
-	 *  and refresh lang-aware prompts (streaming-safe via ClientSession). */
-	async setLocale(clientId: string, locale: string): Promise<void> {
-		const cs = this.clients.get(clientId);
-		if (cs) {
-			await cs.setLocale(locale);
-			return;
-		}
-		// hello race: session still being created — wait for it, then apply.
-		const inflight = this.pending.get(clientId);
-		if (inflight) {
-			try {
-				await (await inflight).setLocale(locale);
-			} catch {
-				/* attach failed — nothing to apply to */
-			}
-		}
-	}
-
-	/** 插件斜杠命令集合变化时由 index.ts 触发：重推各客户端的命令目录。 */
-	applyPluginCommandCatalog(): void {
-		for (const cs of this.clients.values()) void cs.pushSlashCommands();
-	}
-
-	/** 插件常驻后台任务变化时由 index.ts 触发：重推各客户端的 bg_servers。 */
-	refreshBackgroundServers(): void {
-		for (const cs of this.clients.values()) cs.refreshBgTasks();
 	}
 
 	/** Remove a socket from a client's broadcast set (called on socket close). */

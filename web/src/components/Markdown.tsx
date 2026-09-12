@@ -1,4 +1,4 @@
-import { memo, useSyncExternalStore, type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
@@ -10,9 +10,6 @@ import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 import { CopyButton } from "./copy-button";
 import { splitCodeLines } from "../code-lines";
-import { childrenText, fenceLanguage } from "./mermaid";
-import { getFenceRegistryVersion, hasFenceRenderer, subscribeFenceRegistry } from "../plugin-fence";
-import { PluginFenceBlock } from "./PluginFenceBlock";
 
 interface MarkdownProps {
 	text: string;
@@ -73,20 +70,6 @@ export const Markdown = memo(function Markdown({ text, rawHtml = false, hardBrea
 });
 
 function PreWithCopy({ children, ...props }: JSX.IntrinsicElements["pre"]) {
-	// fenced-code 渲染插件机制：有插件认领 ```lang 时交给它渲染（mermaid → SVG
-	// 等），否则回退普通代码块（高亮 + 行号）。认领表由 server 的 plugins 清单 +
-	// plugin-fence.ts 维护，插件命中才懒加载。
-	//
-	// 订阅注册表版本：attach 时历史消息快照先于 plugins 清单到达，清单一到版本
-	// 变化 → 本组件（及整条渲染树）重渲染 → 未命中的 mermaid 围栏补挂插件宿主。
-	// useSyncExternalStore 会绕过外层 memo 的 props 比较，无需穿透传参。
-	// 第三参数提供同步 getServerSnapshot（= 当前版本），使 SSR/服务端渲染（renderToStaticMarkup）
-	// 不因缺 getServerSnapshot 抛错 —— 提问对话框/预览的代码块在服务端渲染时也能正常出图。
-	useSyncExternalStore(subscribeFenceRegistry, getFenceRegistryVersion, getFenceRegistryVersion);
-	const lang = fenceLanguage(children);
-	if (lang && hasFenceRenderer(lang)) {
-		return <PluginFenceBlock lang={lang} code={childrenText(children)} />;
-	}
 	return <PlainCodeBlock children={children} {...props} />;
 }
 

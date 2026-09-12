@@ -8,8 +8,8 @@ import {
 } from "../../web/src/components/left-panel-nav.js";
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
 
-function conv(id: string, cwd: string, parentId?: string): ConversationSummary {
-	return { id, title: id, cwd, messageCount: 1, isStreaming: false, isSubagent: false, parentId };
+function conv(id: string, cwd: string): ConversationSummary {
+	return { id, title: id, cwd, messageCount: 1, isStreaming: false };
 }
 
 function project(path: string, lastUsed: number): ProjectSummary {
@@ -30,17 +30,17 @@ describe("basename", () => {
 });
 
 describe("flattenConversations", () => {
-	it("父在前、子随后，深度递增", () => {
-		const rows = flattenConversations([conv("root", "/p"), conv("kid", "/p", "root"), conv("grand", "/p", "kid")]);
+	it("keeps list order, all rows at root depth", () => {
+		const rows = flattenConversations([conv("root", "/p"), conv("kid", "/p"), conv("grand", "/p")]);
 		expect(rows.map((r) => [r.c.id, r.depth])).toEqual([
 			["root", 0],
-			["kid", 1],
-			["grand", 2],
+			["kid", 0],
+			["grand", 0],
 		]);
 	});
 
-	it("父不在本组时，子退化为根，不丢条目", () => {
-		const rows = flattenConversations([conv("kid", "/p", "missing")]);
+	it("a single conversation is one root row", () => {
+		const rows = flattenConversations([conv("kid", "/p")]);
 		expect(rows).toEqual([{ c: expect.objectContaining({ id: "kid" }), depth: 0 }]);
 	});
 });
@@ -61,15 +61,6 @@ describe("buildLeftNav", () => {
 	it("当前项目优先，其余按 lastUsed 降序", () => {
 		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], new Map(), "/mid");
 		expect(groups.map((g) => g.path)).toEqual(["/mid", "/new", "/old"]);
-	});
-
-	it("子代理继承父对话的 cwd 归组", () => {
-		const groups = buildLeftNav([project("/a", 1)], [conv("root", "/a"), conv("kid", "/b", "root")], new Map(), "/a");
-		expect(groups.map((g) => g.path)).toEqual(["/a"]);
-		expect(groups[0].conversations.map((r) => [r.c.id, r.depth])).toEqual([
-			["root", 0],
-			["kid", 1],
-		]);
 	});
 
 	it("未登记项目的运行对话保留为未分组（不静默丢弃）", () => {

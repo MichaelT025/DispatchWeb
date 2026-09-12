@@ -1,40 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	FiArchive,
-	FiBox,
 	FiClock,
 	FiCpu,
-	FiDownload,
-	FiEdit3,
-	FiEye,
 	FiFileText,
-	FiHelpCircle,
 	FiMessageSquare,
 	FiPackage,
 	FiPlus,
-	FiRefreshCw,
-	FiSend,
 	FiSettings,
 	FiSliders,
 	FiTool,
 	FiTrash2,
-	FiUpload,
-	FiUsers,
 	FiX,
 	FiZap,
 } from "react-icons/fi";
 import { CopyButton } from "./copy-button";
 import { HintTip } from "./HintTip";
-import { PluginSettingsForm } from "./PluginSettingsForm";
-import type {
-	CommandDef,
-	UiExtensionInfo,
-	UiPluginCatalogEntry,
-	UiPluginInfo,
-	UiSettingsState,
-	UiSkillInfo,
-	UiSubagentTemplate,
-} from "../types";
+import { NotifyToggle } from "./NotifyToggle";
+import type { CommandDef, UiExtensionInfo, UiSettingsState, UiSkillInfo } from "../types";
 import {
 	clearPromptHistory,
 	loadPromptHistory,
@@ -44,19 +27,10 @@ import {
 import { randomUuid } from "../uuid";
 import { useWideChat, saveChatWidthSettings } from "../chat-width-settings";
 import { useProjectTitle, saveTitleSettings } from "../title-settings";
-import { sanitizeWallpaperUrl, fileToWallpaperUrl, saveWallpaperSettings, useWallpaperSettings } from "../wallpaper";
-import { useT, useI18n } from "../i18n";
-import { appSend, useAppGlobals } from "../app-globals";
-import { QUICK_PHRASE_DEFAULTS } from "../quick-phrases";
+import { useT } from "../i18n";
+import { appSend } from "../app-globals";
 import { DEFAULT_PROMPT_TEMPLATE, PROMPT_TOKENS, isReadonlyPromptSource } from "../../../server/prompt-composer.js";
-import {
-	ASK_USER_QUESTION_TOOL_NAME,
-	DELEGATE_TASK_TOOL_NAME,
-	EDIT_SOFT_TOOL_NAME,
-	MARKERS_LIST_TOOL_NAME,
-	SUBAGENT_TOOL_NAMES,
-	TERMINAL_TOOL_NAMES,
-} from "../../../server/tool-manager.js";
+import { ASK_USER_QUESTION_TOOL_NAME, TERMINAL_TOOL_NAMES } from "../../../server/tool-manager.js";
 
 /** Minimal terminal-tab bridge (same shape SCMPanel uses). */
 interface SettingsTerminalBridge {
@@ -78,12 +52,6 @@ interface SettingsTerminalBridge {
 interface SettingsModalProps {
 	chat: {
 		settings: UiSettingsState | null;
-		plugins: UiPluginInfo[];
-		/** Installable-plugin list (marketplace) — one-click install candidates. */
-		pluginCatalog: UiPluginCatalogEntry[];
-		/** DSH engine: <dataDir>/dsh-patches user patch files. */
-		dshPatches: { patchDir: string; files: { name: string; path: string; size: number; mtimeMs: number }[] } | null;
-		/** Engine id ("pi" | "dsh") 与 PI_WEB_MANAGED 已移到全局（web/src/app-globals.ts）。 */
 		terminals: {
 			id: string;
 			title: string;
@@ -99,14 +67,6 @@ interface SettingsModalProps {
 	/** Switch the top-level view to the terminal (uninstall runs there). */
 	onSwitchToTerminal: () => void;
 	onClose: () => void;
-}
-
-/** A row with an enable/disable switch (skill / extension). */
-/** 文件大小人类可读（设置面板 DSH 补丁列表用）。 */
-function formatBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** 各来源排序权重：append 置顶（最常用），可编辑居中，只读沉底（纯预览）。 */
@@ -158,32 +118,13 @@ function ToggleRow({
 }
 
 /** 设置弹窗的左侧分组导航（一次只显示一个区块，消灭长滚动）。 */
-type SettingsTab =
-	| "prompt"
-	| "prompt-history"
-	| "tools"
-	| "question"
-	| "display"
-	| "quick"
-	| "markers"
-	| "skills"
-	| "extensions"
-	| "plugins"
-	| "review"
-	| "vision"
-	| "presets"
-	| "subagent-templates";
+type SettingsTab = "prompt" | "prompt-history" | "tools" | "display" | "skills" | "extensions" | "presets";
 
 export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: SettingsModalProps) {
 	const t = useT();
-	const { locale } = useI18n();
 	// {{token}} 元数据文案键是动态的（promptTok_<token>[,_desc]），用 tt 跳过字面量类型。
 	const tt = (k: string) => t(k as Parameters<typeof t>[0]);
 	const settings = chat.settings;
-	// 全局运行态（引擎 / 受管）：不再从 App 一路传进来，见 web/src/app-globals.ts。
-	const { engine, managed } = useAppGlobals();
-	// DSH 引擎：无 pi 扩展/技能体系与视觉桥概念 —— 隐藏对应分区/改占位说明。
-	const isDsh = engine === "dsh";
 	// 当前左侧导航选中的分组。
 	const [tab, setTab] = useState<SettingsTab>("prompt");
 	// 内容滚动容器：切换分组后回到顶部（各组高度不同，停留旧滚动位置会像没切换）。
@@ -191,13 +132,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 	useEffect(() => {
 		bodyRef.current?.scrollTo({ top: 0 });
 	}, [tab]);
-	// DSH 引擎：打开插件分组时拉一次用户 patch 列表（pi 引擎忽略该消息）。
-	useEffect(() => {
-		if (tab === "plugins" && isDsh) {
-			appSend({ type: "dsh_patches_list" });
-		}
-	}, [tab, isDsh]);
-
 	// Compose prompt — 组合模板（{{token}} 自由拼装）+ 各来源覆盖。本地草稿：
 	// 模板聚焦中不覆盖；某个来源的覆盖框聚焦中不覆盖该 key（防回显打断输入）。
 	const [promptTemplateDraft, setPromptTemplateDraft] = useState("");
@@ -209,56 +143,13 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 	// 未覆盖来源行内默认内容预览：点击预览进入覆盖输入（editingSource）；长文本展开/收起。
 	const [editingSource, setEditingSource] = useState<string | null>(null);
 	const [defaultOpen, setDefaultOpen] = useState<Record<string, boolean>>({});
-	// Vision-bridge prompt draft — same local-edit/re-sync pattern as above.
-	const [vbPromptDraft, setVbPromptDraft] = useState("");
-	const [vbPromptMode, setVbPromptMode] = useState<"append" | "replace">("append");
-	const vbPromptFocus = useRef(false);
-	// Goal-review prompt is an independent draft: it does not change the main
-	// agent system prompt and is only used by the isolated reviewer.
-	const [reviewPromptDraft, setReviewPromptDraft] = useState("");
-	const reviewPromptFocus = useRef(false);
 	const [presetName, setPresetName] = useState("");
-	// 正在编辑的子代理模板草稿（新建 = 空模板；null = 关闭编辑表单）。
-	const [tplDraft, setTplDraft] = useState<UiSubagentTemplate | null>(null);
-	// 删除子代理模板的两步确认。
-	const [confirmTplDelete, setConfirmTplDelete] = useState<string | null>(null);
 	// Read-only viewer for the FULL system prompt actually in effect.
 	const [showFullPrompt, setShowFullPrompt] = useState(false);
 	const [showToolsSchema, setShowToolsSchema] = useState(false);
 	// 宽屏聊天列开关（纯前端 localStorage，见 chat-width-settings.ts）。
 	const wideChat = useWideChat();
 	const projectTitle = useProjectTitle();
-	// 聊天背景图（纯前端 localStorage，见 wallpaper.ts）：地址输入框用本地草稿，
-	// 失焦/回车才提交（避免边输边校验）；压暗/模糊滑杆直接提交即时预览。
-	const wallpaper = useWallpaperSettings();
-	const [wallpaperDraft, setWallpaperDraft] = useState(wallpaper.url);
-	const wallpaperFocus = useRef(false);
-	const wallpaperFileRef = useRef<HTMLInputElement>(null);
-	const [wallpaperUploading, setWallpaperUploading] = useState(false);
-	const [wallpaperUploadError, setWallpaperUploadError] = useState(false);
-	useEffect(() => {
-		// data: 图不回填输入框（太长），下方缩略预览即表示生效中。
-		if (!wallpaperFocus.current) setWallpaperDraft(wallpaper.url.startsWith("data:") ? "" : wallpaper.url);
-	}, [wallpaper.url]);
-	const onPickWallpaperFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-		const file = e.target.files?.[0];
-		e.target.value = "";
-		if (!file) return;
-		setWallpaperUploading(true);
-		setWallpaperUploadError(false);
-		try {
-			const url = await fileToWallpaperUrl(file);
-			const clean = url ? sanitizeWallpaperUrl(url) : "";
-			if (!clean) {
-				setWallpaperUploadError(true);
-				return;
-			}
-			setWallpaperDraft("");
-			saveWallpaperSettings({ ...wallpaper, url: clean });
-		} finally {
-			setWallpaperUploading(false);
-		}
-	};
 	// Prompt history settings (纯前端 localStorage，不经过 server).
 	const [phSettings, setPhSettings] = useState(() => loadPromptHistorySettings());
 	const [phCount, setPhCount] = useState(() => {
@@ -286,19 +177,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 	}, [phClearConfirm]);
 	// Two-step uninstall confirm: which extension id is awaiting confirmation.
 	const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
-	// Two-step uninstall confirm for UI plugins (<dataDir>/plugins).
-	const [confirmUiUninstall, setConfirmUiUninstall] = useState<string | null>(null);
-	// "Add to plugin list" form fields (plugin marketplace).
-	const [catSource, setCatSource] = useState("");
-	const [catId, setCatId] = useState("");
-	const [catName, setCatName] = useState("");
-	const [catDesc, setCatDesc] = useState("");
-	const [catIcon, setCatIcon] = useState("");
-	const [showCatAdd, setShowCatAdd] = useState(false);
-	// 快捷短语新增输入框草稿（Enter / 添加按钮提交）。
-	const [quickNew, setQuickNew] = useState("");
-	// 快捷短语行内编辑（null = 未在编辑；输入框受控于 value，回显不打断输入）。
-	const [quickEdit, setQuickEdit] = useState<{ index: number; value: string } | null>(null);
 
 	useEffect(() => {
 		if (!settings) return;
@@ -309,15 +187,7 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 			if (overrideFocus.current) next[overrideFocus.current] = prev[overrideFocus.current] ?? "";
 			return next;
 		});
-		setVbPromptMode(settings.visionBridgePromptMode);
-		if (vbPromptFocus.current) return;
-		setVbPromptDraft(
-			vbPromptMode === "append" || settings.visionBridgePrompt
-				? settings.visionBridgePrompt
-				: settings.visionBridgeDefaultPrompt || "",
-		);
-		if (!reviewPromptFocus.current) setReviewPromptDraft(settings.reviewPrompt);
-	}, [settings, vbPromptMode]);
+	}, [settings]);
 
 	const [idleMsDraft, setIdleMsDraft] = useState<string>(String(settings?.terminalBashIdleMs ?? 15000));
 	useEffect(() => {
@@ -348,38 +218,11 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 			label: t("settingsPromptHistory"),
 			count: phCount,
 		},
-		// 统一工具开关（tool-manager.ts 目录，逐工具）：DSH 引擎无子代理/edit_soft
-		// 概念，隐藏该分区；DSH 的问卷开关仍在“问卷提问”页（走 goal-rpc）。
-		...(isDsh
-			? [{ id: "question" as const, icon: <FiHelpCircle />, label: t("settingsQuestionnaire") }]
-			: [
-					{
-						id: "tools" as const,
-						icon: <FiTool />,
-						label: t("settingsTools"),
-						count: disabledToolsCount + (settings.disabledMarkers?.length ?? 0) || undefined,
-					},
-				]),
+		{ id: "tools", icon: <FiTool />, label: t("settingsTools"), count: disabledToolsCount || undefined },
 		{ id: "display", icon: <FiMessageSquare />, label: t("settingsMessageDisplay") },
-		{ id: "quick", icon: <FiSend />, label: t("quickPhrases"), count: settings.quickPhrases.length },
 		{ id: "skills", icon: <FiCpu />, label: t("settingsSkills"), count: settings.skills.length },
 		{ id: "extensions", icon: <FiPackage />, label: t("settingsExtensions"), count: settings.extensions.length },
-		{ id: "plugins", icon: <FiBox />, label: t("settingsUiPlugins"), count: chat.plugins.length },
-		{ id: "review", icon: <FiZap />, label: t("settingsReview"), count: settings.reviewSkills.length },
-		// DSH：无视觉桥概念（真图片直通 vision 模型），隐藏该分区。
-		...(isDsh ? [] : [{ id: "vision" as const, icon: <FiEye />, label: t("settingsVisionBridge") }]),
 		{ id: "presets", icon: <FiSliders />, label: t("settingsPresets"), count: settings.presets.length },
-		// DSH：无子代理概念，隐藏该分区。
-		...(isDsh
-			? []
-			: [
-					{
-						id: "subagent-templates" as const,
-						icon: <FiUsers />,
-						label: t("settingsSubagentTemplates"),
-						count: settings.subagentTemplates.length,
-					},
-				]),
 	];
 
 	const disabledSkills = new Set(settings.disabledSkills);
@@ -392,43 +235,17 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 		promptOverrides?: Record<string, string>;
 		disabledSkills?: string[];
 		disabledExtensions?: string[];
-		disabledPlugins?: string[];
-		/** 统一工具禁用名单（工具 tab 逐工具开关；遗留单开关仍可用，会折回此名单）。 */
+		/** Unified disabled-tool list (per-tool switches on the Tools tab). */
 		disabledAgentTools?: string[];
 		terminalToolsEnabled?: boolean;
 		terminalBash?: boolean;
 		terminalBashIdleMs?: number;
-		editSoftEnabled?: boolean;
 		questionnaireEnabled?: boolean;
-		goalModeEnabled?: boolean;
 		thinkingWrap?: boolean;
 		toolsWrap?: boolean;
 		skillsFullText?: string[];
-		quickPhrases?: string[];
-		quickPhrasesEnabled?: boolean;
-		visionBridgeEnabled?: boolean;
-		visionBridgeModel?: string | null;
-		visionBridgePromptMode?: "append" | "replace";
-		visionBridgePrompt?: string;
-		subagentDefaultModel?: string | null;
 		retryMaxAttempts?: number;
-		reviewPrompt?: string;
-		reviewDisabledSkills?: string[];
-		markersEnabled?: boolean;
-		disabledMarkers?: string[];
 	}) => appSend({ type: "set_settings", ...patch });
-
-	/** 提交快捷短语行内编辑（空 = 取消；与原值相同 = 无操作；其余走服务端归一化）。 */
-	const commitQuickEdit = () => {
-		if (!quickEdit || !settings) return;
-		const v = quickEdit.value.trim();
-		const i = quickEdit.index;
-		setQuickEdit(null);
-		if (!v || v === settings.quickPhrases[i]) return;
-		const next = [...settings.quickPhrases];
-		next[i] = v;
-		setPartial({ quickPhrases: next });
-	};
 
 	const toggleSkill = (s: UiSkillInfo) => {
 		const next = new Set(disabledSkills);
@@ -446,15 +263,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 		setPartial({ skillsFullText: [...next] });
 	};
 
-	const disabledPlugins = new Set(settings.disabledPlugins ?? []);
-	const installedPluginIds = new Set(chat.plugins.map((p) => p.id));
-	const togglePlugin = (p: UiPluginInfo) => {
-		const next = new Set(disabledPlugins);
-		if (next.has(p.id)) next.delete(p.id);
-		else next.add(p.id);
-		setPartial({ disabledPlugins: [...next] });
-	};
-
 	const toggleExtension = (e: UiExtensionInfo) => {
 		const next = new Set(disabledExts);
 		if (next.has(e.id)) next.delete(e.id);
@@ -462,16 +270,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 		setPartial({ disabledExtensions: [...next] });
 	};
 
-	// 子代理各工具的「?」说明（key 与 tool-manager.ts 的 SUBAGENT_TOOL_NAMES 对齐）。
-	const SUBAGENT_TOOL_TIPS: Record<string, string> = {
-		subagent_spawn: t("toolDescSubagentSpawn"),
-		subagent_get_result: t("toolDescSubagentGetResult"),
-		subagent_steer: t("toolDescSubagentSteer"),
-		subagent_list: t("toolDescSubagentList"),
-		subagent_stop: t("toolDescSubagentStop"),
-		subagent_wait_all: t("toolDescSubagentWaitAll"),
-		subagent_templates: t("toolDescSubagentTemplates"),
-	};
 	// 统一工具开关（工具 tab 逐工具；与 toggleSkill 同模式）。
 	const toggleAgentTool = (name: string) => {
 		const next = new Set(disabledTools);
@@ -480,21 +278,9 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 		setPartial({ disabledAgentTools: [...next] });
 	};
 
-	// ---- markers ----
-	const markersEnabled = settings.markersEnabled ?? true;
-	const disabledMarkers = new Set(settings.disabledMarkers ?? []);
-	const toggleMarker = (name: string) => {
-		const next = new Set(disabledMarkers);
-		const currentlyEnabled = !next.has(name);
-		if (currentlyEnabled) next.add(name);
-		else next.delete(name);
-		setPartial({ disabledMarkers: [...next] });
-	};
-
-	/** Run a maintenance command (extension uninstall / UI-plugin install or
-	 *  uninstall) in a VISIBLE terminal tab (same reuse pattern as SCM write
-	 *  ops) so the user sees exactly what happened. On exit the App watcher
-	 *  sends extensions_reload / plugins_reload to re-discover the lists. */
+	/** Run a maintenance command (extension uninstall) in a VISIBLE terminal
+	 *  tab (same reuse pattern as SCM write ops) so the user sees exactly what
+	 *  happened. On exit the App watcher sends extensions_reload. */
 	const runTerminalCommand = (title: string, command: string) => {
 		const cmd: CommandDef = {
 			name: title,
@@ -538,60 +324,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 	const runUninstall = (pkgName: string) => {
 		setConfirmUninstall(null);
 		runTerminalCommand(`${t("uninstallTitle")} ${pkgName}`, `pi remove npm:${pkgName}`);
-	};
-
-	/** Uninstall a UI plugin: delete <dataDir>/plugins/<id>/ via the CLI.
-	 *  plugins_reload after the tab exits re-scans the dir. */
-	const runUiPluginUninstall = (id: string) => {
-		setConfirmUiUninstall(null);
-		runTerminalCommand(`${t("uninstallTitle")} ${id}`, `pi-web-ui uninstall ${id}`);
-	};
-
-	/** Update a UI plugin from its recorded install source (.pi-source.json):
-	 *  re-run the same install command with --force (config.json survives). */
-	const runUiPluginUpdate = (id: string, source: string) => {
-		runTerminalCommand(`${t("pluginUpdate")} ${id}`, `pi-web-ui install ${source} --name ${id} --force`);
-	};
-
-	/** One-click install a plugin from the marketplace list (not installed
-	 *  yet). `--name <id>` pins the on-disk dir to the catalog id (drives
-	 *  installed-state match). 已装的走 runUiPluginUpdate（--force，即更新）。 */
-	const runCatalogInstall = (e: UiPluginCatalogEntry) => {
-		runTerminalCommand(`${t("pluginInstall")} ${e.id}`, `pi-web-ui install ${e.source} --name ${e.id}`);
-	};
-
-	/** Remove a user-added plugin from the marketplace list. */
-	const runCatalogRemove = (id: string) => {
-		appSend({ type: "plugin_catalog_remove", id });
-	};
-
-	/** Submit the "add to plugin list" form (server validates + persists). */
-	const submitCatalogAdd = () => {
-		const source = catSource.trim();
-		if (!source) return;
-		appSend({
-			type: "plugin_catalog_add",
-			entry: {
-				source,
-				...(catId.trim() ? { id: catId.trim() } : {}),
-				...(catName.trim() ? { name: catName.trim() } : {}),
-				...(catDesc.trim() ? { description: catDesc.trim() } : {}),
-				...(catIcon.trim() ? { icon: catIcon.trim() } : {}),
-			},
-		});
-		setCatSource("");
-		setCatId("");
-		setCatName("");
-		setCatDesc("");
-		setCatIcon("");
-		setShowCatAdd(false);
-	};
-
-	const toggleReviewSkill = (s: UiSkillInfo) => {
-		const disabled = new Set(settings.reviewSkills.filter((x) => !x.enabled).map((x) => x.name));
-		if (disabled.has(s.name)) disabled.delete(s.name);
-		else disabled.add(s.name);
-		setPartial({ reviewDisabledSkills: [...disabled] });
 	};
 
 	const commitTemplate = () => setPartial({ promptTemplate: promptTemplateDraft });
@@ -1132,90 +864,11 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 										/>
 									</div>
 								)}
-								<div className="set-field-label">{t("toolsSectionSubagent")}</div>
-								<div className="set-row-desc">{t("toolsSubagentDepHint")}</div>
-								{SUBAGENT_TOOL_NAMES.map((n) => (
-									<ToggleRow
-										key={n}
-										title={n}
-										tip={SUBAGENT_TOOL_TIPS[n]}
-										enabled={!disabledTools.has(n)}
-										onToggle={() => toggleAgentTool(n)}
-									/>
-								))}
-								<div className="set-field-label">
-									{t("settingsMarkers")}
-									<HintTip text={`${t("settingsMarkersDesc")}\n${t("markerRenameTip")}`} />
-								</div>
-								<ToggleRow
-									title={t("markersEnabled")}
-									tip={`${t("markersEnabledDesc")}\n${t("markersOffHint")}`}
-									enabled={markersEnabled}
-									onToggle={() => setPartial({ markersEnabled: !markersEnabled })}
-								/>
-								{markersEnabled && (settings.markers?.length ?? 0) === 0 && (
-									<p className="set-empty">{t("loading")}...</p>
-								)}
-								{markersEnabled &&
-									settings.markers &&
-									settings.markers.length > 0 &&
-									settings.markers.map((m) => (
-										<ToggleRow
-											key={m.name}
-											title={
-												m.name === "todo"
-													? t("markerGroupTodo")
-													: m.name === "notify"
-														? t("markerGroupNotify")
-														: m.name === "conv"
-															? t("markerGroupRename")
-															: m.name
-											}
-											tip={m.guidance.join("\n")}
-											enabled={m.enabled}
-											onToggle={() => toggleMarker(m.name)}
-										/>
-									))}
-								<ToggleRow
-									title={MARKERS_LIST_TOOL_NAME}
-									tip={`${t("todoListEnabledDesc")}\n${t("todoListOffHint")}`}
-									enabled={!disabledTools.has(MARKERS_LIST_TOOL_NAME)}
-									onToggle={() => toggleAgentTool(MARKERS_LIST_TOOL_NAME)}
-								/>
-								<div className="set-field-label">{t("toolsSectionOther")}</div>
-								<ToggleRow
-									title={EDIT_SOFT_TOOL_NAME}
-									tip={`${t("editSoftEnabledDesc")}\n${t("editSoftOffHint")}`}
-									enabled={!disabledTools.has(EDIT_SOFT_TOOL_NAME)}
-									onToggle={() => toggleAgentTool(EDIT_SOFT_TOOL_NAME)}
-								/>
-								<ToggleRow
-									title={DELEGATE_TASK_TOOL_NAME}
-									tip={`${t("delegateTaskEnabledDesc")}\n${t("delegateTaskOffHint")}`}
-									enabled={!disabledTools.has(DELEGATE_TASK_TOOL_NAME)}
-									onToggle={() => toggleAgentTool(DELEGATE_TASK_TOOL_NAME)}
-								/>
 								<ToggleRow
 									title={ASK_USER_QUESTION_TOOL_NAME}
 									tip={`${t("questionnaireEnabledDesc")}\n${t("questionnaireOffHint")}`}
 									enabled={!disabledTools.has(ASK_USER_QUESTION_TOOL_NAME)}
 									onToggle={() => toggleAgentTool(ASK_USER_QUESTION_TOOL_NAME)}
-								/>
-							</div>
-						)}
-
-						{/* ---- questionnaire (DSH only; pi moved into Tools) -------------- */}
-						{tab === "question" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiHelpCircle className="set-section-icon" />
-									{t("settingsQuestionnaire")}
-								</div>
-								<ToggleRow
-									title={t("questionnaireEnabled")}
-									tip={`${t("questionnaireEnabledDesc")}\n${t("questionnaireOffHint")}`}
-									enabled={settings.questionnaireEnabled}
-									onToggle={() => setPartial({ questionnaireEnabled: !settings.questionnaireEnabled })}
 								/>
 							</div>
 						)}
@@ -1279,240 +932,7 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 									onToggle={() => saveTitleSettings({ projectName: !projectTitle })}
 								/>
 								<hr className="set-sep" />
-								<div className="set-row">
-									<div className="set-row-info">
-										<div className="set-row-name">
-											{t("wallpaperTitle")}
-											<HintTip text={t("wallpaperDesc")} />
-										</div>
-										<div className="wallpaper-url-row">
-											<input
-												className="set-input wallpaper-url"
-												placeholder={t("wallpaperUrlPh")}
-												value={wallpaperDraft}
-												maxLength={2000}
-												spellCheck={false}
-												onFocus={() => {
-													wallpaperFocus.current = true;
-												}}
-												onChange={(e) => setWallpaperDraft(e.target.value)}
-												onBlur={() => {
-													wallpaperFocus.current = false;
-													// 已上传的 data: 图不占输入框：空输入 = 未改动，不断然清空。
-													if (!wallpaperDraft.trim() && wallpaper.url.startsWith("data:")) {
-														setWallpaperDraft("");
-														return;
-													}
-													const url = sanitizeWallpaperUrl(wallpaperDraft);
-													setWallpaperDraft(url);
-													if (url !== wallpaper.url) saveWallpaperSettings({ ...wallpaper, url });
-												}}
-												onKeyDown={(e) => {
-													if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-													else if (e.key === "Escape") {
-														setWallpaperDraft(wallpaper.url.startsWith("data:") ? "" : wallpaper.url);
-														(e.target as HTMLInputElement).blur();
-													}
-												}}
-											/>
-											<button
-												type="button"
-												className="set-save-btn"
-												disabled={wallpaperUploading}
-												onClick={() => wallpaperFileRef.current?.click()}
-											>
-												<FiUpload /> {t("wallpaperUpload")}
-											</button>
-											<input
-												ref={wallpaperFileRef}
-												type="file"
-												accept="image/*"
-												hidden
-												onChange={onPickWallpaperFile}
-											/>
-										</div>
-										{wallpaperUploadError && <p className="set-hint">{t("wallpaperUploadFailed")}</p>}
-										<div className="wallpaper-sliders">
-											<label className="wallpaper-slider">
-												<span>{t("wallpaperDim")}</span>
-												<input
-													type="range"
-													min={0}
-													max={95}
-													step={1}
-													value={wallpaper.dim}
-													onChange={(e) => saveWallpaperSettings({ ...wallpaper, dim: Number(e.target.value) })}
-												/>
-												<output>{wallpaper.dim}%</output>
-											</label>
-											<label className="wallpaper-slider">
-												<span>{t("wallpaperBlur")}</span>
-												<input
-													type="range"
-													min={0}
-													max={24}
-													step={1}
-													value={wallpaper.blur}
-													onChange={(e) => saveWallpaperSettings({ ...wallpaper, blur: Number(e.target.value) })}
-												/>
-												<output>{wallpaper.blur}px</output>
-											</label>
-										</div>
-									</div>
-									{wallpaper.url && (
-										<div className="wallpaper-current">
-											<img className="wallpaper-preview" src={wallpaper.url} alt="" />
-											<button
-												type="button"
-												className="wallpaper-clear"
-												onClick={() => {
-													setWallpaperDraft("");
-													saveWallpaperSettings({ ...wallpaper, url: "" });
-												}}
-											>
-												{t("wallpaperClear")}
-											</button>
-										</div>
-									)}
-								</div>
-							</div>
-						)}
-
-						{/* ---- 快捷短语（输入框上方一键发送） ------------------------------ */}
-						{tab === "quick" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiSend className="set-section-icon" />
-									{t("quickPhrases")}
-									<HintTip text={t("quickPhrasesDesc")} />
-									<span className="set-count">{settings.quickPhrases.length}</span>
-								</div>
-								<ToggleRow
-									title={t("quickPhrasesEnabled")}
-									tip={t("quickPhrasesDesc")}
-									enabled={settings.quickPhrasesEnabled}
-									onToggle={() => setPartial({ quickPhrasesEnabled: !settings.quickPhrasesEnabled })}
-								/>
-								{!settings.quickPhrasesEnabled && <p className="set-hint">{t("quickPhrasesOffHint")}</p>}
-								<div className="set-preset-save">
-									<input
-										className="set-input"
-										placeholder={t("quickPhrasesPlaceholder")}
-										value={quickNew}
-										maxLength={200}
-										onChange={(e) => setQuickNew(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" && quickNew.trim()) {
-												setPartial({ quickPhrases: [...settings.quickPhrases, quickNew.trim()] });
-												setQuickNew("");
-											}
-										}}
-									/>
-									<button
-										type="button"
-										className="set-save-btn"
-										disabled={!quickNew.trim()}
-										onClick={() => {
-											setPartial({ quickPhrases: [...settings.quickPhrases, quickNew.trim()] });
-											setQuickNew("");
-										}}
-									>
-										<FiPlus /> {t("quickPhrasesAdd")}
-									</button>
-								</div>
-								{settings.quickPhrases.length === 0 ? (
-									<p className="set-empty">{t("quickPhrasesEmpty")}</p>
-								) : (
-									<div className="set-list">
-										{settings.quickPhrases.map((p, i) => (
-											<div className="set-row" key={`${i}:${p}`}>
-												{quickEdit?.index === i ? (
-													<div className="set-row-info">
-														<input
-															className="set-input"
-															autoFocus
-															value={quickEdit.value}
-															maxLength={200}
-															placeholder={t("quickPhrasesEditPh")}
-															onChange={(e) => setQuickEdit({ index: i, value: e.target.value })}
-															onKeyDown={(e) => {
-																if (e.key === "Enter") commitQuickEdit();
-																else if (e.key === "Escape") setQuickEdit(null);
-															}}
-															onBlur={commitQuickEdit}
-														/>
-													</div>
-												) : (
-													<>
-														<div className="set-row-info">
-															<div className="set-row-name" title={p}>
-																{p}
-															</div>
-														</div>
-														<div className="set-row-actions">
-															<button
-																type="button"
-																className="set-icon-btn"
-																title={t("quickPhrasesEdit")}
-																onClick={() => setQuickEdit({ index: i, value: p })}
-															>
-																<FiEdit3 />
-															</button>
-															<button
-																type="button"
-																className="set-icon-btn"
-																title={t("quickPhrasesMoveUp")}
-																disabled={i === 0}
-																onClick={() => {
-																	const next = [...settings.quickPhrases];
-																	[next[i - 1], next[i]] = [next[i], next[i - 1]];
-																	setPartial({ quickPhrases: next });
-																}}
-															>
-																↑
-															</button>
-															<button
-																type="button"
-																className="set-icon-btn"
-																title={t("quickPhrasesMoveDown")}
-																disabled={i === settings.quickPhrases.length - 1}
-																onClick={() => {
-																	const next = [...settings.quickPhrases];
-																	[next[i], next[i + 1]] = [next[i + 1], next[i]];
-																	setPartial({ quickPhrases: next });
-																}}
-															>
-																↓
-															</button>
-															<button
-																type="button"
-																className="set-icon-btn danger"
-																title={t("quickPhrasesDelete")}
-																onClick={() =>
-																	setPartial({ quickPhrases: settings.quickPhrases.filter((_, j) => j !== i) })
-																}
-															>
-																<FiTrash2 />
-															</button>
-														</div>
-													</>
-												)}
-											</div>
-										))}
-									</div>
-								)}
-								<div className="compose-toolbar">
-									<button
-										type="button"
-										className="dd-refresh"
-										onClick={() => {
-											setQuickEdit(null);
-											setPartial({ quickPhrases: QUICK_PHRASE_DEFAULTS[locale] ?? QUICK_PHRASE_DEFAULTS.en });
-										}}
-									>
-										{t("quickPhrasesReset")}
-									</button>
-								</div>
+								<NotifyToggle />
 							</div>
 						)}
 
@@ -1526,7 +946,7 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 									<span className="set-count">{settings.skills.length}</span>
 								</div>
 								{settings.skills.length === 0 ? (
-									<p className="set-empty">{isDsh ? t("dshSkillsNote") : t("noSkills")}</p>
+									<p className="set-empty">{t("noSkills")}</p>
 								) : (
 									<div className="set-list">
 										{settings.skills.map((s) => (
@@ -1562,7 +982,7 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 									<span className="set-count">{settings.extensions.length}</span>
 								</div>
 								{settings.extensions.length === 0 ? (
-									<p className="set-empty">{isDsh ? t("dshExtensionsNote") : t("noExtensions")}</p>
+									<p className="set-empty">{t("noExtensions")}</p>
 								) : (
 									<div className="set-list">
 										{settings.extensions.map((e) => {
@@ -1603,414 +1023,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 										})}
 									</div>
 								)}
-							</div>
-						)}
-
-						{/* ---- 插件市场（可一键安装的插件列表） ------------------------ */}
-						{/* A managed instance installs software through its deploy, not
-						    through this page: the market would only offer an action the
-						    server refuses (server/managed.ts). Plugins already installed
-						    keep working and stay listed above. */}
-						{tab === "plugins" && managed && (
-							<div className="set-section">
-								<div className="set-note">{t("updatesManaged")}</div>
-							</div>
-						)}
-						{tab === "plugins" && !managed && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiPackage className="set-section-icon" />
-									{t("pluginMarket")}
-									<span className="set-count">{chat.pluginCatalog.length}</span>
-									<button
-										type="button"
-										className="set-uninstall"
-										title={t("pluginCatalogAddHint")}
-										onClick={() => setShowCatAdd((v) => !v)}
-									>
-										<FiPlus />
-										{t("pluginCatalogAdd")}
-									</button>
-								</div>
-								{showCatAdd && (
-									<div className="set-catalog-add">
-										<input
-											className="set-input"
-											placeholder={t("pluginCatalogSource")}
-											value={catSource}
-											onChange={(ev) => setCatSource(ev.target.value)}
-										/>
-										<input
-											className="set-input"
-											placeholder={t("pluginCatalogId")}
-											value={catId}
-											onChange={(ev) => setCatId(ev.target.value)}
-										/>
-										<input
-											className="set-input"
-											placeholder={t("pluginCatalogName")}
-											value={catName}
-											onChange={(ev) => setCatName(ev.target.value)}
-										/>
-										<input
-											className="set-input"
-											placeholder={t("pluginCatalogIcon")}
-											value={catIcon}
-											onChange={(ev) => setCatIcon(ev.target.value)}
-										/>
-										<textarea
-											className="set-input"
-											rows={2}
-											placeholder={t("pluginCatalogDesc")}
-											value={catDesc}
-											onChange={(ev) => setCatDesc(ev.target.value)}
-										/>
-										<div className="set-catalog-add-actions">
-											<button
-												type="button"
-												className="set-uninstall confirm"
-												disabled={!catSource.trim()}
-												onClick={submitCatalogAdd}
-											>
-												{t("pluginCatalogAddSubmit")}
-											</button>
-											<button type="button" className="set-uninstall" onClick={() => setShowCatAdd(false)}>
-												{t("cancel")}
-											</button>
-										</div>
-									</div>
-								)}
-								{chat.pluginCatalog.length === 0 ? (
-									<p className="set-empty">{t("noPluginCatalog")}</p>
-								) : (
-									<div className="set-list">
-										{chat.pluginCatalog.map((e) => {
-											const installed = installedPluginIds.has(e.id);
-											return (
-												<div key={e.id} className="set-catalog-row">
-													<div className="set-catalog-main">
-														<div className="set-catalog-title">
-															<span>
-																{e.icon ? `${e.icon} ` : ""}
-																{e.name}
-															</span>
-															{installed && <span className="set-catalog-installed">{t("pluginInstalled")}</span>}
-															{!e.builtin && <span className="set-catalog-custom">{t("pluginCatalogCustom")}</span>}
-														</div>
-														{e.description && <div className="set-catalog-desc">{e.description}</div>}
-														<div className="set-catalog-source">{e.source}</div>
-													</div>
-													<div className="set-row-actions">
-														{installed ? (
-															<>
-																<button
-																	type="button"
-																	className="set-uninstall"
-																	title={t("pluginUpdateHint")}
-																	onClick={() => runUiPluginUpdate(e.id, e.source)}
-																>
-																	<FiRefreshCw />
-																	{t("pluginUpdate")}
-																</button>
-																{confirmUiUninstall === e.id ? (
-																	<button
-																		type="button"
-																		className="set-uninstall confirm"
-																		title={t("pluginUninstallHint")}
-																		onClick={() => runUiPluginUninstall(e.id)}
-																	>
-																		{t("uninstallConfirm")}
-																	</button>
-																) : (
-																	<button
-																		type="button"
-																		className="set-uninstall"
-																		title={t("pluginUninstallHint")}
-																		onClick={() => setConfirmUiUninstall(e.id)}
-																	>
-																		<FiTrash2 />
-																		{t("uninstallExt")}
-																	</button>
-																)}
-															</>
-														) : (
-															<button
-																type="button"
-																className="set-uninstall"
-																title={t("pluginInstallHint")}
-																onClick={() => runCatalogInstall(e)}
-															>
-																<FiDownload />
-																{t("pluginInstall")}
-															</button>
-														)}
-														{!e.builtin && (
-															<button
-																type="button"
-																className="set-uninstall"
-																title={t("pluginCatalogRemoveHint")}
-																onClick={() => runCatalogRemove(e.id)}
-															>
-																<FiX />
-															</button>
-														)}
-													</div>
-												</div>
-											);
-										})}
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* ---- UI plugins（<dataDir>/plugins，纯 UI 隐藏） ----------------- */}
-						{tab === "plugins" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiBox className="set-section-icon" />
-									{t("settingsUiPlugins")}
-									<span className="set-count">{chat.plugins.length}</span>
-								</div>
-								{chat.plugins.length === 0 ? (
-									<p className="set-empty">{t("noUiPlugins")}</p>
-								) : (
-									<div className="set-list">
-										{chat.plugins.map((p) => (
-											<>
-												<ToggleRow
-													key={p.id}
-													title={`${p.icon ? `${p.icon} ` : ""}${p.name}`}
-													subtitle={
-														(p.error
-															? `${p.id} · ${p.error}`
-															: p.source
-																? `${p.id} · ${p.source}`
-																: `${p.id} · ${t("uiPluginNoSource")}`) +
-														(p.permissions?.length ? ` · ${t("uiPluginPerms")}: ${p.permissions.join(", ")}` : "")
-													}
-													enabled={!disabledPlugins.has(p.id) && !p.error}
-													onToggle={() => !p.error && togglePlugin(p)}
-													action={
-														<div className="set-row-actions">
-															{p.source && (
-																<button
-																	type="button"
-																	className="set-uninstall"
-																	title={t("pluginUpdateHint")}
-																	onClick={() => runUiPluginUpdate(p.id, p.source!)}
-																>
-																	<FiRefreshCw />
-																	{t("pluginUpdate")}
-																</button>
-															)}
-															{confirmUiUninstall === p.id ? (
-																<button
-																	type="button"
-																	className="set-uninstall confirm"
-																	title={t("pluginUninstallHint")}
-																	onClick={() => runUiPluginUninstall(p.id)}
-																>
-																	{t("uninstallConfirm")}
-																</button>
-															) : (
-																<button
-																	type="button"
-																	className="set-uninstall"
-																	title={t("pluginUninstallHint")}
-																	onClick={() => setConfirmUiUninstall(p.id)}
-																>
-																	<FiTrash2 />
-																	{t("uninstallExt")}
-																</button>
-															)}
-														</div>
-													}
-												/>
-												{/* 声明式设置：manifest settings schema → 自动渲染表单 */}
-												{p.settingsSchema && p.settingsSchema.length > 0 && <PluginSettingsForm plugin={p} />}
-											</>
-										))}
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* ---- DSH 用户补丁（<dataDir>/dsh-patches，仅 dsh 引擎） ---------- */}
-						{tab === "plugins" && isDsh && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiBox className="set-section-icon" />
-									{t("dshPatches")}
-									<HintTip text={t("dshPatchesDesc")} />
-									<span className="set-count">{chat.dshPatches?.files.length ?? 0}</span>
-									<button
-										type="button"
-										className="set-uninstall"
-										title={t("dshPatchesRescanHint")}
-										onClick={() => appSend({ type: "dsh_patches_rescan" })}
-									>
-										<FiRefreshCw />
-										{t("dshPatchesRescan")}
-									</button>
-								</div>
-								{(chat.dshPatches?.files.length ?? 0) === 0 ? (
-									<p className="set-empty">{t("dshPatchesEmpty")}</p>
-								) : (
-									<div className="set-list">
-										{chat.dshPatches!.files.map((f) => (
-											<div className="set-row" key={f.name}>
-												<div className="set-row-info">
-													<div className="set-row-name">{f.name}</div>
-													<div className="set-row-desc">
-														{formatBytes(f.size)} · {new Date(f.mtimeMs).toLocaleString()}
-													</div>
-												</div>
-											</div>
-										))}
-									</div>
-								)}
-								<p className="set-hint">
-									{t("dshPatchesPath")} {chat.dshPatches?.patchDir ?? ""}
-								</p>
-							</div>
-						)}
-
-						{/* ---- goal review ----------------------------------------------- */}
-						{tab === "review" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiZap className="set-section-icon" />
-									{t("settingsReview")}
-									<HintTip text={t("settingsReviewDesc")} />
-									<span className="set-count">{settings.reviewSkills.length}</span>
-								</div>
-								<ToggleRow
-									title={t("goalModeEnabled")}
-									tip={`${t("goalModeEnabledDesc")}\n${t("goalModeOffHint")}`}
-									enabled={settings.goalModeEnabled}
-									onToggle={() => setPartial({ goalModeEnabled: !settings.goalModeEnabled })}
-								/>
-								<textarea
-									className="set-prompt-input"
-									rows={5}
-									placeholder={t("reviewPromptPlaceholder")}
-									value={reviewPromptDraft}
-									onFocus={() => (reviewPromptFocus.current = true)}
-									onBlur={() => {
-										reviewPromptFocus.current = false;
-										setPartial({ reviewPrompt: reviewPromptDraft });
-									}}
-									onChange={(e) => setReviewPromptDraft(e.target.value)}
-								/>
-								<div className="set-field-label">
-									{t("settingsReviewSkills")}
-									{isDsh && (
-										<>
-											{" "}
-											<HintTip text={t("dshReviewPromptNote")} />
-										</>
-									)}
-								</div>
-								{settings.reviewSkills.length === 0 ? (
-									<p className="set-empty">{t("noSkills")}</p>
-								) : (
-									<div className="set-list">
-										{settings.reviewSkills.map((s) => (
-											<ToggleRow
-												key={`review-${s.name}`}
-												title={s.name}
-												subtitle={s.description}
-												enabled={s.enabled}
-												onToggle={() => toggleReviewSkill(s)}
-											/>
-										))}
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* ---- vision bridge ---------------------------------------------- */}
-						{tab === "vision" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiEye className="set-section-icon" />
-									{t("settingsVisionBridge")}
-								</div>
-								<ToggleRow
-									title={t("visionBridgeEnabled")}
-									tip={`${t("settingsVisionBridgeDesc")}\n${t("visionBridgeOffHint")}`}
-									enabled={settings.visionBridgeEnabled}
-									onToggle={() => setPartial({ visionBridgeEnabled: !settings.visionBridgeEnabled })}
-								/>
-								{settings.visionBridgeEnabled && (
-									<div className="set-mode-row">
-										<label className="set-field-label">{t("visionBridgeModel")}</label>
-										<select
-											className="set-select"
-											value={settings.visionBridgeModel ?? ""}
-											onChange={(e) => setPartial({ visionBridgeModel: e.target.value || null })}
-										>
-											<option value="">{t("visionBridgeAuto")}</option>
-											{settings.visionModels.map((m) => (
-												<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-													{m.label}
-												</option>
-											))}
-										</select>
-									</div>
-								)}
-								{settings.visionBridgeEnabled && (
-									<div className="set-mode-row">
-										<label className="set-field-label">{t("visionBridgePromptMode")}</label>
-										<select
-											className="set-select"
-											value={vbPromptMode}
-											onChange={(e) => {
-												const mode = e.target.value as "append" | "replace";
-												setVbPromptMode(mode);
-												setPartial({ visionBridgePromptMode: mode });
-											}}
-										>
-											<option value="append">{t("promptModeAppend")}</option>
-											<option value="replace">{t("promptModeReplace")}</option>
-										</select>
-									</div>
-								)}
-								{settings.visionBridgeEnabled && (
-									<textarea
-										className="set-prompt-input"
-										rows={4}
-										placeholder={t("visionBridgePromptPlaceholder")}
-										value={vbPromptDraft}
-										onFocus={() => (vbPromptFocus.current = true)}
-										onBlur={() => {
-											vbPromptFocus.current = false;
-											// Same contract as the system prompt: an unmodified copy of
-											// the built-in default is stored as empty (use default).
-											const text =
-												vbPromptMode === "replace" &&
-												settings.visionBridgeDefaultPrompt &&
-												vbPromptDraft === settings.visionBridgeDefaultPrompt
-													? ""
-													: vbPromptDraft;
-											setPartial({
-												visionBridgePromptMode: vbPromptMode,
-												visionBridgePrompt: text,
-											});
-										}}
-										onChange={(e) => setVbPromptDraft(e.target.value)}
-									/>
-								)}
-								{settings.visionBridgeEnabled &&
-									(settings.visionModels.length === 0 ? (
-										<p className="set-hint">{t("visionBridgeNoModels")}</p>
-									) : (
-										<p className="set-hint">
-											{t("visionBridgeCurrent", {
-												model: settings.visionBridgeModel ?? t("visionBridgeAuto"),
-											})}
-										</p>
-									))}
 							</div>
 						)}
 
@@ -2077,289 +1089,6 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 													>
 														<FiTrash2 />
 													</button>
-												</div>
-											</div>
-										))}
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* ---- subagent templates（全局共享；DSH 引擎隐藏该分区） ---------- */}
-						{tab === "subagent-templates" && (
-							<div className="set-section">
-								<div className="set-section-title">
-									<FiUsers className="set-section-icon" />
-									{t("settingsSubagentTemplates")}
-									<HintTip text={t("settingsSubagentTemplatesDesc")} />
-									<span className="set-count">{settings.subagentTemplates.length}</span>
-									<button
-										type="button"
-										className="set-save-btn"
-										title={t("subagentTemplateNew")}
-										onClick={() =>
-											setTplDraft({
-												name: "",
-												description: "",
-												promptMode: "replace",
-												systemPrompt: "",
-												enabledSkills: [],
-												enabledExtensions: [],
-												model: "",
-												enabled: true,
-											})
-										}
-									>
-										<FiPlus /> {t("subagentTemplateNew")}
-									</button>
-								</div>
-
-								{/* ---- 默认模型：全部子代理的兜底（模板/显式 model 参数优先） ---------- */}
-								<div className="set-mode-row">
-									<label className="set-field-label">
-										{t("subagentDefaultModelLabel")} <HintTip text={t("subagentDefaultModelHint")} />
-									</label>
-									<select
-										className="set-select"
-										value={settings.subagentDefaultModel ?? ""}
-										onChange={(e) => setPartial({ subagentDefaultModel: e.target.value || null })}
-									>
-										<option value="">{t("subagentFollowMain")}</option>
-										{settings.subagentModels.map((m) => (
-											<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-												{m.label}
-											</option>
-										))}
-									</select>
-								</div>
-								{settings.subagentModels.length === 0 && <p className="set-hint">{t("subagentNoModels")}</p>}
-
-								{/* ---- 编辑器（新建 / 编辑同表单） ------------------------------ */}
-								{tplDraft && (
-									<div className="tpl-editor">
-										<div className="tpl-fields">
-											<input
-												className="set-input"
-												placeholder={t("tplNamePlaceholder")}
-												value={tplDraft.name}
-												onChange={(e) => setTplDraft({ ...tplDraft, name: e.target.value })}
-											/>
-											<input
-												className="set-input"
-												placeholder={t("tplDescriptionPlaceholder")}
-												value={tplDraft.description}
-												onChange={(e) => setTplDraft({ ...tplDraft, description: e.target.value })}
-											/>
-											<input
-												className="set-input"
-												placeholder={t("tplDescriptionEnPlaceholder")}
-												value={tplDraft.descriptionEn ?? ""}
-												onChange={(e) => setTplDraft({ ...tplDraft, descriptionEn: e.target.value })}
-											/>
-										</div>
-										<div className="set-mode-row">
-											<label className="set-field-label">{t("tplPromptModeLabel")}</label>
-											<select
-												className="set-select"
-												value={tplDraft.promptMode}
-												onChange={(e) =>
-													setTplDraft({ ...tplDraft, promptMode: e.target.value as "append" | "replace" })
-												}
-											>
-												<option value="replace">{t("promptModeReplace")}</option>
-												<option value="append">{t("promptModeAppend")}</option>
-											</select>
-										</div>
-										<div className="set-mode-row">
-											<label className="set-field-label">{t("tplModelLabel")}</label>
-											<select
-												className="set-select"
-												value={tplDraft.model ?? ""}
-												onChange={(e) => setTplDraft({ ...tplDraft, model: e.target.value })}
-											>
-												<option value="">{t("subagentFollowMain")}</option>
-												{settings.subagentModels.map((m) => (
-													<option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-														{m.label}
-													</option>
-												))}
-											</select>
-										</div>
-										<textarea
-											className="set-prompt-input"
-											rows={4}
-											placeholder={`${t("tplSystemPromptLabel")}${locale === "zh" ? "：" : ": "}${t("tplSystemPromptPlaceholder")}`}
-											value={tplDraft.systemPrompt}
-											onChange={(e) => setTplDraft({ ...tplDraft, systemPrompt: e.target.value })}
-										/>
-										<textarea
-											className="set-prompt-input"
-											rows={4}
-											placeholder={`${t("tplSystemPromptLabel")}: ${t("tplSystemPromptEnPlaceholder")}`}
-											value={tplDraft.systemPromptEn ?? ""}
-											onChange={(e) => setTplDraft({ ...tplDraft, systemPromptEn: e.target.value })}
-										/>
-										<div className="tpl-pick-block">
-											<div className="tpl-pick-head">
-												<span>
-													{t("tplSkillsLabel")} · {t("tplWhitelistHint")}
-												</span>
-											</div>
-											{settings.skills.length === 0 ? (
-												<p className="set-hint">{t("noSkills")}</p>
-											) : (
-												<div className="tpl-pick">
-													{settings.skills.map((s) => (
-														<label
-															key={s.name}
-															className={`tpl-chip${tplDraft.enabledSkills.includes(s.name) ? " on" : ""}`}
-														>
-															<input
-																type="checkbox"
-																checked={tplDraft.enabledSkills.includes(s.name)}
-																onChange={(e) => {
-																	const on = e.target.checked;
-																	setTplDraft({
-																		...tplDraft,
-																		enabledSkills: on
-																			? [...tplDraft.enabledSkills, s.name]
-																			: tplDraft.enabledSkills.filter((n) => n !== s.name),
-																	});
-																}}
-															/>
-															{s.name}
-														</label>
-													))}
-												</div>
-											)}
-										</div>
-										<div className="tpl-pick-block">
-											<div className="tpl-pick-head">
-												<span>
-													{t("tplExtensionsLabel")} · {t("tplWhitelistHint")}
-												</span>
-											</div>
-											{settings.extensions.length === 0 ? (
-												<p className="set-hint">{t("noExtensions")}</p>
-											) : (
-												<div className="tpl-pick">
-													{settings.extensions.map((x) => (
-														<label
-															key={x.id}
-															className={`tpl-chip${tplDraft.enabledExtensions.includes(x.id) ? " on" : ""}`}
-														>
-															<input
-																type="checkbox"
-																checked={tplDraft.enabledExtensions.includes(x.id)}
-																onChange={(e) => {
-																	const on = e.target.checked;
-																	setTplDraft({
-																		...tplDraft,
-																		enabledExtensions: on
-																			? [...tplDraft.enabledExtensions, x.id]
-																			: tplDraft.enabledExtensions.filter((id) => id !== x.id),
-																	});
-																}}
-															/>
-															{x.name}
-														</label>
-													))}
-												</div>
-											)}
-										</div>
-										<div className="tpl-actions">
-											<button
-												type="button"
-												className="set-save-btn"
-												disabled={!tplDraft.name.trim()}
-												onClick={() => {
-													appSend({
-														type: "save_subagent_template",
-														template: { ...tplDraft, name: tplDraft.name.trim() },
-													});
-													setTplDraft(null);
-												}}
-											>
-												{t("tplSave")}
-											</button>
-											<button type="button" className="dd-refresh" onClick={() => setTplDraft(null)}>
-												{t("tplCancel")}
-											</button>
-										</div>
-									</div>
-								)}
-
-								{/* ---- 模板列表 ------------------------------------------------ */}
-								{settings.subagentTemplates.length === 0 ? (
-									<p className="set-empty">{t("noSubagentTemplates")}</p>
-								) : (
-									<div className="set-list">
-										{settings.subagentTemplates.map((tp) => (
-											<div className="set-row" key={tp.name}>
-												<div className="set-row-info">
-													<div className="set-row-name">
-														{tp.name}
-														{settings.subagentDefaultTemplates.includes(tp.name) && (
-															<span className="tpl-badge default">{t("tplDefaultBadge")}</span>
-														)}
-														{!tp.enabled && <span className="tpl-badge">{t("subagentTemplateClosed")}</span>}
-													</div>
-													<div className="set-row-desc">
-														{(locale !== "zh" && tp.descriptionEn ? tp.descriptionEn : tp.description) ||
-															`${tp.promptMode === "replace" ? t("promptModeReplace") : t("promptModeAppend")}`}
-														{tp.model ? ` · ${t("tplModelLabel")} ${tp.model}` : ` · ${t("subagentFollowMain")}`}
-														{tp.enabledSkills.length > 0 && ` · ${t("tplSkillsLabel")} ${tp.enabledSkills.length}`}
-														{tp.enabledExtensions.length > 0 &&
-															` · ${t("tplExtensionsLabel")} ${tp.enabledExtensions.length}`}
-														{!tp.description &&
-															tp.enabledSkills.length === 0 &&
-															tp.enabledExtensions.length === 0 &&
-															` · ${t("tplInherit")}`}
-													</div>
-												</div>
-												<div className="set-row-actions">
-													<button
-														type="button"
-														className={`set-switch${tp.enabled ? " on" : ""}`}
-														role="switch"
-														aria-checked={tp.enabled}
-														title={`${tp.enabled ? t("subagentTemplateDisable") : t("subagentTemplateEnable")} · ${t("subagentTemplateOffHint")}`}
-														onClick={() =>
-															appSend({ type: "save_subagent_template", template: { ...tp, enabled: !tp.enabled } })
-														}
-													>
-														<span className="set-switch-knob" />
-													</button>
-													<button
-														type="button"
-														className="dd-refresh"
-														title={t("subagentTemplateEdit")}
-														onClick={() => setTplDraft({ ...tp })}
-													>
-														{t("subagentTemplateEdit")}
-													</button>
-													{confirmTplDelete === tp.name ? (
-														<button
-															type="button"
-															className="set-uninstall confirm"
-															title={t("uninstallConfirmHint")}
-															onClick={() => {
-																appSend({ type: "delete_subagent_template", name: tp.name });
-																setConfirmTplDelete(null);
-															}}
-														>
-															{t("uninstallConfirm")}
-														</button>
-													) : (
-														<button
-															type="button"
-															className="set-icon-btn danger"
-															title={t("tplDelete")}
-															onClick={() => setConfirmTplDelete(tp.name)}
-														>
-															<FiTrash2 />
-														</button>
-													)}
 												</div>
 											</div>
 										))}

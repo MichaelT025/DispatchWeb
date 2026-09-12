@@ -94,8 +94,6 @@ export class BgServerTracker {
 			emit: (msg: ServerMessage) => void;
 			flushSnapshot: () => void;
 			isDisposed: () => boolean;
-			/** 插件注册的常驻任务（host.registerBackgroundTask）→ 追加进同一列表。 */
-			pluginTasks?: () => BgServer[];
 		},
 	) {}
 
@@ -161,8 +159,7 @@ export class BgServerTracker {
 			this.opts.emit({
 				type: "notice",
 				level: "info",
-				text: `检测到 AI 启动的后台服务：端口 ${port}（pid ${pid}）——可在顶栏「后台任务」里单独停止或全部关闭`,
-				textEn: `Detected an AI-started background service: port ${port} (pid ${pid}) — stop it individually or all at once under Background tasks in the top bar`,
+				text: `Detected an AI-started background service: port ${port} (pid ${pid}) — stop it individually or all at once under Background tasks in the top bar`,
 			});
 		}
 		if (added) this.push();
@@ -196,7 +193,6 @@ export class BgServerTracker {
 				...(v.command ? { command: v.command } : {}),
 			}))
 			.sort((a, b) => a.since - b.since);
-		for (const t of this.opts.pluginTasks?.() ?? []) out.push(t);
 		return out;
 	}
 
@@ -236,8 +232,7 @@ export class BgServerTracker {
 			this.opts.emit({
 				type: "notice",
 				level: "info",
-				text: `端口 ${port} 不在后台任务列表中`,
-				textEn: `Port ${port} is not in the background task list`,
+				text: `Port ${port} is not in the background task list`,
 			});
 			this.opts.flushSnapshot();
 			return false;
@@ -248,8 +243,7 @@ export class BgServerTracker {
 		this.opts.emit({
 			type: "notice",
 			level: "info",
-			text: `已停止后台任务：端口 ${port}（pid ${entry.pid}）`,
-			textEn: `Stopped background task: port ${port} (pid ${entry.pid})`,
+			text: `Stopped background task: port ${port} (pid ${entry.pid})`,
 		});
 		this.opts.flushSnapshot();
 		return true;

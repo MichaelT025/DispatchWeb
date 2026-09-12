@@ -207,15 +207,12 @@ async function run() {
  * 删除“当前对话”的自动切走行为（独立第二套环境，避免干扰上面的既有用例）：
  *   A) 当前对话持有目标文件 + 存在更早历史 → 自动切到次新会话，再删文件；
  *   B) 当前对话持有唯一的会话文件 → 自动新建空白对话，再删文件，服务不崩；
- *   C) 后台对话（未过期 pi-subagents wake 订阅保留）持有目标文件 → 拒绝删除。
  */
 async function runCurrentSessionCases() {
 	const base2 = mkdtempSync(join(tmpdir(), "pi-web-lp-del-cur-"));
 	const workDir2 = join(base2, "proj");
 	const dataDir2 = mkdtempSync(join(tmpdir(), "pi-web-lp-del-cur-data-"));
 	const agentDir2 = join(base2, "agent");
-	// PI_SUBAGENTS_TEMP_ROOT：让 wake 订阅扫描落在本测试可控的目录里
-	const subRoot = join(base2, "pi-subagents-root");
 	mkdirSync(workDir2, { recursive: true });
 
 	// 先种旧会话再种新会话：mtime 与消息时间戳一致地让“最新”= cur-target（continueRecent 取最新）
@@ -228,7 +225,6 @@ async function runCurrentSessionCases() {
 		PI_WEB_DATA_DIR: dataDir2,
 		PI_CODING_AGENT_DIR: agentDir2,
 		PI_WEB_CWD: workDir2,
-		PI_SUBAGENTS_TEMP_ROOT: subRoot,
 	});
 	const URL2 = `ws://localhost:${PORT + 1}/ws`;
 	const c = await connect(URL2);
@@ -279,48 +275,8 @@ async function runCurrentSessionCases() {
 		"sessions（B 删后刷新）",
 	);
 
-	// C) 后台对话持有目标文件 → 拒绝删除（wake 订阅让切走时保留运行时）
-	const sessBg = seedSession(null, "cur-bg", workDir2, "后台占用的对话", 1722700803000, agentDir2);
-	const sessAfter = seedSession(null, "cur-after", workDir2, "切换目标对话", 1722700804000, agentDir2);
-	const subDir = join(subRoot, "wait-subscriptions");
-	mkdirSync(subDir, { recursive: true });
-	const bgToken = "3f2b8c64-1a2b-4c3d-9e4f-5a6b7c8d9e0f";
-	writeFileSync(
-		join(subDir, `${bgToken}.json`),
-		JSON.stringify({
-			version: 1,
-			token: bgToken,
-			sessionId: sessBg, // 会话 .jsonl 绝对路径（与 conv.session.sessionFile 一致）
-			targetKind: "async",
-			runId: "run-del-test",
-			requestedId: "req-del-test",
-			createdAt: Date.now(),
-			expiresAt: Date.now() + 10 * 60_000,
-		}),
-	);
-
-	c.send({ type: "switch_session", path: sessBg });
-	const onBg = await c.next((m) => stateMsg(m) && m.state.sessionFile === sessBg, "切到后台目标会话");
-	const bgConvId = onBg.state.conversationId;
-	c.send({ type: "switch_session", path: sessAfter });
-	await c.next((m) => stateMsg(m) && m.state.sessionFile === sessAfter, "切走（后台保留）");
-	const convsC = await c.next(
-		(m) => m.type === "conversations" && (m.conversations ?? []).some((x) => x.id === bgConvId),
-		"conversations（后台对话在运行列表）",
-	);
-	check(
-		"切走后原对话保留为后台运行",
-		(convsC.conversations ?? []).some((x) => x.id === bgConvId),
-		bgConvId,
-	);
-
-	c.send({ type: "delete_session", path: sessBg });
-	const nC = await c.next(
-		(m) => m.type === "notice" && m.level === "warning" && m.text === "该对话正在后台运行，请先停止或关闭该对话再删除",
-		"后台占用拒绝删除提示",
-	);
-	check("后台对话占用的会话拒绝删除", typeof nC.text === "string" && nC.text.includes("后台运行"), nC.text);
-	check("后台会话文件仍在磁盘", existsSync(sessBg), sessBg);
+	// Running-session deletion is covered by conv-cross-project-test with a
+	// real local streaming provider, rather than removed wait subscriptions.
 
 	c.ws.close();
 }

@@ -4259,48 +4259,55 @@ export class ClientSession {
 	private sessionsRequested = false;
 
 	/**
-	 * Last parsed session list for this cwd, cached briefly so repeated
+	 * Last parsed session lists, keyed by cwd and cached briefly so repeated
 	 * global-search keystrokes don't re-parse every transcript file on each
 	 * request (a project can hold 100+ sessions of several MB each).
 	 * pushSessions() and searchSessions() share this fridge — opening the
-	 * panel warms it, then every keystroke inside the TTL is free.
+	 * panel (or expanding a project group) warms it, then every keystroke
+	 * inside the TTL is free. Keyed by cwd so a non-current project's listing
+	 * never pollutes or races the active cwd's fridge.
 	 */
-	private sessionInfosCache: { cwd: string; infos: SessionInfo[]; at: number } | null = null;
+	private sessionInfosCache = new Map<string, { infos: SessionInfo[]; at: number }>();
 	private static readonly SESSION_INFO_CACHE_TTL = 3000;
 
-	private async loadSessionInfos(): Promise<SessionInfo[]> {
+	private async loadSessionInfos(cwd: string = this.cwd): Promise<SessionInfo[]> {
 		const now = Date.now();
-		const c = this.sessionInfosCache;
-		if (c && c.cwd === this.cwd && now - c.at < ClientSession.SESSION_INFO_CACHE_TTL) {
+		const c = this.sessionInfosCache.get(cwd);
+		if (c && now - c.at < ClientSession.SESSION_INFO_CACHE_TTL) {
 			return c.infos;
 		}
-		const infos = await SessionManager.list(this.cwd, piSessionsRoot());
-		this.sessionInfosCache = { cwd: this.cwd, infos, at: now };
+		const infos = await SessionManager.list(cwd, piSessionsRoot());
+		this.sessionInfosCache.set(cwd, { infos, at: now });
 		return infos;
 	}
 
 	/** Session files on disk changed (delete / new-transcript) — drop the brief
 	 *  TTL fridge so the NEXT listing re-reads the directory instead of serving
 	 *  the pre-mutation snapshot (delete-then-refresh commonly runs inside the
-	 *  window, which would re-push the just-removed session). */
-	private invalidateSessionInfos(): void {
-		this.sessionInfosCache = null;
+	 *  window, which would re-push the just-removed session). Scoped by cwd:
+	 *  only the mutated project's entry is dropped; omit cwd to drop all. */
+	private invalidateSessionInfos(cwd?: string): void {
+		if (cwd === undefined) this.sessionInfosCache.clear();
+		else this.sessionInfosCache.delete(cwd);
 	}
 
-	/** Push the persisted session list to the client (client-requested). */
-	async refreshSessions(): Promise<void> {
+	/** Push the persisted session list to the client (client-requested).
+	 *  `cwd` scopes the listing to one project; omitted = active cwd. */
+	async refreshSessions(cwd?: string): Promise<void> {
 		this.sessionsRequested = true;
-		await this.pushSessions();
+		await this.pushSessions(cwd);
 	}
 
-	private async pushSessions(): Promise<void> {
+	private async pushSessions(cwd?: string): Promise<void> {
 		if (!this.sessionsRequested) return;
-		if (!this.sessionsRequested) return;
+		const targetCwd = cwd ?? this.cwd;
 		try {
 			// Sessions live in the SDK default per-project dir
 			// (<agentDir>/sessions/--<cwd>--/), the same files the pi CLI/TUI
-			// use — one listing covers every conversation of the current folder.
-			const infos = await this.loadSessionInfos();
+			// use — one listing covers every conversation of one folder. The
+			// echoed `cwd` lets the client attribute the reply to the right
+			// project group even when several scoped queries are in flight.
+			const infos = await this.loadSessionInfos(targetCwd);
 
 			const sessions = new Map<string, SessionSummary>();
 			for (const s of infos) {
@@ -4314,9 +4321,9 @@ export class ClientSession {
 				});
 			}
 			const sorted = [...sessions.values()].sort((a, b) => b.modified - a.modified).slice(0, 200); // newest first — the panel shows recent history
-			this.emit({ type: "sessions", sessions: sorted });
+			this.emit({ type: "sessions", cwd: targetCwd, sessions: sorted });
 		} catch {
-			this.emit({ type: "sessions", sessions: [] });
+			this.emit({ type: "sessions", cwd: targetCwd, sessions: [] });
 		}
 	}
 
@@ -4407,12 +4414,23 @@ export class ClientSession {
 					return;
 				}
 			}
+			// Resolve the deleted transcript's project BEFORE unlinking so the
+			// refresh targets that project's listing (a history entry from a
+			// non-current group must refresh its OWN group, not the active cwd).
+			let affectedCwd: string | undefined = holder ? this.cwd : undefined;
+			if (!holder) {
+				try {
+					affectedCwd = SessionManager.open(abs).getCwd() || undefined;
+				} catch {
+					affectedCwd = undefined;
+				}
+			}
 			rmSync(abs, { force: true });
-			// Bust the brief session-info fridge: refreshSessions() below usually
-			// lands inside its 3s TTL and would otherwise re-serve a listing that
-			// still contains the deleted transcript.
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			// Bust the brief session-info fridge for THAT project: refreshSessions()
+			// below usually lands inside its 3s TTL and would otherwise re-serve a
+			// listing that still contains the deleted transcript.
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4444,8 +4462,9 @@ export class ClientSession {
 			const mgr = SessionManager.open(abs);
 			mgr.appendSessionInfo(trimmed);
 			this.setConversationTitleForFile(abs, trimmed);
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			const affectedCwd = mgr.getCwd() || undefined;
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4465,15 +4484,20 @@ export class ClientSession {
 			const conv = this.convs.get(id);
 			if (!conv) return;
 			conv.title = trimmed;
+			let affectedCwd = conv.cwd;
 			try {
 				const file = conv.session.sessionFile;
-				if (file !== undefined) SessionManager.open(resolve(file)).appendSessionInfo(trimmed);
+				if (file !== undefined) {
+					const mgr = SessionManager.open(resolve(file));
+					mgr.appendSessionInfo(trimmed);
+					affectedCwd = mgr.getCwd() || conv.cwd;
+				}
 			} catch {
 				// in-memory title still updated; transcript write is best-effort
 			}
 			this.emitConversations();
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",

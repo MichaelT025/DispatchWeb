@@ -27,8 +27,7 @@ export interface NavGroup {
 	lastUsed: number;
 	/** Running conversations nested under this group (subagent tree flattened). */
 	conversations: NavConversation[];
-	/** History sessions under this group. Only the CURRENT project has data —
-	 *  the wire `sessions` list is scoped to the active cwd (see AGENTS.md). */
+	/** History sessions under this group, matched by the group's cwd. */
 	sessions: SessionSummary[];
 }
 
@@ -76,7 +75,7 @@ function makeGroup(
 	isProject: boolean,
 	lastUsed: number,
 	convsByCwd: Map<string, ConversationSummary[]>,
-	sessions: SessionSummary[],
+	sessionsByCwd: ReadonlyMap<string, SessionSummary[]>,
 	currentCwd: string,
 ): NavGroup {
 	const isCurrent = path === currentCwd;
@@ -87,7 +86,7 @@ function makeGroup(
 		isCurrent,
 		lastUsed,
 		conversations: flattenConversations(convsByCwd.get(path) ?? []),
-		sessions: isCurrent ? sessions : [],
+		sessions: sessionsByCwd.get(path) ?? [],
 	};
 }
 
@@ -99,9 +98,9 @@ function makeGroup(
  *   cwd (a subagent child inherits its parent's cwd).
  * - Running conversations whose cwd is not a known project are kept as
  *   "ungrouped" groups (one per cwd) so they are never silently dropped.
- * - History sessions are attached only to the current project: the protocol's
- *   `sessions` payload is scoped to the active cwd, so fabricating per-project
- *   history for other workspaces is impossible without a server seam.
+ * - History sessions are attached to the group matching their cwd: the server
+ *   echoes each `sessions` push with its queried cwd, so the left panel can
+ *   load any project's history on expand without switching the active chat.
  *
  * Order: current project first, then known projects by last-used desc, then
  * ungrouped cwds by label asc.
@@ -109,7 +108,7 @@ function makeGroup(
 export function buildLeftNav(
 	projects: ProjectSummary[],
 	conversations: ConversationSummary[],
-	sessions: SessionSummary[],
+	sessionsByCwd: ReadonlyMap<string, SessionSummary[]>,
 	currentCwd: string,
 ): NavGroup[] {
 	const byId = new Map(conversations.map((c) => [c.id, c]));
@@ -125,12 +124,12 @@ export function buildLeftNav(
 	const groups: NavGroup[] = [];
 
 	for (const p of projects) {
-		groups.push(makeGroup(p.path, true, p.lastUsed, convsByCwd, sessions, currentCwd));
+		groups.push(makeGroup(p.path, true, p.lastUsed, convsByCwd, sessionsByCwd, currentCwd));
 	}
 
 	const ungroupedCwds = [...convsByCwd.keys()].filter((cwd) => !known.has(cwd)).sort();
 	for (const cwd of ungroupedCwds) {
-		groups.push(makeGroup(cwd, false, 0, convsByCwd, sessions, currentCwd));
+		groups.push(makeGroup(cwd, false, 0, convsByCwd, sessionsByCwd, currentCwd));
 	}
 
 	groups.sort((a, b) => {

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useCallback } from "react";
+import { memo, useEffect, useState, useCallback, useRef } from "react";
 import {
 	FiCheck,
 	FiChevronDown,
@@ -24,13 +24,14 @@ import { buildLeftNav, type NavGroup } from "./left-panel-nav";
 interface LeftPanelProps {
 	sessionFile: string | null;
 	conversations: ConversationSummary[];
-	sessions: SessionSummary[];
+	/** Persisted sessions per project cwd (server echoes the queried cwd). */
+	sessionsByCwd: Map<string, SessionSummary[]>;
 	projects: ProjectSummary[];
 	activeConversationId: string;
 	panelSend: (
 		msg:
 			| { type: "new_chat" }
-			| { type: "list_sessions" }
+			| { type: "list_sessions"; cwd?: string }
 			| { type: "list_projects" }
 			| { type: "switch_session"; path: string }
 			| { type: "switch_conversation"; id: string }
@@ -82,7 +83,7 @@ function loadCollapsedGroups(): Set<string> {
 export const LeftPanel = memo(function LeftPanel({
 	sessionFile,
 	conversations,
-	sessions,
+	sessionsByCwd,
 	projects,
 	activeConversationId,
 	panelSend,
@@ -121,20 +122,32 @@ export const LeftPanel = memo(function LeftPanel({
 			scopeId,
 		});
 	}, []);
-	const toggleGroup = useCallback((path: string) => {
-		setCollapsedGroups((prev) => {
-			const next = new Set(prev);
-			if (next.has(path)) {
-				next.delete(path);
-			} else {
-				next.add(path);
+	/** 已请求过会话列表的项目 cwd —— 展开时只拉一次，避免每次展开都重扫磁盘。 */
+	const requestedCwds = useRef<Set<string>>(new Set());
+	const toggleGroup = useCallback(
+		(path: string, isCurrent: boolean) => {
+			// 展开非当前项目时惰性拉取该项目的保存会话（只读查询，不切活动对话）；
+			// 折叠/再展开不重复请求，当前项目由挂载 effect 负责。
+			const expanding = collapsedGroups.has(path);
+			if (expanding && !isCurrent && !requestedCwds.current.has(path)) {
+				requestedCwds.current.add(path);
+				panelSend({ type: "list_sessions", cwd: path });
 			}
-			try {
-				localStorage.setItem(LS_COLLAPSED_GROUPS, JSON.stringify([...next]));
-			} catch {}
-			return next;
-		});
-	}, []);
+			setCollapsedGroups((prev) => {
+				const next = new Set(prev);
+				if (next.has(path)) {
+					next.delete(path);
+				} else {
+					next.add(path);
+				}
+				try {
+					localStorage.setItem(LS_COLLAPSED_GROUPS, JSON.stringify([...next]));
+				} catch {}
+				return next;
+			});
+		},
+		[collapsedGroups, panelSend],
+	);
 	useEffect(() => {
 		if (!convCtx) return;
 		const onDown = (e: MouseEvent) => {
@@ -476,7 +489,7 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	const groups = buildLeftNav(projects, conversations, sessions, currentCwd);
+	const groups = buildLeftNav(projects, conversations, sessionsByCwd, currentCwd);
 
 	return (
 		<aside className="panel panel-left lp-panel">
@@ -527,7 +540,7 @@ export const LeftPanel = memo(function LeftPanel({
 										title={collapsed ? t("expandSection") : t("collapseSection")}
 										aria-expanded={!collapsed}
 										aria-label={g.label}
-										onClick={() => toggleGroup(g.path)}
+										onClick={() => toggleGroup(g.path, g.isCurrent)}
 									>
 										{collapsed ? <FiChevronRight /> : <FiChevronDown />}
 									</button>

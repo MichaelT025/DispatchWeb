@@ -29,6 +29,7 @@ const ALL = [
 	"clear-provider-key-test",
 	"conv-cross-project-test",
 	"conv-cwd-test",
+	"saved-chats-per-project-test",
 	"project-model-key-test",
 	"provider-keys-test",
 	"db-client-test",

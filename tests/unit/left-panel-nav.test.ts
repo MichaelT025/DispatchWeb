@@ -46,11 +46,11 @@ describe("flattenConversations", () => {
 
 describe("buildLeftNav", () => {
 	it("空输入返回空数组", () => {
-		expect(buildLeftNav([], [], [], "/p")).toEqual([]);
+		expect(buildLeftNav([], [], new Map(), "/p")).toEqual([]);
 	});
 
 	it("项目目录成为顶层分组，运行中的对话按其 cwd 嵌套", () => {
-		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [conv("c1", "/a")], [], "/a");
+		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [conv("c1", "/a")], new Map(), "/a");
 		expect(groups.map((g) => g.path)).toEqual(["/a", "/b"]);
 		expect(groups[0].isCurrent).toBe(true);
 		expect(groups[0].conversations.map((r) => r.c.id)).toEqual(["c1"]);
@@ -58,12 +58,12 @@ describe("buildLeftNav", () => {
 	});
 
 	it("当前项目优先，其余按 lastUsed 降序", () => {
-		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], [], "/mid");
+		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], new Map(), "/mid");
 		expect(groups.map((g) => g.path)).toEqual(["/mid", "/new", "/old"]);
 	});
 
 	it("子代理继承父对话的 cwd 归组", () => {
-		const groups = buildLeftNav([project("/a", 1)], [conv("root", "/a"), conv("kid", "/b", "root")], [], "/a");
+		const groups = buildLeftNav([project("/a", 1)], [conv("root", "/a"), conv("kid", "/b", "root")], new Map(), "/a");
 		expect(groups.map((g) => g.path)).toEqual(["/a"]);
 		expect(groups[0].conversations.map((r) => [r.c.id, r.depth])).toEqual([
 			["root", 0],
@@ -72,7 +72,7 @@ describe("buildLeftNav", () => {
 	});
 
 	it("未登记项目的运行对话保留为未分组（不静默丢弃）", () => {
-		const groups = buildLeftNav([project("/a", 1)], [conv("orphan", "/zzz")], [], "/a");
+		const groups = buildLeftNav([project("/a", 1)], [conv("orphan", "/zzz")], new Map(), "/a");
 		const ungrouped = groups.find((g) => !g.isProject) as NavGroup;
 		expect(ungrouped).toBeDefined();
 		expect(ungrouped.path).toBe("/zzz");
@@ -82,9 +82,27 @@ describe("buildLeftNav", () => {
 		expect(groups[0].path).toBe("/a");
 	});
 
-	it("历史会话只挂到当前项目（协议 sessions 仅含当前 cwd）", () => {
+	it("历史会话按 cwd 分别挂到各自项目（服务器按项目回推）", () => {
+		const sa = [session("/s/a")];
+		const sb = [session("/s/b1"), session("/s/b2")];
+		const groups = buildLeftNav(
+			[project("/a", 2), project("/b", 1)],
+			[],
+			new Map([
+				["/a", sa],
+				["/b", sb],
+			]),
+			"/a",
+		);
+		const a = groups.find((g) => g.path === "/a") as NavGroup;
+		const b = groups.find((g) => g.path === "/b") as NavGroup;
+		expect(a.sessions).toEqual(sa);
+		expect(b.sessions).toEqual(sb);
+	});
+
+	it("未请求过会话的项目显示空历史（不伪造当前项目数据）", () => {
 		const s = [session("/s/1")];
-		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [], s, "/a");
+		const groups = buildLeftNav([project("/a", 2), project("/b", 1)], [], new Map([["/a", s]]), "/a");
 		const a = groups.find((g) => g.path === "/a") as NavGroup;
 		const b = groups.find((g) => g.path === "/b") as NavGroup;
 		expect(a.sessions).toEqual(s);
@@ -93,7 +111,7 @@ describe("buildLeftNav", () => {
 
 	it("当前 cwd 不在项目列表时，会话挂到对应未分组目录", () => {
 		const s = [session("/s/1")];
-		const groups = buildLeftNav([project("/a", 1)], [conv("c", "/cur")], s, "/cur");
+		const groups = buildLeftNav([project("/a", 1)], [conv("c", "/cur")], new Map([["/cur", s]]), "/cur");
 		const cur = groups.find((g) => g.path === "/cur") as NavGroup;
 		expect(cur.isCurrent).toBe(true);
 		expect(cur.sessions).toEqual(s);

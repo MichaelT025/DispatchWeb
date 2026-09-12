@@ -942,7 +942,7 @@ export function App() {
 							active={!isMobile || drawer === "left"}
 							sessionFile={chat.state?.sessionFile ?? null}
 							conversations={chat.conversations}
-							sessions={chat.sessions}
+							sessionsByCwd={chat.sessionsByCwd}
 							projects={chat.projects}
 							activeConversationId={chat.activeConversationId}
 						/>

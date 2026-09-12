@@ -687,7 +687,7 @@ export interface DispatchSession {
 	cycleThinking(): void;
 	flushSnapshot(forceFull?: boolean): void;
 	pushSlashCommands(): Promise<void>;
-	refreshSessions(): Promise<void>;
+	refreshSessions(cwd?: string): Promise<void>;
 	pushProjects(): Promise<void>;
 	removeProject(path: string): Promise<void>;
 	deleteSession(path: string): Promise<void>;
@@ -1071,7 +1071,7 @@ wss.on("connection", (ws) => {
 				void cs.pushSlashCommands();
 				break;
 			case "list_sessions":
-				void cs.refreshSessions();
+				void cs.refreshSessions(msg.cwd);
 				break;
 			case "list_projects":
 				void cs.pushProjects();

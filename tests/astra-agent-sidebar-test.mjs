@@ -28,20 +28,14 @@
  *
  * Run: npm run build:web && npm run build:server && node tests/astra-agent-sidebar-test.mjs
  */
-import { CHROME_PATH } from "./lib/chrome.mjs";
-import { portUp, freePort } from "./lib/port-utils.mjs";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { startBrowserFixture, artifactDir } from "./lib/browser-fixture.mjs";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { chromium } from "playwright-core";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SHOT_DIR = fileURLToPath(new URL("../../PiAstra/docs/reference/", import.meta.url));
-const PORT = 43000 + Math.floor(Math.random() * 900);
+const SHOT_DIR = artifactDir;
 
 // --- isolated temp environment ------------------------------------------------
 const base = mkdtempSync(join(tmpdir(), "piweb-astra4-"));
@@ -144,147 +138,128 @@ const checkVisible = async (page, name, selector, timeout = 8000) => {
 	}
 };
 
+const fixture = await startBrowserFixture({ cwd: projA, agentDir, dataDir, sessionRoot });
+const browser = fixture.browser;
 try {
-	await freePort(PORT);
-} catch {
-	/* port free */
-}
-await sleep(300);
-
-const server = spawn("node", ["dist/server/index.js"], {
-	cwd: REPO_ROOT,
-	env: {
-		...process.env,
-		PI_WEB_PORT: String(PORT),
-		PI_WEB_CWD: projA,
-		PI_WEB_DATA_DIR: dataDir,
-		PI_CODING_AGENT_DIR: agentDir,
-		PI_CODING_AGENT_SESSION_DIR: sessionRoot,
-	},
-	stdio: "ignore",
-});
-for (let i = 0; i < 60 && !(await portUp(PORT)); i++) await sleep(250);
-
-const browser = await chromium.launch({ executablePath: CHROME_PATH });
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
-await ctx.addInitScript(
-	([cid, collapsedPath]) => {
-		try {
-			sessionStorage.setItem("pi-web-client-id", cid);
-			// Start the non-current project collapsed so expanding it exercises the
-			// lazy `list_sessions { cwd }` path (the feature under test).
-			localStorage.setItem("pi-web-ui:lp-collapsed-groups", JSON.stringify([collapsedPath]));
-		} catch {}
-	},
-	[CLIENT_ID, projB],
-);
-const page = await ctx.newPage();
-let shotN = 0;
-const shot = (name) => page.screenshot({ path: join(SHOT_DIR, `astra-polish-${name}.png`) });
-
-// ---------- boot: real empty conversation + discovered projects ----------
-await page.goto(`http://localhost:${PORT}/`, { waitUntil: "domcontentloaded" });
-await sleep(3000);
-
-// The temp agent dir has no auth, so the one-time Pi setup overlay opens on
-// boot. Dismiss it so it cannot intercept clicks (test presentation only —
-// no provider key is entered and no model request is made).
-if ((await page.locator(".modal-backdrop .modal-close").count()) > 0) {
-	await page.locator(".modal-backdrop .modal-close").first().click();
-	await sleep(500);
-}
-check("setup overlay dismissed (no credentials seeded)", (await page.locator(".modal-backdrop").count()) === 0);
-
-// ---------- 1) nested project chats in the left nav ----------
-const projABasename = projA.replace(/\\/g, "/").split("/").pop();
-const projBBasename = projB.replace(/\\/g, "/").split("/").pop();
-const groupA = page.locator(".lp-group", { has: page.locator(`.lp-group-label:text-is("${projABasename}")`) });
-const groupB = page.locator(".lp-group", { has: page.locator(`.lp-group-label:text-is("${projBBasename}")`) });
-
-check("project A group discovered from session file cwd", (await groupA.count()) === 1);
-check("project B group discovered from session file cwd", (await groupB.count()) === 1);
-check("current project group marked current", (await groupA.first().getAttribute("class"))?.includes("current"));
-
-// A is the active project → its saved chat is listed on boot, nested in A.
-check("saved chat for A rendered nested in A", (await groupA.locator(".lp-group-body .session-item").count()) >= 1);
-check(
-	"A's session text matches the seeded transcript",
-	(await groupA.locator(".session-item").first().innerText()).includes("alpha nested chat"),
-);
-// B's history must NOT be attributed to A.
-check("B's seeded chat never appears under A", !(await groupA.innerText()).includes("beta nested chat"));
-
-// B starts collapsed with no loaded sessions; expanding lazily loads them.
-check("B starts without a loaded history", (await groupB.locator(".lp-group-body .session-item").count()) === 0);
-await groupB.locator(".lp-group-toggle").click();
-await sleep(1800);
-check(
-	"expanding B loads its saved chat (lazy list_sessions)",
-	(await groupB.locator(".lp-group-body .session-item").count()) >= 1,
-);
-check(
-	"B's nested chat matches the seeded transcript",
-	(await groupB.locator(".session-item").first().innerText()).includes("beta nested chat"),
-);
-check("B's expansion does not leak B's chat into A", !(await groupA.innerText()).includes("beta nested chat"));
-check(
-	"both project groups hold their own nested rows",
-	(await groupA.locator(".session-item").count()) >= 1 && (await groupB.locator(".session-item").count()) >= 1,
-);
-
-await shot(`${String(++shotN).padStart(2, "0")}-sidebar-projects`);
-
-// ---------- 2) four agent composer states (mocked status bridge) ----------
-// Extension catalog → the picker is available (both /agent + /piastra, source
-// extension). One neutral state before any confirmed status.
-await checkVisible(page, "agent picker available", ".agent-picker");
-check("picker exposes exactly the four role buttons", (await page.locator(".agent-picker-btn").count()) === 4);
-check(
-	"no role pressed before a confirmed status",
-	(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 0,
-);
-
-const ROLES = ["orchestrator", "general", "fast", "review"];
-// The roles live in a menu behind the composer pill; open it before each pick.
-const pickRole = async (role) => {
-	await page.locator(".agent-picker-pill").click();
-	await page.locator(`.agent-picker-btn[data-agent-role="${role}"]`).click();
-};
-for (const role of ROLES) {
-	await pickRole(role);
-	// Real WS round-trip: /agent <role> → extension ctx.ui.setStatus → statuses.
-	let confirmed = false;
-	for (let i = 0; i < 40; i++) {
-		if ((await page.locator(`.agent-picker-btn[data-agent-role="${role}"][aria-pressed="true"]`).count()) === 1) {
-			confirmed = true;
-			break;
-		}
-		await sleep(150);
-	}
-	check(`picker confirms ${role} from the server status bridge`, confirmed);
-	check(
-		`composer root carries data-agent=${role}`,
-		(await page.locator(`.inputbar[data-agent="${role}"]`).count()) === 1,
+	const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+	await ctx.addInitScript(
+		([cid, collapsedPath]) => {
+			try {
+				sessionStorage.setItem("pi-web-client-id", cid);
+				// Start the non-current project collapsed so expanding it exercises the
+				// lazy `list_sessions { cwd }` path (the feature under test).
+				localStorage.setItem("pi-web-ui:lp-collapsed-groups", JSON.stringify([collapsedPath]));
+			} catch {}
+		},
+		[CLIENT_ID, projB],
 	);
-	// Exactly one role highlighted at a time (server-confirmed, not optimistic).
-	check(`only ${role} is highlighted`, (await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1);
-	await shot(`${String(++shotN).padStart(2, "0")}-agent-${role}`);
+	const page = await ctx.newPage();
+	let shotN = 0;
+	const shot = (name) => page.screenshot({ path: join(SHOT_DIR, `astra-polish-${name}.png`) });
+
+	// ---------- boot: real empty conversation + discovered projects ----------
+	await page.goto(fixture.url, { waitUntil: "domcontentloaded" });
+	await sleep(3000);
+
+	// The temp agent dir has no auth, so the one-time Pi setup overlay opens on
+	// boot. Dismiss it so it cannot intercept clicks (test presentation only —
+	// no provider key is entered and no model request is made).
+	if ((await page.locator(".modal-backdrop .modal-close").count()) > 0) {
+		await page.locator(".modal-backdrop .modal-close").first().click();
+		await sleep(500);
+	}
+	check("setup overlay dismissed (no credentials seeded)", (await page.locator(".modal-backdrop").count()) === 0);
+
+	// ---------- 1) nested project chats in the left nav ----------
+	const projABasename = projA.replace(/\\/g, "/").split("/").pop();
+	const projBBasename = projB.replace(/\\/g, "/").split("/").pop();
+	const groupA = page.locator(".lp-group", { has: page.locator(`.lp-group-label:text-is("${projABasename}")`) });
+	const groupB = page.locator(".lp-group", { has: page.locator(`.lp-group-label:text-is("${projBBasename}")`) });
+
+	check("project A group discovered from session file cwd", (await groupA.count()) === 1);
+	check("project B group discovered from session file cwd", (await groupB.count()) === 1);
+	check("current project group marked current", (await groupA.first().getAttribute("class"))?.includes("current"));
+
+	// A is the active project → its saved chat is listed on boot, nested in A.
+	check("saved chat for A rendered nested in A", (await groupA.locator(".lp-group-body .session-item").count()) >= 1);
+	check(
+		"A's session text matches the seeded transcript",
+		(await groupA.locator(".session-item").first().innerText()).includes("alpha nested chat"),
+	);
+	// B's history must NOT be attributed to A.
+	check("B's seeded chat never appears under A", !(await groupA.innerText()).includes("beta nested chat"));
+
+	// B starts collapsed with no loaded sessions; expanding lazily loads them.
+	check("B starts without a loaded history", (await groupB.locator(".lp-group-body .session-item").count()) === 0);
+	await groupB.locator(".lp-group-toggle").click();
+	await sleep(1800);
+	check(
+		"expanding B loads its saved chat (lazy list_sessions)",
+		(await groupB.locator(".lp-group-body .session-item").count()) >= 1,
+	);
+	check(
+		"B's nested chat matches the seeded transcript",
+		(await groupB.locator(".session-item").first().innerText()).includes("beta nested chat"),
+	);
+	check("B's expansion does not leak B's chat into A", !(await groupA.innerText()).includes("beta nested chat"));
+	check(
+		"both project groups hold their own nested rows",
+		(await groupA.locator(".session-item").count()) >= 1 && (await groupB.locator(".session-item").count()) >= 1,
+	);
+
+	await shot(`${String(++shotN).padStart(2, "0")}-sidebar-projects`);
+
+	// ---------- 2) four agent composer states (mocked status bridge) ----------
+	// Extension catalog → the picker is available (both /agent + /piastra, source
+	// extension). One neutral state before any confirmed status.
+	await checkVisible(page, "agent picker available", ".agent-picker");
+	check("picker exposes exactly the four role buttons", (await page.locator(".agent-picker-btn").count()) === 4);
+	check(
+		"no role pressed before a confirmed status",
+		(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 0,
+	);
+
+	const ROLES = ["orchestrator", "general", "fast", "review"];
+	// The roles live in a menu behind the composer pill; open it before each pick.
+	const pickRole = async (role) => {
+		await page.locator(".agent-picker-pill").click();
+		await page.locator(`.agent-picker-btn[data-agent-role="${role}"]`).click();
+	};
+	for (const role of ROLES) {
+		await pickRole(role);
+		// Real WS round-trip: /agent <role> → extension ctx.ui.setStatus → statuses.
+		let confirmed = false;
+		for (let i = 0; i < 40; i++) {
+			if ((await page.locator(`.agent-picker-btn[data-agent-role="${role}"][aria-pressed="true"]`).count()) === 1) {
+				confirmed = true;
+				break;
+			}
+			await sleep(150);
+		}
+		check(`picker confirms ${role} from the server status bridge`, confirmed);
+		check(
+			`composer root carries data-agent=${role}`,
+			(await page.locator(`.inputbar[data-agent="${role}"]`).count()) === 1,
+		);
+		// Exactly one role highlighted at a time (server-confirmed, not optimistic).
+		check(`only ${role} is highlighted`, (await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1);
+		await shot(`${String(++shotN).padStart(2, "0")}-agent-${role}`);
+	}
+
+	// Sending an unknown role must not fabricate a state (mock extension ignores
+	// it); the last confirmed role stays. This guards against optimistic UI.
+	await pickRole("general");
+	await sleep(1200);
+	check(
+		"confirmed role persists after selecting another role",
+		(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1,
+	);
+	check(
+		"composer accent tracks the confirmed role",
+		(await page.locator('.inputbar[data-agent="general"]').count()) === 1,
+	);
+} finally {
+	await fixture.close();
 }
-
-// Sending an unknown role must not fabricate a state (mock extension ignores
-// it); the last confirmed role stays. This guards against optimistic UI.
-await pickRole("general");
-await sleep(1200);
-check(
-	"confirmed role persists after selecting another role",
-	(await page.locator('.agent-picker-btn[aria-pressed="true"]').count()) === 1,
-);
-check(
-	"composer accent tracks the confirmed role",
-	(await page.locator('.inputbar[data-agent="general"]').count()) === 1,
-);
-
-await browser.close();
-server.kill();
 console.log(failures === 0 ? "ALL PASS" : `FAILURES: ${failures}`);
 process.exit(failures === 0 ? 0 : 1);

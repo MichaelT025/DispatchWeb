@@ -7,7 +7,7 @@
 //
 // Usage: npm run build && node tests/conv-cross-project-test.mjs [port]
 import { createServer } from "node:http";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { realpathSync } from "node:fs";
@@ -37,8 +37,16 @@ const check = (name, ok, extra = "") => {
 	if (!ok) failures++;
 };
 
-// --- mock OpenAI-completions SSE: "SLOW" prompts stream for ~2.5s so the
-//     conversation is still streaming when set_cwd displaces it ---
+// Hold "SLOW" mock responses until the test releases them, so set_cwd
+// reliably displaces a conversation while it is streaming.
+let releaseSlow;
+let slowRelease;
+const holdSlow = () => {
+	slowRelease = new Promise((resolve) => {
+		releaseSlow = resolve;
+	});
+};
+holdSlow();
 const mock = createServer(async (req, res) => {
 	let body = "";
 	for await (const chunk of req) body += chunk;
@@ -73,7 +81,7 @@ const mock = createServer(async (req, res) => {
 			})}\n\n`,
 		);
 	writeChunk(slow ? "cross-" : "seed-");
-	if (slow) await sleep(2500);
+	if (slow) await slowRelease;
 	writeChunk(slow ? "project" : "message");
 	res.write(
 		`data: ${JSON.stringify({
@@ -113,7 +121,7 @@ writeFileSync(
 );
 
 const repoRoot = realpathSync(new URL("../", import.meta.url));
-execSync("npm run build", { cwd: repoRoot, stdio: "ignore" });
+if (!process.env.PI_WEB_SKIP_TEST_BUILD) execSync("npm run build", { cwd: repoRoot, stdio: "ignore" });
 const server = spawn(process.execPath, ["dist/server/index.js"], {
 	cwd: repoRoot,
 	env: {
@@ -247,6 +255,8 @@ try {
 		),
 	);
 	check("A's streaming conversation stays visible after leaving the project", true);
+
+	releaseSlow();
 	// The conversation must already be NAMED from its first prompt (not "新对话"
 	// / "New chat"): naming happens at prompt start, so by the time the run is
 	// displaced the title is the typed text.
@@ -299,10 +309,24 @@ try {
 		filesAfter > filesBeforeSwitch,
 		`${filesBeforeSwitch} → ${filesAfter} pushes`,
 	);
+	// A completed turn has materialized the transcript on disk. Hold a second
+	// run open to prove deletion protection against an actual file.
+	const aSessionFile = client.state.sessionFile;
+	check("completed transcript exists", Boolean(aSessionFile) && existsSync(aSessionFile));
+	holdSlow();
+	client.send({ type: "prompt", text: "SLOW deletion protection" });
+	await client.waitForState((state) => state.isStreaming);
+	client.send({ type: "set_cwd", path: projB });
+	await client.waitForState((state) => state.cwd === projB);
+	client.send({ type: "delete_session", path: aSessionFile });
+	await client.waitForType("notice", (m) => m.level === "warning" && m.text.includes("still running"));
+	check("running background transcript cannot be deleted", existsSync(aSessionFile));
+	releaseSlow();
 } catch (error) {
 	console.error(`✗ ${error.message}`);
 	failures++;
 } finally {
+	releaseSlow();
 	client?.ws.close();
 	server.kill();
 	mock.close();

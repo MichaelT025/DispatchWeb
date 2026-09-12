@@ -33,7 +33,7 @@ const check = (name, ok, extra = "") => {
 };
 
 try {
-	execSync("npm run build", { cwd: REPO_ROOT, stdio: "ignore" });
+	if (!process.env.PI_WEB_SKIP_TEST_BUILD) execSync("npm run build", { cwd: REPO_ROOT, stdio: "ignore" });
 } catch {
 	console.error("build failed");
 	process.exit(1);
@@ -112,7 +112,7 @@ check(
 );
 check(
 	"server emits 目录不存在/Directory not found notice",
-	notices.some((n) => n.text?.includes("目录不存在") || n.textEn?.includes("Directory not found")),
+	notices.some((n) => n.level === "warning" && n.text?.includes("Directory not found: documents/review")),
 	JSON.stringify(notices.map((n) => n.textEn ?? n.text)),
 );
 

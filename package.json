@@ -48,10 +48,13 @@
 		"check:protocol": "node scripts/check-protocol-sync.mjs",
 		"test:freeze": "node tests/freeze-test.mjs",
 		"start": "node dist/server/index.js",
-		"format": "prettier --write server/ web/src/ scripts/ bin/ tests/*.mjs tests/unit/",
-		"format:check": "prettier --check server/ web/src/ scripts/ bin/ tests/*.mjs tests/unit/",
+		"format": "prettier --write server/ web/src/ scripts/ bin/ tests/*.mjs tests/unit/ tests/lib/ .github/workflows/ci.yml package.json README.md",
+		"format:check": "prettier --check server/ web/src/ scripts/ bin/ tests/*.mjs tests/unit/ tests/lib/ .github/workflows/ci.yml package.json README.md",
 		"lint": "oxlint server/ web/src/ scripts/",
-		"lint:fix": "oxlint --fix server/ web/src/ scripts/"
+		"lint:fix": "oxlint --fix server/ web/src/ scripts/",
+		"check": "npm run format:check && npm run lint && npm run check:protocol && npm run typecheck",
+		"ci": "npm run check && npm run build && npm test && npm run test:smoke && npm run test:browser",
+		"test:browser": "node tests/run-browser.mjs"
 	},
 	"dependencies": {
 		"@earendil-works/pi-coding-agent": "^0.85.1",

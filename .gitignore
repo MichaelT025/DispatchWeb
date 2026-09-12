@@ -18,5 +18,6 @@ web/dist/
 
 # Scratch/test temp files
 tests/scratch/
+test-results/
 
 .omo/

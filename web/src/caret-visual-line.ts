@@ -10,7 +10,7 @@
  * 隐藏 div 上，塞入「光标前的文本 + 一个零宽标记」，量标记的 `offsetTop`；div 与
  * textarea 的折行规则一致（`pre-wrap` + `break-word`），所以「上方还有没有视觉行」
  * 可以直接比像素：
- *   - 光标在首视觉行 ⇔ 光标标记的 offsetTop ≈ 0
+ *   - 光标在首视觉行 ⇔ 光标标记的 offsetTop ≈ 首行标记的 offsetTop
  *   - 光标在末视觉行 ⇔ 光标标记的 offsetTop ≈ 全文末尾标记的 offsetTop
  *
  * 拿不到布局时（SSR / jsdom / 未挂载 / `display:none`）回落旧的逻辑行判定，行为
@@ -119,8 +119,11 @@ export function caretVisualLineFlags(ta: HTMLTextAreaElement): CaretLineFlags {
 	if (typeof document === "undefined" || typeof getComputedStyle !== "function") return logical;
 	const el = getMirror();
 	if (syncMirror(ta, el) <= 0) return logical;
-	const caretTop = measureTop(el, value.slice(0, index));
-	const endTop = measureTop(el, value);
+	// Inline font metrics can put the first marker below the top (e.g. 3px in
+	// the composer). Compare rows relative to that baseline, not the div top.
+	const firstRowTop = measureTop(el, "");
+	const caretTop = measureTop(el, value.slice(0, index)) - firstRowTop;
+	const endTop = measureTop(el, value) - firstRowTop;
 	// 没有布局引擎的宿主（jsdom / SSR / 未挂载元素）：offsetTop 恒为 0，会把任意位置
 	// 都判成首行 —— 用镜像高度判掉，回落逻辑行。
 	const measurable = el.offsetHeight > 0;

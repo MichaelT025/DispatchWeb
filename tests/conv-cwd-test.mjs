@@ -33,7 +33,7 @@ const check = (name, ok, extra = "") => {
 };
 
 try {
-	execSync("npm run build", { cwd: PROJ, stdio: "ignore" });
+	if (!process.env.PI_WEB_SKIP_TEST_BUILD) execSync("npm run build", { cwd: PROJ, stdio: "ignore" });
 } catch {
 	console.error("build failed");
 	process.exit(1);
@@ -161,7 +161,7 @@ check(
 );
 check(
 	"workspace-switch notices fired",
-	notices.some((n) => n.includes("已切换到工作目录")),
+	notices.some((n) => n.includes("Switched to directory:")),
 	notices.join(" | "),
 );
 

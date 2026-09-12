@@ -257,6 +257,7 @@ function AstraHeader({
 				<button type="button" className="panel-toggle" title={t("openHistory")} onClick={() => onOpenPanel("left")}>
 					<FiMenu />
 				</button>
+				<FiFolder className="astra-header-icon" aria-hidden="true" />
 				<span className="astra-project" title={title || projectName}>
 					{title || projectName}
 				</span>

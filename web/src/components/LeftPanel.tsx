@@ -6,7 +6,6 @@ import {
 	FiChevronsLeft,
 	FiEdit2,
 	FiFolder,
-	FiMessageSquare,
 	FiSearch,
 	FiTrash2,
 	FiX,
@@ -327,7 +326,6 @@ export const LeftPanel = memo(function LeftPanel({
 						if (!active) panelSend({ type: "switch_conversation", id: c.id });
 					}}
 				>
-					<FiMessageSquare className="session-icon" />
 					<span className="session-info">
 						{renaming === key ? (
 							<input
@@ -469,7 +467,6 @@ export const LeftPanel = memo(function LeftPanel({
 						if (!active) panelSend({ type: "switch_session", path: s.path });
 					}}
 				>
-					<FiMessageSquare className="session-icon" />
 					<span className="session-info">
 						{renaming === s.path ? (
 							<input
@@ -534,19 +531,30 @@ export const LeftPanel = memo(function LeftPanel({
 			{/* Astra 品牌 + 突出的「新对话」——替代旧顶栏的 new_chat 入口。 */}
 			<div className="lp-brand">
 				<span className="lp-brand-title">
-					<Logo size={22} />
+					<Logo size={20} />
 					<span className="lp-brand-name">PiAstra</span>
 				</span>
-				{collapsible && onToggleCollapse && (
+				<span className="lp-brand-actions">
 					<button
 						type="button"
-						className="panel-collapse-btn lp-brand-collapse"
-						title={t("collapsePanel")}
-						onClick={onToggleCollapse}
+						className="lp-icon-btn lp-search"
+						title={t("searchGlobal")}
+						aria-label={t("searchGlobal")}
+						onClick={onOpenGlobalSearch}
 					>
-						<FiChevronsLeft />
+						<FiSearch />
 					</button>
-				)}
+					{collapsible && onToggleCollapse && (
+						<button
+							type="button"
+							className="panel-collapse-btn lp-brand-collapse lp-icon-btn"
+							title={t("collapsePanel")}
+							onClick={onToggleCollapse}
+						>
+							<FiChevronsLeft />
+						</button>
+					)}
+				</span>
 			</div>
 			<button
 				type="button"
@@ -556,10 +564,6 @@ export const LeftPanel = memo(function LeftPanel({
 			>
 				<FiEdit2 />
 				<span>{t("newChat")}</span>
-			</button>
-			<button type="button" className="lp-new-chat lp-search" onClick={onOpenGlobalSearch}>
-				<FiSearch />
-				<span>{t("searchGlobal")}</span>
 			</button>
 			<div className="lp-section-label">{t("recentProjects")}</div>
 			{/* Codex 式统一导航树：项目目录为顶层分组，运行中的对话与当前项目的历史
@@ -626,10 +630,20 @@ export const LeftPanel = memo(function LeftPanel({
 				)}
 			</nav>
 			<footer className="lp-footer">
-				<span className={`conn-dot ${ready ? "ok" : "busy"}`} />
-				<span>{ready ? t("connected") : status === "closed" ? t("reconnecting") : t("connecting")}</span>
+				<span className="lp-footer-avatar" aria-hidden="true">
+					<Logo size={12} />
+				</span>
 				<span className="lp-footer-project" title={cwd}>
 					{cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop()}
+				</span>
+				<span
+					className="lp-footer-status"
+					title={ready ? t("connected") : status === "closed" ? t("reconnecting") : t("connecting")}
+				>
+					<span className={`conn-dot ${ready ? "ok" : "busy"}`} />
+					<span className="lp-footer-conn">
+						{ready ? t("connected") : status === "closed" ? t("reconnecting") : t("connecting")}
+					</span>
 				</span>
 			</footer>
 			{convCtx && (

@@ -1897,7 +1897,7 @@ export class ClientSession {
 		// Statuses are now per-conversation, so a reconnect must restore the
 		// active chat's own role — not whatever a background chat last wrote.
 		const statuses = this.activeStatusSnapshot();
-		if (statuses.length > 0) send({ type: "statuses", statuses });
+		send({ type: "statuses", statuses });
 		// Reconnect: push the current project's running-conversation list so the
 		// left panel shows every background chat (a fresh socket never got the
 		// newChat/switch pushes).
@@ -1943,6 +1943,10 @@ export class ClientSession {
 		const conv = this.conv;
 		conv.unsubscribe?.();
 		conv.session = conv.runtime.session;
+		// A replacement runtime may not load the same extensions. Clear stale
+		// entries before session_start repopulates its confirmed statuses.
+		this.convStatuses.remove(conv.id);
+		this.pushActiveStatuses();
 		await conv.session.bindExtensions({
 			mode: "rpc",
 			// Per-conversation UI context: setStatus is routed into this
@@ -1953,6 +1957,7 @@ export class ClientSession {
 				this.emit({ type: "notice", level: "error", text: err.error, textEn: err.error });
 			},
 		});
+		this.pushActiveStatuses();
 		conv.unsubscribe = conv.session.subscribe((event) => this.onEvent(conv, event));
 		// 新会话 / 切换会话 / 强杀重建的必经之路：刚创建的 runtime 用的是 SDK
 		// 默认重试 3 次——这里把面板的 retryMaxAttempts 覆盖注入，否则“设了 6
@@ -4320,7 +4325,7 @@ export class ClientSession {
 					source: "web",
 				});
 			}
-			const sorted = [...sessions.values()].sort((a, b) => b.modified - a.modified).slice(0, 200); // newest first — the panel shows recent history
+			const sorted = [...sessions.values()].sort((a, b) => b.modified - a.modified); // newest first; retain older project chats
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: sorted });
 		} catch {
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: [] });

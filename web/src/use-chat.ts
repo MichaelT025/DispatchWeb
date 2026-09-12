@@ -109,8 +109,9 @@ export interface ChatState {
 	/** PI_WEB_TABS on the server: the tabs this instance offers. Undefined
 	 *  means all of them, which is the default. */
 	tabs?: string[];
-	/** Persisted session list for the left panel. */
-	sessions: SessionSummary[];
+	/** Persisted session lists, keyed by the project cwd they belong to
+	 *  (the server echoes the queried cwd on every `sessions` push). */
+	sessionsByCwd: Map<string, SessionSummary[]>;
 	/** Open conversations (each runs its own session in parallel). */
 	conversations: ConversationSummary[];
 	/** Id of the conversation the current snapshot belongs to. */
@@ -261,7 +262,7 @@ type Action =
 			tabs?: string[];
 			service?: UiServiceInfo;
 	  }
-	| { type: "sessions"; sessions: SessionSummary[] }
+	| { type: "sessions"; cwd: string; sessions: SessionSummary[] }
 	| {
 			type: "conversations";
 			conversations: ConversationSummary[];
@@ -591,8 +592,11 @@ function reducer(state: ChatState, action: Action): ChatState {
 				...state,
 				notices: state.notices.filter((n) => n.id !== action.id),
 			};
-		case "sessions":
-			return { ...state, sessions: action.sessions };
+		case "sessions": {
+			const sessionsByCwd = new Map(state.sessionsByCwd);
+			sessionsByCwd.set(action.cwd, action.sessions);
+			return { ...state, sessionsByCwd };
+		}
 		case "conversations":
 			return {
 				...state,
@@ -788,7 +792,7 @@ export function useChat() {
 		liveOutputs: new Map(),
 		toolStatuses: new Map(),
 		notices: [],
-		sessions: [],
+		sessionsByCwd: new Map(),
 		conversations: [],
 		activeConversationId: "",
 		projects: [],
@@ -1063,9 +1067,13 @@ export function useChat() {
 					});
 					break;
 				}
-				case "sessions":
-					dispatch({ type: "sessions", sessions: msg.sessions });
+				case "sessions": {
+					// Old servers / engines omit cwd — attribute to the current
+					// project (backward compatible with the unscoped payload).
+					const cwd = msg.cwd ?? chatApi.current.chat.state?.cwd ?? "";
+					dispatch({ type: "sessions", cwd, sessions: msg.sessions });
 					break;
+				}
 				case "conversations":
 					dispatch({
 						type: "conversations",

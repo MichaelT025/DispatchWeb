@@ -87,4 +87,9 @@ macOS 下若服务由 launchd 拉起（`process.ppid === 1`，LaunchAgent/孤儿
 
 ## Windows shell 解析
 
-`terminals.ts` 的 `resolveShell()` 每次创建终端时解析，优先 bash——`PI_WEB_SHELL` 显式 → `$SHELL` → Git Bash（ProgramFiles）→ busybox 兜底（`~/.pi-web/bin/bash.exe`，`ensure-bash.ts` 无 Git Bash 时自动下载 busybox-w32）→ `$COMSPEC` → powershell。与 SDK bash 工具（Git Bash / PATH 上的 bash）保持一致，避免 PowerShell/bash 混用挂死。
+Windows 上**用户交互终端**与**AI bash 工具**各走一条解析链，互不影响：
+
+- 用户终端（面板里手动新建的 `agentBash=false` 终端）：`terminals.ts` 的 `resolveShell()` → `resolveWindowsUserShell()`，每次创建终端时解析，默认 **PowerShell**（Windows 用户预期的 shell）：`PI_WEB_SHELL` 显式 → `pwsh.exe`（PowerShell 7+：ProgramFiles → ProgramFiles(x86) → PATH 上的各目录，覆盖 scoop/choco/便携安装）→ `powershell.exe`（5.1，Windows 自带）→ bash 兜底（`$SHELL` → Git Bash → busybox `~/.pi-web/bin/bash.exe`）→ `$COMSPEC`（cmd.exe）。
+- AI bash 工具（`ai-bash`，`forceBash=true`）：`resolveBashShell()` → `resolveWindowsBashShell()` **始终解析为 bash**——Git Bash → busybox → `$SHELL`（仅当其为 bash）→ PATH 上的裸 `bash`。这样模型写的 bash 语法（heredoc、`&&`、进程替换）语义不变，不会被用户终端的 PowerShell 默认带偏。
+
+两条链都注入 `env` + `exists` 探针实现为纯函数，可跨平台单测（`tests/unit/terminals-shell.test.ts`）。早期版本用户终端也优先 Git Bash 以「与 SDK bash 工具一致」，结果浏览器里打开的是 MinGW，与 Windows 用户预期不符；现仅 AI 终端保持 bash。

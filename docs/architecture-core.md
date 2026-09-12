@@ -156,3 +156,7 @@ bash 工具卡片运行中显示「停止」→ 发 `{ type: "abort_bash" }` →
 扩展的 `setWidget/setStatus/notify/select/confirm/input` → `widgets/statuses/notice/dialog` 消息；对话框经 `dialog_response` 回传，Esc 视为取消。`Dialog.tsx`（扩展对话框）与 `DshQuestionDialog.tsx`（DSH 模型提问桥）的正文/选项/详情/预览都走 `Markdown(rawHtml)` 富渲染（markdown + 原始 HTML 混排，模型自选、信任模型；默认 `rawHtml=false` 的聊天正文渲染不受影响），可选项 `preview` 展示「选项预览」框。
 
 `snapshot` 里 `streamingMessage` 是进行中的消息（60ms 粒度流式），`messages` 是已落盘的。
+
+### Sidebar chat destinations
+
+The sidebar nests chats under Projects and shows ungrouped chats under Recents. The global New chat sends `new_chat` with `cwd: null`; project hover actions send the project's absolute `cwd`. Omitting `cwd` retains the existing current-workspace behavior for other callers. Projectless chats use `<dataDir>/chats` as their working directory, excluded from the project list; their history is loaded with the project list on reconnect. The Projects heading reveals an add action that sends `pick_project_folder` to open the native OS folder picker. Selecting a folder adds it through `setCwd`; canceling makes no change.

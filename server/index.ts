@@ -28,6 +28,7 @@ import express from "express";
 import compression from "compression";
 import { WebSocket, WebSocketServer } from "ws";
 import { VERSION, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { pickProjectFolder } from "./project-folder-picker.js";
 import { PROTOCOL_VERSION } from "./protocol-version.js";
 import { AgentService, workspacePath, QuiesceRejectedError } from "./agent-service.js";
 import { isAbsoluteWirePath, wireToAbs } from "./files-service.js";
@@ -690,15 +691,13 @@ export interface DispatchSession {
 	killBackgroundServer(port?: number, taskId?: string): Promise<boolean>;
 	killAllBackgroundServers(): Promise<string[]>;
 	listBgServers(): Promise<void>;
-	/** 返回值语义见 SlashHost.newChat：布尔值 = 是否落在一个可接收首条的空白
-	 *  新对话（/new <prompt> 用）。此处只管转发，返回值被丢弃，故允许 void。 */
-	newChat(): Promise<boolean | void>;
+	newChat(cwd?: string | null): Promise<boolean>;
 	editMessage(messageId: string, text: string, attachments?: PromptAttachment[]): Promise<void>;
 	cycleModel(): Promise<void>;
 	cycleThinking(): void;
 	flushSnapshot(forceFull?: boolean): void;
 	pushSlashCommands(): Promise<void>;
-	refreshSessions(): Promise<void>;
+	refreshSessions(cwd?: string): Promise<void>;
 	pushProjects(): Promise<void>;
 	removeProject(path: string): Promise<void>;
 	deleteSession(path: string): Promise<void>;
@@ -1066,8 +1065,22 @@ wss.on("connection", (ws) => {
 			case "list_bg_servers":
 				void cs.listBgServers();
 				break;
+			case "pick_project_folder":
+				void pickProjectFolder(cs.cwd)
+					.then(async (path) => {
+						if (path && ws.readyState === WebSocket.OPEN) await cs.setCwd(path);
+					})
+					.catch((err: Error) => {
+						send({
+							type: "notice",
+							level: "error",
+							text: `无法打开文件夹选择器：${err.message}`,
+							textEn: `Could not open folder picker: ${err.message}`,
+						});
+					});
+				break;
 			case "new_chat":
-				void cs.newChat();
+				void cs.newChat(msg.cwd);
 				break;
 			case "edit_message":
 				void cs.editMessage(msg.messageId, msg.text, msg.attachments);
@@ -1087,7 +1100,7 @@ wss.on("connection", (ws) => {
 				void cs.pushSlashCommands();
 				break;
 			case "list_sessions":
-				void cs.refreshSessions();
+				void cs.refreshSessions(msg.cwd);
 				break;
 			case "list_projects":
 				void cs.pushProjects();

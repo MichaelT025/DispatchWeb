@@ -33,6 +33,7 @@ import {
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
+	type ExtensionUIContext,
 	type SessionInfo,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -85,7 +86,7 @@ import {
 	isTerminalGuidanceOn,
 	MARKERS_LIST_TOOL_NAME,
 } from "./tool-manager.js";
-import { WebUIContext, mockThemeProxy } from "./webui-context.js";
+import { ConversationStatuses, WebUIContext, mockThemeProxy, type StatusEntry } from "./webui-context.js";
 import { decodeText } from "./text-sniff.js";
 import { makeEditSoftTool } from "./edit-soft-tool.js";
 import {
@@ -1344,6 +1345,9 @@ export class ClientSession {
 
 	/** Web-facing extension UI context (widgets, notifications). */
 	private webUi = new WebUIContext((msg) => this.emit(msg));
+	/** Per-conversation footer statuses (setStatus bridge). Active conversation
+	 *  resolved lazily so switches don't have to re-register anything. */
+	private readonly convStatuses = new ConversationStatuses(() => this.activeId);
 
 	/**
 	 * 第一方子代理 host（见 subagents.ts 设计头注）。子代理 = 一个标记
@@ -1897,8 +1901,11 @@ export class ClientSession {
 		// session creation, before any socket was attached).
 		const widgets = this.webUi.snapshot();
 		if (widgets.length > 0) send({ type: "widgets", widgets });
-		const statuses = this.webUi.statusSnapshot();
-		if (statuses.length > 0) send({ type: "statuses", statuses });
+		// Replay the ACTIVE conversation's extension statuses (role footer).
+		// Statuses are now per-conversation, so a reconnect must restore the
+		// active chat's own role — not whatever a background chat last wrote.
+		const statuses = this.activeStatusSnapshot();
+		send({ type: "statuses", statuses });
 		// Reconnect: push the current project's running-conversation list so the
 		// left panel shows every background chat (a fresh socket never got the
 		// newChat/switch pushes).
@@ -1944,13 +1951,21 @@ export class ClientSession {
 		const conv = this.conv;
 		conv.unsubscribe?.();
 		conv.session = conv.runtime.session;
+		// A replacement runtime may not load the same extensions. Clear stale
+		// entries before session_start repopulates its confirmed statuses.
+		this.convStatuses.remove(conv.id);
+		this.pushActiveStatuses();
 		await conv.session.bindExtensions({
 			mode: "rpc",
-			uiContext: this.webUi,
+			// Per-conversation UI context: setStatus is routed into this
+			// conversation's own status map (see uiContextFor), so a background
+			// chat's role can't overwrite the active footer.
+			uiContext: this.uiContextFor(conv.id),
 			onError: (err) => {
 				this.emit({ type: "notice", level: "error", text: err.error, textEn: err.error });
 			},
 		});
+		this.pushActiveStatuses();
 		conv.unsubscribe = conv.session.subscribe((event) => this.onEvent(conv, event));
 		// 新会话 / 切换会话 / 强杀重建的必经之路：刚创建的 runtime 用的是 SDK
 		// 默认重试 3 次——这里把面板的 retryMaxAttempts 覆盖注入，否则“设了 6
@@ -1960,6 +1975,47 @@ export class ClientSession {
 		this.webUi.refresh();
 		this.startWidgetsTimer();
 		this.startStallTimer();
+	}
+
+	/** Per-conversation extension UI context. Everything delegates to the shared
+	 *  webUi (widgets/notifications/dialogs) EXCEPT setStatus, which is routed
+	 *  into the given conversation's own status map. This is what keeps a
+	 *  background chat's role status from overwriting the active chat's footer. */
+	private uiContextFor(convId: string): ExtensionUIContext {
+		const base = this.webUi;
+		const self = this;
+		return new Proxy(base as unknown as Record<string | symbol, unknown>, {
+			get(target, prop) {
+				if (prop === "setStatus") {
+					return (key: string, text: string | undefined): void => self.setConvStatus(convId, key, text);
+				}
+				const value = target[prop];
+				return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(base) : value;
+			},
+		}) as unknown as ExtensionUIContext;
+	}
+
+	/** Write a setStatus entry into ONE conversation's own map. When the writer
+	 *  is the active conversation, push it to the client immediately; otherwise
+	 *  record it and let switchConversation replay it when that chat becomes
+	 *  active (a background runtime must never clobber the active footer). */
+	private setConvStatus(convId: string, key: string, text: string | undefined): void {
+		const clean = text === undefined ? undefined : stripAnsi(text);
+		const out = this.convStatuses.set(convId, key, clean);
+		if (out) {
+			this.emit({ type: "statuses", statuses: out });
+		}
+	}
+
+	/** Push the ACTIVE conversation's status entries to the client (empty clears
+	 *  the footer, which is exactly what a role-less chat needs on switch). */
+	private pushActiveStatuses(): void {
+		this.emit({ type: "statuses", statuses: this.convStatuses.activeSnapshot() });
+	}
+
+	/** Status entries of the ACTIVE conversation (for replay on reconnect). */
+	private activeStatusSnapshot(): StatusEntry[] {
+		return this.convStatuses.activeSnapshot();
 	}
 
 	/** Poll extension widgets so TUI-only overlays (e.g. rpiv-todo) stay live. */
@@ -3952,12 +4008,18 @@ export class ClientSession {
 		}
 	}
 
-	/** 新建/切到一个空白对话。返回值 = 「当前活动对话就是一个可以接收首条的
-	 *  空白新对话」——/new <prompt> 只在 true 时投递首条提示；false 表示没能进入
-	 *  新对话（准入关闭 / 同项目对话数达上限 / runtime 创建失败），此时照发会把
-	 *  首条提示投进用户原本正在用的那个对话里。 */
-	async newChat(): Promise<boolean> {
+	private get projectlessCwd(): string {
+		return join(this.stateStore.dataDir, "chats");
+	}
+
+	async newChat(cwd?: string | null): Promise<boolean> {
 		if (this.quiesceBlocked()) return false;
+		if (cwd !== undefined) {
+			const target = cwd === null ? this.projectlessCwd : resolve(cwd);
+			if (cwd === null) mkdirSync(target, { recursive: true });
+			await this.setCwd(target);
+			if (this.cwd !== target) return false;
+		}
 		// Reuse an already-open blank conversation instead of piling up new ones
 		// on every click: if the active chat has no messages it IS the new chat
 		// (focus already on it); otherwise switch to the first blank one (under
@@ -3978,7 +4040,7 @@ export class ClientSession {
 		}
 		for (const conv of this.convs.values()) {
 			if (conv.id === this.activeId) continue;
-			if (isBlank(conv)) {
+			if (conv.cwd === this.cwd && !conv.isSubagent && isBlank(conv)) {
 				await this.switchConversation(conv.id);
 				this.flushSnapshot();
 				return true;
@@ -4121,6 +4183,7 @@ export class ClientSession {
 		const conv = this.convs.get(id);
 		if (!conv || id === this.activeId) return;
 		this.convs.delete(id);
+		this.convStatuses.remove(id);
 		this.clearAllToolWatchdogs(conv);
 		conv.terminals.killAll();
 		conv.unsubscribe?.();
@@ -4143,6 +4206,10 @@ export class ClientSession {
 		this.conv.promptedSinceActive = false;
 		this.conv.lastActiveAt = Date.now();
 		this.webUi.refresh();
+		// Replay the switched-to conversation's OWN extension statuses (role
+		// footer). Without this, the client keeps showing the previous chat's
+		// role even though the tools/model belong to the new chat (issue #116).
+		this.pushActiveStatuses();
 		this.emitConversations();
 		this.goalSvc.emitGoalStatus();
 		this.pushTerminals();
@@ -4220,48 +4287,55 @@ export class ClientSession {
 	private sessionsRequested = false;
 
 	/**
-	 * Last parsed session list for this cwd, cached briefly so repeated
+	 * Last parsed session lists, keyed by cwd and cached briefly so repeated
 	 * global-search keystrokes don't re-parse every transcript file on each
 	 * request (a project can hold 100+ sessions of several MB each).
 	 * pushSessions() and searchSessions() share this fridge — opening the
-	 * panel warms it, then every keystroke inside the TTL is free.
+	 * panel (or expanding a project group) warms it, then every keystroke
+	 * inside the TTL is free. Keyed by cwd so a non-current project's listing
+	 * never pollutes or races the active cwd's fridge.
 	 */
-	private sessionInfosCache: { cwd: string; infos: SessionInfo[]; at: number } | null = null;
+	private sessionInfosCache = new Map<string, { infos: SessionInfo[]; at: number }>();
 	private static readonly SESSION_INFO_CACHE_TTL = 3000;
 
-	private async loadSessionInfos(): Promise<SessionInfo[]> {
+	private async loadSessionInfos(cwd: string = this.cwd): Promise<SessionInfo[]> {
 		const now = Date.now();
-		const c = this.sessionInfosCache;
-		if (c && c.cwd === this.cwd && now - c.at < ClientSession.SESSION_INFO_CACHE_TTL) {
+		const c = this.sessionInfosCache.get(cwd);
+		if (c && now - c.at < ClientSession.SESSION_INFO_CACHE_TTL) {
 			return c.infos;
 		}
-		const infos = await SessionManager.list(this.cwd, piSessionsRoot());
-		this.sessionInfosCache = { cwd: this.cwd, infos, at: now };
+		const infos = await SessionManager.list(cwd, piSessionsRoot());
+		this.sessionInfosCache.set(cwd, { infos, at: now });
 		return infos;
 	}
 
 	/** Session files on disk changed (delete / new-transcript) — drop the brief
 	 *  TTL fridge so the NEXT listing re-reads the directory instead of serving
 	 *  the pre-mutation snapshot (delete-then-refresh commonly runs inside the
-	 *  window, which would re-push the just-removed session). */
-	private invalidateSessionInfos(): void {
-		this.sessionInfosCache = null;
+	 *  window, which would re-push the just-removed session). Scoped by cwd:
+	 *  only the mutated project's entry is dropped; omit cwd to drop all. */
+	private invalidateSessionInfos(cwd?: string): void {
+		if (cwd === undefined) this.sessionInfosCache.clear();
+		else this.sessionInfosCache.delete(cwd);
 	}
 
-	/** Push the persisted session list to the client (client-requested). */
-	async refreshSessions(): Promise<void> {
+	/** Push the persisted session list to the client (client-requested).
+	 *  `cwd` scopes the listing to one project; omitted = active cwd. */
+	async refreshSessions(cwd?: string): Promise<void> {
 		this.sessionsRequested = true;
-		await this.pushSessions();
+		await this.pushSessions(cwd);
 	}
 
-	private async pushSessions(): Promise<void> {
+	private async pushSessions(cwd?: string): Promise<void> {
 		if (!this.sessionsRequested) return;
-		if (!this.sessionsRequested) return;
+		const targetCwd = cwd ?? this.cwd;
 		try {
 			// Sessions live in the SDK default per-project dir
 			// (<agentDir>/sessions/--<cwd>--/), the same files the pi CLI/TUI
-			// use — one listing covers every conversation of the current folder.
-			const infos = await this.loadSessionInfos();
+			// use — one listing covers every conversation of one folder. The
+			// echoed `cwd` lets the client attribute the reply to the right
+			// project group even when several scoped queries are in flight.
+			const infos = await this.loadSessionInfos(targetCwd);
 
 			const sessions = new Map<string, SessionSummary>();
 			for (const s of infos) {
@@ -4274,10 +4348,10 @@ export class ClientSession {
 					source: "web",
 				});
 			}
-			const sorted = [...sessions.values()].sort((a, b) => b.modified - a.modified).slice(0, 200); // newest first — the panel shows recent history
-			this.emit({ type: "sessions", sessions: sorted });
+			const sorted = [...sessions.values()].sort((a, b) => b.modified - a.modified); // newest first; retain older project chats
+			this.emit({ type: "sessions", cwd: targetCwd, sessions: sorted });
 		} catch {
-			this.emit({ type: "sessions", sessions: [] });
+			this.emit({ type: "sessions", cwd: targetCwd, sessions: [] });
 		}
 	}
 
@@ -4368,12 +4442,23 @@ export class ClientSession {
 					return;
 				}
 			}
+			// Resolve the deleted transcript's project BEFORE unlinking so the
+			// refresh targets that project's listing (a history entry from a
+			// non-current group must refresh its OWN group, not the active cwd).
+			let affectedCwd: string | undefined = holder ? this.cwd : undefined;
+			if (!holder) {
+				try {
+					affectedCwd = SessionManager.open(abs).getCwd() || undefined;
+				} catch {
+					affectedCwd = undefined;
+				}
+			}
 			rmSync(abs, { force: true });
-			// Bust the brief session-info fridge: refreshSessions() below usually
-			// lands inside its 3s TTL and would otherwise re-serve a listing that
-			// still contains the deleted transcript.
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			// Bust the brief session-info fridge for THAT project: refreshSessions()
+			// below usually lands inside its 3s TTL and would otherwise re-serve a
+			// listing that still contains the deleted transcript.
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4405,8 +4490,9 @@ export class ClientSession {
 			const mgr = SessionManager.open(abs);
 			mgr.appendSessionInfo(trimmed);
 			this.setConversationTitleForFile(abs, trimmed);
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			const affectedCwd = mgr.getCwd() || undefined;
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4426,15 +4512,20 @@ export class ClientSession {
 			const conv = this.convs.get(id);
 			if (!conv) return;
 			conv.title = trimmed;
+			let affectedCwd = conv.cwd;
 			try {
 				const file = conv.session.sessionFile;
-				if (file !== undefined) SessionManager.open(resolve(file)).appendSessionInfo(trimmed);
+				if (file !== undefined) {
+					const mgr = SessionManager.open(resolve(file));
+					mgr.appendSessionInfo(trimmed);
+					affectedCwd = mgr.getCwd() || conv.cwd;
+				}
 			} catch {
 				// in-memory title still updated; transcript write is best-effort
 			}
 			this.emitConversations();
-			this.invalidateSessionInfos();
-			await this.refreshSessions();
+			this.invalidateSessionInfos(affectedCwd);
+			await this.refreshSessions(affectedCwd);
 		} catch (err) {
 			this.emit({
 				type: "notice",
@@ -4930,6 +5021,8 @@ export class ClientSession {
 			await this.restoreProjectModelForCwd(targetCwd);
 			this.conv.lastActiveAt = Date.now();
 			this.webUi.refresh();
+			// Replay the resumed conversation's own statuses (role footer).
+			this.pushActiveStatuses();
 			this.emitConversations();
 			this.goalSvc.emitGoalStatus();
 			this.pushTerminals();
@@ -5081,11 +5174,12 @@ export class ClientSession {
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
 			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => !removedProjects.has(path) && existsSync(path))
+				.filter(([path]) => path !== this.projectlessCwd && !removedProjects.has(path) && existsSync(path))
 				.map(([path, lastUsed]) => ({ path, lastUsed }))
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
 			this.emit({ type: "projects", projects });
+			await this.refreshSessions(this.projectlessCwd);
 		} catch {
 			this.emit({ type: "projects", projects: [] });
 		}
@@ -5217,6 +5311,8 @@ export class ClientSession {
 				throw new Error("路径不是目录");
 			}
 			if (abs === this.cwd) {
+				this.stateStore.remember(this.clientId, abs);
+				void this.pushProjects();
 				this.emit({
 					type: "notice",
 					level: "info",
@@ -5285,6 +5381,9 @@ export class ClientSession {
 			this.stateStore.remember(this.clientId, abs);
 			void this.pushProjects();
 			this.webUi.refresh();
+			// Project switch also switches the active conversation — replay its
+			// own statuses so the role footer follows (issue #116).
+			this.pushActiveStatuses();
 			this.emitConversations();
 			this.goalSvc.emitGoalStatus();
 			// Skills / prompt templates are project-bound — refresh the catalog.

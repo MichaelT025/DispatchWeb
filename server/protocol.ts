@@ -384,7 +384,7 @@ export type ClientMessage =
 	| { type: "scm_filediff"; reqId: number; path: string }
 	/** Full patch of one commit. */
 	| { type: "scm_commit"; reqId: number; hash: string }
-	| { type: "new_chat" }
+	| { type: "new_chat"; cwd?: string | null }
 	/** Edit a past user question and re-ask it (forks a new session at that point). */
 	| {
 			type: "edit_message";
@@ -403,10 +403,17 @@ export type ClientMessage =
 	| { type: "cycle_model" }
 	| { type: "cycle_thinking" }
 	| { type: "get_state" }
-	| { type: "list_sessions" }
+	/** List persisted session transcripts. `cwd` scopes the query to one
+	 *  project directory (the server maps it to that project's session store);
+	 *  omitted = the ACTIVE conversation's cwd (backward-compatible). Scoping by
+	 *  cwd lets the left panel load another project's history on expand WITHOUT
+	 *  switching the active conversation. */
+	| { type: "list_sessions"; cwd?: string }
 	| { type: "switch_session"; path: string }
 	| { type: "switch_conversation"; id: string }
 	| { type: "list_projects" }
+	/** Open the host OS folder picker; cancellation leaves the project unchanged. */
+	| { type: "pick_project_folder" }
 	| { type: "list_files"; path?: string }
 	/** 列目录：path 省略 = 工作区根；也接受工作区外绝对路径（Windows "C:/…"、
 	 *  posix "/…"）与机器根 "@root"（盘符列表，见 files-service.ts MACHINE_ROOT）。
@@ -1341,7 +1348,12 @@ export type ServerMessage =
 	| { type: "scm_changed" }
 	/** Sent every ~10s so clients can detect half-open connections. */
 	| { type: "heartbeat" }
-	| { type: "sessions"; sessions: SessionSummary[] }
+	/** Persisted session list for ONE project. `cwd` is the queried project
+	 *  directory (echoed back from `list_sessions`, or the active cwd on a
+	 *  spontaneous push); the client keys its per-project cache by this field.
+	 *  Omitted only by engines/older callers that never scope the query — the
+	 *  client falls back to the current cwd. */
+	| { type: "sessions"; cwd?: string; sessions: SessionSummary[] }
 	/** Filename matches for the global search panel (reqId echo). Always sent
 	 *  in reply to a search_files request — ok:false means the walk failed. */
 	| {

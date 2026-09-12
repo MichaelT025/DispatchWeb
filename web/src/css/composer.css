@@ -1,0 +1,335 @@
+/* PiAstra composer — Codex-style restyle. Loaded after styles.css; equal-specificity
+   selectors here win by source order, so no !important is needed. */
+
+/* ---- box ---- */
+.app .inputbox {
+	gap: 4px;
+	padding: 14px 14px 10px;
+	border: 1px solid var(--border-soft);
+	border-radius: 18px;
+	background: var(--inputbox-bg);
+	box-shadow: none;
+}
+.app .inputbox:focus-within {
+	border-color: var(--border);
+	box-shadow: none;
+}
+.inputbox textarea {
+	padding: 0 2px 4px;
+	font-size: 14.5px;
+	caret-color: var(--text);
+}
+.inputbox textarea::placeholder {
+	color: var(--text-faint);
+}
+
+/* ---- tool row ---- */
+.composer-tools {
+	min-height: 32px;
+	padding-top: 6px;
+	border-top: 0;
+	gap: 8px;
+}
+.composer-tools-left,
+.composer-tools-right {
+	gap: 4px;
+}
+.composer-tools-right {
+	min-width: 0;
+	flex-shrink: 1;
+}
+
+/* shared ghost control: transparent, hover raises to bg-elev2 */
+.inputbox .btn.attach-img,
+.inputbox .btn.tpl-open,
+.agent-picker-pill,
+.composer-tools .chip {
+	height: 28px;
+	min-width: 28px;
+	padding: 0 6px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-dim);
+	font-size: 13px;
+	font-family: var(--sans);
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background 0.15s,
+		color 0.15s;
+}
+.inputbox .btn.attach-img,
+.inputbox .btn.tpl-open {
+	width: 28px;
+	padding: 0;
+	color: var(--text);
+}
+.inputbox .btn.attach-img svg {
+	width: 18px;
+	height: 18px;
+}
+.inputbox .btn.tpl-open svg {
+	width: 15px;
+	height: 15px;
+}
+.inputbox .btn.attach-img:hover:not(:disabled),
+.inputbox .btn.tpl-open:hover,
+.agent-picker-pill:hover:not(:disabled),
+.composer-tools .chip:hover {
+	background: var(--bg-elev2);
+	border-color: transparent;
+	color: var(--text);
+}
+.inputbox .btn.attach-img:focus-visible,
+.inputbox .btn.tpl-open:focus-visible,
+.agent-picker-pill:focus-visible,
+.composer-tools .chip:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* ---- agent pill + menu ---- */
+.app .agent-picker {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	font-size: 13px;
+}
+.agent-picker-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 8px;
+	max-width: 220px;
+	color: var(--text);
+}
+.agent-picker-pill > svg {
+	width: 15px;
+	height: 15px;
+	flex-shrink: 0;
+	color: var(--text-dim);
+}
+.agent-picker-pill .dd-caret {
+	width: 13px;
+	height: 13px;
+}
+.agent-picker-pill-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.agent-picker-menu {
+	display: none;
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + 6px);
+	flex-direction: column;
+	gap: 2px;
+	min-width: 168px;
+	padding: 6px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--menu-bg, var(--bg-elev2));
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+	z-index: 60;
+}
+.agent-picker.open .agent-picker-menu {
+	display: flex;
+}
+.agent-picker-btn,
+.app .inputbar .agent-picker-btn {
+	justify-content: flex-start;
+	padding: 7px 10px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text);
+	font-size: 13px;
+	box-shadow: none;
+}
+.agent-picker-btn:hover:not(:disabled) {
+	background: var(--bg-elev2);
+	color: var(--text);
+}
+.agent-picker-btn.active,
+.app .inputbar .agent-picker-btn.active,
+.inputbar[data-agent="orchestrator"] .agent-picker-btn.active,
+.inputbar[data-agent="general"] .agent-picker-btn.active,
+.inputbar[data-agent="fast"] .agent-picker-btn.active,
+.inputbar[data-agent="review"] .agent-picker-btn.active {
+	color: var(--text);
+	background: var(--bg-elev2);
+	border-color: transparent;
+	box-shadow: none;
+}
+.agent-picker-btn.active::after {
+	content: "✓";
+	margin-left: auto;
+	padding-left: 12px;
+	font-size: 12px;
+	color: var(--text-dim);
+}
+.agent-picker-unavailable {
+	height: 28px;
+	padding: 0 8px;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--text-faint);
+	border: 0;
+}
+.agent-picker-unavailable svg {
+	width: 15px;
+	height: 15px;
+}
+
+/* ---- model · thinking phrase (two triggers reading as one) ---- */
+.model-thinking {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+}
+.model-thinking.compact {
+	gap: 0;
+}
+.model-thinking.compact > .dropdown {
+	flex-shrink: 1;
+	min-width: 0;
+}
+.model-thinking.compact .chip {
+	gap: 4px;
+	height: 28px;
+	padding: 0 6px;
+	color: var(--text);
+}
+.model-thinking.compact .chip .chip-model {
+	color: var(--text);
+	font-weight: 400;
+}
+.model-thinking.compact .chip .chip-sub {
+	color: var(--text-dim);
+}
+/* model trigger: no caret, tighter right edge so the thinking word sits next to it */
+.model-thinking.compact > .dropdown:first-child .chip {
+	padding-right: 2px;
+	border-top-right-radius: 4px;
+	border-bottom-right-radius: 4px;
+}
+.model-thinking.compact > .dropdown:first-child .dd-caret {
+	display: none;
+}
+.model-thinking.compact > .dropdown:last-child .chip {
+	padding-left: 4px;
+	border-top-left-radius: 4px;
+	border-bottom-left-radius: 4px;
+}
+.model-thinking.compact .dd-caret {
+	width: 13px;
+	height: 13px;
+	color: var(--text-dim);
+}
+.model-thinking.compact .dd-menu {
+	right: 0;
+	left: auto;
+}
+
+/* ---- send / stop / queue ---- */
+.inputbox-actions {
+	gap: 6px;
+	padding-bottom: 0;
+	margin-left: 4px;
+}
+.app .inputbox .btn.send,
+.app .inputbox .btn.stop,
+.app .inputbox .split-send {
+	width: 28px;
+	height: 28px;
+	border: 0;
+	border-radius: 50%;
+	background: var(--send-blue);
+	color: var(--send-fg);
+	box-shadow: none;
+	transform: none;
+	transition:
+		background 0.15s,
+		color 0.15s;
+}
+.app .inputbox .btn.send svg,
+.app .inputbox .btn.stop svg,
+.app .inputbox .split-send button svg {
+	width: 15px;
+	height: 15px;
+}
+.app .inputbox .btn.send:hover:not(:disabled) {
+	background: var(--send-blue-hover);
+	color: var(--send-fg);
+	transform: none;
+	box-shadow: none;
+}
+.app .inputbox .btn.send:disabled {
+	opacity: 1;
+	background: var(--send-disabled-bg);
+	color: var(--send-disabled-fg);
+}
+.app .inputbox .btn.stop {
+	background: var(--bg-elev2);
+	color: var(--text);
+}
+.app .inputbox .btn.stop:hover:not(:disabled) {
+	background: var(--bg-elev2);
+	color: var(--text);
+	transform: none;
+	box-shadow: none;
+}
+.app .inputbox .btn.stop svg {
+	width: 12px;
+	height: 12px;
+}
+.app .inputbox .split-send {
+	width: 60px;
+	border-radius: 999px;
+}
+.app .inputbox .split-send.single {
+	width: 28px;
+}
+.app .inputbox .split-send button {
+	color: var(--send-fg);
+}
+.app .inputbox .split-send .split-queue {
+	background: rgba(0, 0, 0, 0.1);
+}
+.app .inputbox .split-send button + button {
+	border-left: 1px solid rgba(0, 0, 0, 0.25);
+}
+.app .inputbox .split-send:hover {
+	background: var(--send-blue-hover);
+	transform: none;
+	box-shadow: none;
+}
+.app .inputbox .split-send button:hover:not(:disabled) {
+	background: rgba(0, 0, 0, 0.16);
+}
+.app .inputbox .split-send.disabled,
+.app .inputbox .split-send.disabled:hover {
+	background: var(--send-disabled-bg);
+}
+.app .inputbox .split-send.disabled button {
+	color: var(--send-disabled-fg);
+}
+
+/* ---- narrow: wrap the row, keep the send at the end ---- */
+@media (max-width: 560px) {
+	.composer-tools {
+		flex-wrap: wrap;
+	}
+	.composer-tools-right {
+		margin-left: auto;
+	}
+	.agent-picker-pill {
+		max-width: 140px;
+	}
+}

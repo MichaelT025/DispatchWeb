@@ -58,6 +58,61 @@ interface WidgetEntry {
 	dispose?: () => void;
 }
 
+/** A footer status entry, mirroring the server `statuses` message payload. */
+export interface StatusEntry {
+	key: string;
+	text: string | undefined;
+}
+
+/**
+ * Per-conversation footer status store. Extensions call `setStatus(key, text)`
+ * through a per-conversation UI context; each write lands in the conversation
+ * that made it. Only the ACTIVE conversation's entries are returned for
+ * emission, so a background chat's role/status can never overwrite the active
+ * footer. The active conversation is resolved lazily via `getActiveId` (the
+ * server owns that pointer and can switch it without re-registering).
+ */
+export class ConversationStatuses {
+	private byConv = new Map<string, Map<string, string>>();
+
+	constructor(private readonly getActiveId: () => string) {}
+
+	/** Record a status write for `convId`. Returns the snapshot to emit, or
+	 *  null when the writer is not the active conversation (recorded for replay
+	 *  when that conversation becomes active). */
+	set(convId: string, key: string, text: string | undefined): StatusEntry[] | null {
+		let map = this.byConv.get(convId);
+		if (!map) {
+			map = new Map();
+			this.byConv.set(convId, map);
+		}
+		if (text === undefined || text === "") {
+			map.delete(key);
+		} else {
+			map.set(key, text);
+		}
+		if (convId !== this.getActiveId()) return null;
+		return this.snapshot(convId);
+	}
+
+	/** Snapshot of one conversation's entries (for switch/reconnect replay). */
+	snapshot(convId: string): StatusEntry[] {
+		const map = this.byConv.get(convId);
+		if (!map) return [];
+		return [...map.entries()].map(([key, text]) => ({ key, text }));
+	}
+
+	/** Snapshot of the ACTIVE conversation's entries. */
+	activeSnapshot(): StatusEntry[] {
+		return this.snapshot(this.getActiveId());
+	}
+
+	/** Drop a conversation's statuses when it is disposed. */
+	remove(convId: string): void {
+		this.byConv.delete(convId);
+	}
+}
+
 /**
  * Implements the subset of ExtensionUIContext that makes sense for a web UI.
  * TUI-only affordances (select/confirm/input dialogs, terminal input, custom

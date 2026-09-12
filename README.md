@@ -120,12 +120,8 @@ theme switching, and a full settings panel — tuned for daily development.
 
 ### 🖥️ Terminal & Git
 
-- Built-in terminal (xterm.js + node-pty) with per-client PTY management; on Windows it picks Git Bash, falls back to a bundled busybox download, then `cmd`. Up to 16 live terminals (agent-opened ones don't count), each keeping its own 8000-line scrollback while you switch tabs; tabs can be renamed inline, closed (which really kills the process) and show their exit code in the scrollback.
-- **Saved commands** — the sidebar's upper half is the project's `.pi/commands.json` list (`name` + `command` + `cwd`, `${pwd}` expands to the workspace): click a row to run it (a same-titled tab is reused and restarted, VS Code task style), add/edit/delete entries, and reload the file from disk.
-- **AI bash grouping** — terminals the agent opens through its bash takeover are folded into an “AI bash” group so they don't bury your own tabs.
-- **Terminal-backed bash** (Settings → Tools, off by default) — the agent's `bash` tool then runs inside a visible persistent terminal instead of a hidden process, so shell state (`cd`, venv, ssh) survives between calls; a silence threshold (default 15 s, `0` = wait forever) moves a quiet command to the background, and `head`/`tail` trim what the model has to read.
-- **Liveness detection** — when a terminal the agent is using goes silent while the chat is still streaming, the server steers the AI with the tail of its output (“read it / answer it / close it”) instead of letting the turn hang.
-- **Source control (Git) panel** — status / branch / diff / history / untracked files via a hidden query terminal, plus per-file stage (＋) and unstage (−), a commit box (Enter commits, IME-safe) with “Commit all” (`git add -A && git commit`), a branch picker that groups local and remote-tracking refs (picking a remote one creates a local branch tracking it), and detached-HEAD / `↑ahead ↓behind` badges. The “Commit tree” tab loads `git log --graph` with per-commit diffs. Writes (commit / branch switch / push / pull) run in the visible terminal and the view follows them there; the panel refreshes itself when the repository's real git dir changes (worktrees included) and via a 30 s fallback poll, so commits made outside the browser show up by themselves.
+- Built-in terminal (xterm.js + node-pty) with per-client PTY management; on Windows the interactive shell defaults to PowerShell (`pwsh` → `powershell.exe`), while the AI bash tool always resolves to Git Bash/busybox.
+- **Source control (Git) panel** — status / branch / diff / untracked files via a hidden query terminal; commit, switch branch, push and pull run in the visible terminal and auto-switch to the terminal view.
 
 ### 🎛️ Models & settings
 

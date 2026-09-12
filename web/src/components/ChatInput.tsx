@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { FiList, FiSquare, FiPaperclip, FiArrowUp, FiGrid } from "react-icons/fi";
+import { FiList, FiSquare, FiPlus, FiArrowUp, FiGrid } from "react-icons/fi";
 import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
+import type { AgentRole } from "../agents";
 import { useT, useI18n } from "../i18n";
 import { appSend, useAppField, useIsDsh } from "../app-globals";
 import { mergeRecalledDraft } from "../composer-draft";
@@ -12,6 +13,7 @@ import { loadPromptHistory, pushPromptHistory } from "../prompt-history";
 import { detectTouchFirstDevice } from "../touch-device";
 
 import { ModelThinking } from "./ModelThinking";
+import { AgentPicker } from "./AgentPicker";
 import { useTemplates } from "./PromptTemplates";
 
 /** True on touch-first devices (phones / tablets driven by a soft keyboard) —
@@ -71,6 +73,11 @@ interface ChatInputProps {
 	/** 输入框上方的快捷短语（点击即发送；与文件引用 chips 是两套独立 UI，互不干扰）。 */
 	quickPhrases: string[];
 	quickPhrasesEnabled: boolean;
+	/** PiAstra agent picker: CONFIRMED role from the server status bridge
+	 *  (null = unknown; we never show an optimistic local guess). */
+	activeAgent: AgentRole | null;
+	/** Whether the PiAstra extension is loaded (slash /agent + /piastra present). */
+	agentAvailable: boolean;
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -90,6 +97,8 @@ export const ChatInput = memo(function ChatInput({
 	providerKeys,
 	quickPhrases,
 	quickPhrasesEnabled,
+	activeAgent,
+	agentAvailable,
 	recallDrafts,
 }: ChatInputProps) {
 	const t = useT();
@@ -618,6 +627,7 @@ export const ChatInput = memo(function ChatInput({
 		<div
 			ref={composerRef}
 			className="inputbar"
+			data-agent={activeAgent ?? ""}
 			onDragOver={(e) => {
 				// 只做 preventDefault（允许落点 drop）；提示交给全窗口遮罩
 				// （App.tsx 的 .app-drop-overlay），输入条不再叠一层局部遮罩。
@@ -731,22 +741,6 @@ export const ChatInput = memo(function ChatInput({
 					</div>
 				</div>
 			)}
-			{quickPhrasesEnabled && quickPhrases.length > 0 && (
-				<div className="quick-row" aria-label={t("quickPhrases")}>
-					{quickPhrases.map((p) => (
-						<button
-							key={p}
-							type="button"
-							className="quick-chip"
-							title={t("quickPhrasesTip", { text: p })}
-							disabled={!connected}
-							onClick={() => sendPhrase(p)}
-						>
-							{p}
-						</button>
-					))}
-				</div>
-			)}
 			<div className="inputbox">
 				<input
 					ref={fileInputRef}
@@ -781,8 +775,8 @@ export const ChatInput = memo(function ChatInput({
 					onKeyDown={onKeyDown}
 					onPaste={onPaste}
 				/>
-				{/* 底部工具条（ChatGPT 风格）：附件 / 模型 / 思考强度 在左，
-				    发送 / 停止 在右，全部收进输入框容器内。 */}
+				{/* 底部工具条（Codex 风格）：附件「+」/ 智能体角色 / 模板 在左，
+				    模型 · 思考强度 / 发送 / 停止 在右，全部收进输入框容器内。 */}
 				<div className="composer-tools">
 					<div className="composer-tools-left">
 						<button
@@ -792,11 +786,23 @@ export const ChatInput = memo(function ChatInput({
 							disabled={!connected}
 							onClick={() => fileInputRef.current?.click()}
 						>
-							<FiPaperclip />
+							<FiPlus />
 						</button>
+						<AgentPicker
+							activeRole={activeAgent}
+							available={agentAvailable}
+							busy={streaming}
+							onSelect={(role) => {
+								// Real switch via the EXISTING /agent slash command — the
+								// extension performs model + thinking + tools + setStatus.
+								appSend({ type: "prompt", text: `/agent ${role}` });
+							}}
+						/>
 						<button type="button" className="btn tpl-open" title={t("tpl.openPicker")} onClick={openPicker}>
 							<FiGrid />
 						</button>
+					</div>
+					<div className="composer-tools-right">
 						<ModelThinking
 							state={modelState}
 							models={models}
@@ -805,8 +811,8 @@ export const ChatInput = memo(function ChatInput({
 							providerKeys={providerKeys}
 							compact
 						/>
+						{renderActions()}
 					</div>
-					<div className="composer-tools-right">{renderActions()}</div>
 				</div>
 			</div>
 		</div>

@@ -14,7 +14,7 @@ const STORAGE_KEY = "pi-web-ui:lang";
 
 export const zh = {
 	/* common */
-	docTitle: "pi-web-ui — pi 编码智能体",
+	docTitle: "PiAstra",
 	cancel: "取消",
 	ok: "确定",
 	save: "保存",
@@ -43,6 +43,12 @@ export const zh = {
 
 	/* topbar */
 	viewSwitch: "视图切换",
+	astraWorkspace: "工作台",
+	astraFiles: "文件",
+	astraReview: "审查",
+	astraWorkspaceHint: "选择要打开的面板",
+	astraEmptyHint: "输入消息开始，或按 / 查看命令",
+	fpBack: "返回文件列表",
 	chat: "对话",
 	terminal: "终端",
 	selectModel: "选择模型",
@@ -117,7 +123,7 @@ export const zh = {
 	foldersNotSupported: "不支持直接拖入文件夹，请展开后选择文件",
 	placeholderStreaming: "智能体正在工作中…回车插队发送，或点「排队」等回答结束后发送",
 	placeholderStreamingQueued: "智能体正在工作中…回车或点「排队」，回答完全结束后发送（本引擎不支持插队）",
-	placeholderIdle: "给 pi 发送消息 — Enter 发送，/ 查看命令",
+	placeholderIdle: "想做什么？",
 	placeholderConnecting: "正在连接服务器…",
 	stopAgent: "停止智能体",
 	stop: "停止",
@@ -159,6 +165,16 @@ export const zh = {
 	quickPhrasesEdit: "编辑该短语",
 	quickPhrasesEditPh: "修改短语…（Enter 保存，Esc 取消）",
 	quickPhrasesReset: "恢复默认短语",
+	agentPickerLabel: "选择智能体角色",
+	agentPickerNeutral: "智能体",
+	agentPickerBusy: "智能体正在工作中——请先停止或等待本轮结束再切换角色",
+	agentPickerUnavailable: "智能体角色不可用（未加载 PiAstra 扩展）",
+	agentActiveRole: "当前角色：{role}",
+	agentUnknown: "角色未确认",
+	agentRoleOrchestrator: "编导",
+	agentRoleGeneral: "通用",
+	agentRoleFast: "快速",
+	agentRoleReview: "审查",
 
 	/* slash commands */
 	slashCommands: "命令",
@@ -176,7 +192,9 @@ export const zh = {
 	slashCopyEmpty: "还没有可复制的助手回复",
 
 	/* left panel */
-	recentProjects: "最近项目",
+	recentProjects: "项目",
+	addProject: "添加项目",
+	recents: "最近对话",
 	runningConversations: "运行的对话",
 	subagentBadge: "子代理",
 	convErrorBadge: "子代理运行报错：{error}",
@@ -1087,7 +1105,7 @@ export const zh = {
 
 const en: Record<keyof typeof zh, string> = {
 	/* common */
-	docTitle: "pi-web-ui — pi coding agent",
+	docTitle: "PiAstra",
 	cancel: "Cancel",
 	ok: "OK",
 	save: "Save",
@@ -1116,6 +1134,12 @@ const en: Record<keyof typeof zh, string> = {
 
 	/* topbar */
 	viewSwitch: "Switch view",
+	astraWorkspace: "Workspace",
+	astraFiles: "Files",
+	astraReview: "Review",
+	astraWorkspaceHint: "Pick a panel to open",
+	astraEmptyHint: "Type a message to start, or press / for commands",
+	fpBack: "Back to files",
 	chat: "Chat",
 	terminal: "Terminal",
 	selectModel: "Select model",
@@ -1192,7 +1216,7 @@ const en: Record<keyof typeof zh, string> = {
 	placeholderStreaming: "The agent is working… press Enter to steer, or click Queue to send after the reply finishes",
 	placeholderStreamingQueued:
 		"The agent is working… press Enter or click Queue — delivered after the reply finishes (this engine cannot steer)",
-	placeholderIdle: "Message pi — Enter to send, / for commands",
+	placeholderIdle: "Do anything",
 	placeholderConnecting: "Connecting to server…",
 	stopAgent: "Stop agent",
 	stop: "Stop",
@@ -1237,6 +1261,16 @@ const en: Record<keyof typeof zh, string> = {
 	quickPhrasesEdit: "Edit this phrase",
 	quickPhrasesEditPh: "Edit phrase… (Enter to save, Esc to cancel)",
 	quickPhrasesReset: "Reset to defaults",
+	agentPickerLabel: "Select agent role",
+	agentPickerNeutral: "Agent",
+	agentPickerBusy: "The agent is working — stop it or wait for the turn to finish before switching",
+	agentPickerUnavailable: "Agent roles unavailable (PiAstra extension not loaded)",
+	agentActiveRole: "Active role: {role}",
+	agentUnknown: "Role unconfirmed",
+	agentRoleOrchestrator: "Orchestrator",
+	agentRoleGeneral: "General",
+	agentRoleFast: "Fast",
+	agentRoleReview: "Review",
 
 	/* slash commands */
 	slashCommands: "Commands",
@@ -1254,7 +1288,9 @@ const en: Record<keyof typeof zh, string> = {
 	slashCopyEmpty: "No assistant reply to copy yet",
 
 	/* left panel */
-	recentProjects: "Recent projects",
+	recentProjects: "Projects",
+	addProject: "Add project",
+	recents: "Recents",
 	runningConversations: "Running chats",
 	subagentBadge: "Subagent",
 	convErrorBadge: "Subagent failed: {error}",

@@ -259,5 +259,5 @@ npm publish
 - **Playwright 脚本**：Chrome 路径由 `tests/lib/chrome.mjs` 逐平台探测（`PI_WEB_CHROME` 可覆盖），不再写死本机路径；脚本里取仓库根一律用 `fileURLToPath(new URL("..", import.meta.url))`——`URL.pathname` 在 Windows 上得到 `/E:/...`，`spawn` 会直接 ENOENT；服务端进程清理在 win32 走 `tests/lib/port-utils.mjs` 的 `freePort`（负数 PID 的进程组在 Windows 上不存在）。
 
 ---
-
-_结构/流程变更时同步更新本文件及相关 `docs/` 文档。修改后运行 `/reload` 生效。_
+*结构/流程变更时同步更新本文件及相关 `docs/` 文档。修改后运行 `/reload` 生效。*
+Sidebar: global New chat uses `new_chat { cwd: null }` for projectless chats in `<dataDir>/chats`; project hover New chat passes `cwd`. Projects heading hover opens the native OS folder picker. Ungrouped chats render under Recents. See docs/architecture-core.md.

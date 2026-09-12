@@ -27,3 +27,5 @@ tests/scratch/
 
 # pi-web-ui Electron 桌面版构建产物
 release/
+
+.omo/

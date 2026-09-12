@@ -1,13 +1,13 @@
 {
-	"name": "pi-web-ui — pi coding agent",
-	"short_name": "pi-web-ui",
-	"description": "The polished browser cockpit for the pi coding agent. Stream conversations, inspect tool calls, manage files and run your workspace.",
+	"name": "PiAstra",
+	"short_name": "PiAstra",
+	"description": "PiAstra — a Codex-style workspace for the pi coding agent: conversations, files and terminal in one shell.",
 	"start_url": "./",
 	"scope": "./",
 	"display": "standalone",
 	"orientation": "any",
-	"background_color": "#0f172a",
-	"theme_color": "#0f172a",
+	"background_color": "#000000",
+	"theme_color": "#000000",
 	"categories": ["developer tools", "productivity"],
 	"icons": [
 		{

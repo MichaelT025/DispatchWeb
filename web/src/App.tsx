@@ -47,6 +47,7 @@ import { GlobalSearchModal } from "./components/GlobalSearchModal";
 import { TemplateProvider } from "./components/PromptTemplates";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
+import { parseAgentRole, hasPiastraExtension } from "./agents";
 import type { ClientMessage, CommandDef, PromptAttachment, UiMessage } from "./types";
 import { QUICK_PHRASE_DEFAULTS } from "./quick-phrases";
 import { useI18n, localeShort, useT } from "./i18n";
@@ -762,6 +763,11 @@ export function App() {
 	// ModelThinking chain; identity is stable while tokens stream in.
 	const viewState = chat.state;
 
+	// PiAstra agent role: parsed from the extension's CONFIRMED status bridge
+	// (never the active model), and whether the extension is loaded at all.
+	const activeAgent = parseAgentRole(chat.statuses);
+	const agentAvailable = hasPiastraExtension(chat.slashCommands);
+
 	const model = chat.state?.model;
 	const thinkingLevel = chat.state?.thinkingLevel;
 	const availableThinkingLevels = chat.state?.availableThinkingLevels;
@@ -989,6 +995,8 @@ export function App() {
 									onSent={clearAttachments}
 									quickPhrases={chat.settings?.quickPhrases ?? []}
 									quickPhrasesEnabled={chat.settings?.quickPhrasesEnabled ?? true}
+									activeAgent={activeAgent}
+									agentAvailable={agentAvailable}
 									recallDrafts={recallDrafts}
 								/>
 							</main>

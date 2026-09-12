@@ -165,6 +165,16 @@ export const zh = {
 	quickPhrasesEdit: "编辑该短语",
 	quickPhrasesEditPh: "修改短语…（Enter 保存，Esc 取消）",
 	quickPhrasesReset: "恢复默认短语",
+	agentPickerLabel: "选择智能体角色",
+	agentPickerNeutral: "智能体",
+	agentPickerBusy: "智能体正在工作中——请先停止或等待本轮结束再切换角色",
+	agentPickerUnavailable: "智能体角色不可用（未加载 PiAstra 扩展）",
+	agentActiveRole: "当前角色：{role}",
+	agentUnknown: "角色未确认",
+	agentRoleOrchestrator: "编导",
+	agentRoleGeneral: "通用",
+	agentRoleFast: "快速",
+	agentRoleReview: "审查",
 
 	/* slash commands */
 	slashCommands: "命令",
@@ -1245,6 +1255,16 @@ const en: Record<keyof typeof zh, string> = {
 	quickPhrasesEdit: "Edit this phrase",
 	quickPhrasesEditPh: "Edit phrase… (Enter to save, Esc to cancel)",
 	quickPhrasesReset: "Reset to defaults",
+	agentPickerLabel: "Select agent role",
+	agentPickerNeutral: "Agent",
+	agentPickerBusy: "The agent is working — stop it or wait for the turn to finish before switching",
+	agentPickerUnavailable: "Agent roles unavailable (PiAstra extension not loaded)",
+	agentActiveRole: "Active role: {role}",
+	agentUnknown: "Role unconfirmed",
+	agentRoleOrchestrator: "Orchestrator",
+	agentRoleGeneral: "General",
+	agentRoleFast: "Fast",
+	agentRoleReview: "Review",
 
 	/* slash commands */
 	slashCommands: "Commands",

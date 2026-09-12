@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { FiList, FiSquare, FiPaperclip, FiArrowUp, FiGrid } from "react-icons/fi";
 import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
+import type { AgentRole } from "../agents";
 import { useT, useI18n } from "../i18n";
 import { appSend, useAppField, useIsDsh } from "../app-globals";
 import { mergeRecalledDraft } from "../composer-draft";
@@ -10,6 +11,7 @@ import { loadPromptHistory, pushPromptHistory } from "../prompt-history";
 import { detectTouchFirstDevice } from "../touch-device";
 
 import { ModelThinking } from "./ModelThinking";
+import { AgentPicker } from "./AgentPicker";
 import { useTemplates } from "./PromptTemplates";
 
 /** True on touch-first devices (phones / tablets driven by a soft keyboard) —
@@ -69,6 +71,11 @@ interface ChatInputProps {
 	/** 输入框上方的快捷短语（点击即发送；与文件引用 chips 是两套独立 UI，互不干扰）。 */
 	quickPhrases: string[];
 	quickPhrasesEnabled: boolean;
+	/** PiAstra agent picker: CONFIRMED role from the server status bridge
+	 *  (null = unknown; we never show an optimistic local guess). */
+	activeAgent: AgentRole | null;
+	/** Whether the PiAstra extension is loaded (slash /agent + /piastra present). */
+	agentAvailable: boolean;
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -88,6 +95,8 @@ export const ChatInput = memo(function ChatInput({
 	providerKeys,
 	quickPhrases,
 	quickPhrasesEnabled,
+	activeAgent,
+	agentAvailable,
 	recallDrafts,
 }: ChatInputProps) {
 	const t = useT();
@@ -606,6 +615,7 @@ export const ChatInput = memo(function ChatInput({
 		<div
 			ref={composerRef}
 			className={`inputbar${dragOver ? " drop-active" : ""}`}
+			data-agent={activeAgent ?? ""}
 			onDragOver={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -767,6 +777,16 @@ export const ChatInput = memo(function ChatInput({
 				    发送 / 停止 在右，全部收进输入框容器内。 */}
 				<div className="composer-tools">
 					<div className="composer-tools-left">
+						<AgentPicker
+							activeRole={activeAgent}
+							available={agentAvailable}
+							busy={streaming}
+							onSelect={(role) => {
+								// Real switch via the EXISTING /agent slash command — the
+								// extension performs model + thinking + tools + setStatus.
+								appSend({ type: "prompt", text: `/agent ${role}` });
+							}}
+						/>
 						<button
 							type="button"
 							className="btn attach-img"

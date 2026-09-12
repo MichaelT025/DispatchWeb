@@ -7,7 +7,7 @@ import {
 	FiEdit2,
 	FiFolder,
 	FiMessageSquare,
-	FiPlus,
+	FiSearch,
 	FiTrash2,
 	FiX,
 } from "react-icons/fi";
@@ -22,6 +22,7 @@ import { buildLeftNav, pendingSessionCwds, type NavGroup } from "./left-panel-na
  *  and conversation lists on every delta. Add a prop here when adding a chat
  *  field usage — TypeScript enforces it at the call site. */
 interface LeftPanelProps {
+	readonly onOpenGlobalSearch: () => void;
 	sessionFile: string | null;
 	conversations: ConversationSummary[];
 	/** Persisted sessions per project cwd (server echoes the queried cwd). */
@@ -81,6 +82,7 @@ function loadCollapsedGroups(): Set<string> {
 }
 
 export const LeftPanel = memo(function LeftPanel({
+	onOpenGlobalSearch,
 	sessionFile,
 	conversations,
 	sessionsByCwd,
@@ -548,9 +550,14 @@ export const LeftPanel = memo(function LeftPanel({
 				title={t("newChatTip")}
 				onClick={() => panelSend({ type: "new_chat" })}
 			>
-				<FiPlus />
+				<FiEdit2 />
 				<span>{t("newChat")}</span>
 			</button>
+			<button type="button" className="lp-new-chat lp-search" onClick={onOpenGlobalSearch}>
+				<FiSearch />
+				<span>{t("searchGlobal")}</span>
+			</button>
+			<div className="lp-section-label">{t("recentProjects")}</div>
 			{/* Codex 式统一导航树：项目目录为顶层分组，运行中的对话与当前项目的历史
 			    会话按 cwd 嵌套在各目录下（未登记项目的运行对话单独成组，不丢弃）。 */}
 			<nav className="lp-nav">
@@ -614,6 +621,13 @@ export const LeftPanel = memo(function LeftPanel({
 					})
 				)}
 			</nav>
+			<footer className="lp-footer">
+				<span className={`conn-dot ${ready ? "ok" : "busy"}`} />
+				<span>{ready ? t("connected") : status === "closed" ? t("reconnecting") : t("connecting")}</span>
+				<span className="lp-footer-project" title={cwd}>
+					{cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop()}
+				</span>
+			</footer>
 			{convCtx && (
 				<div
 					className="ctx-menu"

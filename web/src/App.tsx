@@ -51,7 +51,15 @@ import { parseAgentRole, hasPiastraExtension } from "./agents";
 import type { ClientMessage, CommandDef, PromptAttachment, UiMessage } from "./types";
 import { QUICK_PHRASE_DEFAULTS } from "./quick-phrases";
 import { useI18n, localeShort, useT } from "./i18n";
-import { FiAlertCircle, FiAlertTriangle, FiArrowLeft, FiChevronsLeft, FiChevronsRight, FiInfo, FiX } from "react-icons/fi";
+import {
+	FiAlertCircle,
+	FiAlertTriangle,
+	FiArrowLeft,
+	FiChevronsLeft,
+	FiChevronsRight,
+	FiInfo,
+	FiX,
+} from "react-icons/fi";
 import type { Notice } from "./use-chat";
 import { fileToProcessedImage, isRasterImage, type ProcessedImage } from "./image-paste";
 import { randomUuid } from "./uuid";
@@ -206,6 +214,7 @@ type WorkspaceTab = "files" | "git" | `plugin:${string}`;
  *  常驻多标签/工具链，只保留搜索 / 声音 / 语言 / 主题 / 更新等必要入口。 */
 function AstraHeader({
 	chat,
+	title,
 	onOpenPanel,
 	onOpenSettings,
 	onOpenBgTasks,
@@ -222,6 +231,7 @@ function AstraHeader({
 	onThemeChange,
 }: {
 	chat: { ready: boolean; status: string; state: { cwd: string } | null; bgServers: unknown[] };
+	readonly title: string | undefined;
 	onOpenPanel: (side: "left" | "right") => void;
 	onOpenSettings: () => void;
 	onOpenBgTasks: () => void;
@@ -239,7 +249,6 @@ function AstraHeader({
 }) {
 	const { locale, setLocale, t, packs } = useI18n();
 	const [overflowOpen, setOverflowOpen] = useState(false);
-	const connLabel = chat.ready ? t("connected") : chat.status === "closed" ? t("reconnecting") : t("connecting");
 	const projectName = projectNameFromCwd(chat.state?.cwd ?? "");
 	const chatBgCount = chat.bgServers.length;
 	return (
@@ -248,9 +257,9 @@ function AstraHeader({
 				<button type="button" className="panel-toggle" title={t("openHistory")} onClick={() => onOpenPanel("left")}>
 					<FiMenu />
 				</button>
-				{projectName && <span className="astra-project">{projectName}</span>}
-				<span className={`conn-dot ${chat.ready ? "ok" : "busy"}`} title={connLabel} />
-				<span className="conn-label">{connLabel}</span>
+				<span className="astra-project" title={title || projectName}>
+					{title || projectName}
+				</span>
 			</div>
 			<div className="astra-header-right">
 				<button type="button" className="chip" title={t("searchGlobalTip")} onClick={onOpenGlobalSearch}>
@@ -762,6 +771,11 @@ export function App() {
 	// Narrow snapshot of the model/thinking fields for the memoized ChatInput →
 	// ModelThinking chain; identity is stable while tokens stream in.
 	const viewState = chat.state;
+	const currentSession = chat.sessionsByCwd.get(cwd)?.find((session) => session.path === viewState?.sessionFile);
+	const conversationTitle =
+		currentSession?.name ||
+		chat.conversations.find((conversation) => conversation.id === chat.activeConversationId)?.title ||
+		currentSession?.firstMessage.trim();
 
 	// PiAstra agent role: parsed from the extension's CONFIRMED status bridge
 	// (never the active model), and whether the extension is loaded at all.
@@ -902,26 +916,6 @@ export function App() {
 					<span>📎 {t("dropHereToAttach")}</span>
 				</div>
 			)}
-			<AstraHeader
-				chat={chat}
-				onOpenPanel={(side) => {
-					if (side === "left") setDrawer("left");
-				}}
-				onOpenSettings={() => setSettingsOpen(true)}
-				onOpenBgTasks={() => setBgTasksOpen(true)}
-				onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
-				workspaceOpen={workspaceOpen}
-				onToggleWorkspace={toggleWorkspace}
-				bottomTerminalOpen={bottomTerminalOpen}
-				onToggleBottomTerminal={toggleBottomTerminal}
-				sound={sound}
-				onSoundChange={setSound}
-				onSoundPreview={(kind: SoundKind) => playSound(kind, sound)}
-				themes={themes}
-				theme={theme}
-				onThemeChange={switchTheme}
-			/>
-
 			{chat.protocolMismatch && <div className="protocol-banner">⚠ {t("protocolMismatch")}</div>}
 			<div className="notices">
 				{chat.notices.map((n) => (
@@ -936,6 +930,10 @@ export function App() {
 						className={`panel-drawer drawer-left ${drawer === "left" ? "open" : ""}${isMobile ? "" : leftCollapsed ? " hidden" : ""}`}
 					>
 						<LeftPanel
+							onOpenGlobalSearch={() => {
+								setDrawer(null);
+								setGlobalSearchOpen(true);
+							}}
 							collapsible={!isMobile}
 							onToggleCollapse={toggleLeft}
 							panelSend={panelSend}
@@ -949,6 +947,24 @@ export function App() {
 					</div>
 					{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
 					<div className="astra-column">
+						<AstraHeader
+							chat={chat}
+							title={conversationTitle}
+							onOpenPanel={() => setDrawer("left")}
+							onOpenSettings={() => setSettingsOpen(true)}
+							onOpenBgTasks={() => setBgTasksOpen(true)}
+							onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
+							workspaceOpen={workspaceOpen}
+							onToggleWorkspace={toggleWorkspace}
+							bottomTerminalOpen={bottomTerminalOpen}
+							onToggleBottomTerminal={toggleBottomTerminal}
+							sound={sound}
+							onSoundChange={setSound}
+							onSoundPreview={(kind: SoundKind) => playSound(kind, sound)}
+							themes={themes}
+							theme={theme}
+							onThemeChange={switchTheme}
+						/>
 						<div className="astra-row" style={{ "--right-w": `${rightWidth}px` } as CSSProperties}>
 							<main className={wide ? "main wide-chat" : "main"}>
 								{viewState ? (

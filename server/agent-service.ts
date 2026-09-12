@@ -33,6 +33,7 @@ import {
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
 	type CreateAgentSessionRuntimeFactory,
+	type ExtensionUIContext,
 	type SessionInfo,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -85,7 +86,7 @@ import {
 	isTerminalGuidanceOn,
 	MARKERS_LIST_TOOL_NAME,
 } from "./tool-manager.js";
-import { WebUIContext, mockThemeProxy } from "./webui-context.js";
+import { ConversationStatuses, WebUIContext, mockThemeProxy, type StatusEntry } from "./webui-context.js";
 import { decodeText } from "./text-sniff.js";
 import { makeEditSoftTool } from "./edit-soft-tool.js";
 import {
@@ -1337,6 +1338,9 @@ export class ClientSession {
 
 	/** Web-facing extension UI context (widgets, notifications). */
 	private webUi = new WebUIContext((msg) => this.emit(msg));
+	/** Per-conversation footer statuses (setStatus bridge). Active conversation
+	 *  resolved lazily so switches don't have to re-register anything. */
+	private readonly convStatuses = new ConversationStatuses(() => this.activeId);
 
 	/**
 	 * 第一方子代理 host（见 subagents.ts 设计头注）。子代理 = 一个标记
@@ -1889,7 +1893,10 @@ export class ClientSession {
 		// session creation, before any socket was attached).
 		const widgets = this.webUi.snapshot();
 		if (widgets.length > 0) send({ type: "widgets", widgets });
-		const statuses = this.webUi.statusSnapshot();
+		// Replay the ACTIVE conversation's extension statuses (role footer).
+		// Statuses are now per-conversation, so a reconnect must restore the
+		// active chat's own role — not whatever a background chat last wrote.
+		const statuses = this.activeStatusSnapshot();
 		if (statuses.length > 0) send({ type: "statuses", statuses });
 		// Reconnect: push the current project's running-conversation list so the
 		// left panel shows every background chat (a fresh socket never got the
@@ -1938,7 +1945,10 @@ export class ClientSession {
 		conv.session = conv.runtime.session;
 		await conv.session.bindExtensions({
 			mode: "rpc",
-			uiContext: this.webUi,
+			// Per-conversation UI context: setStatus is routed into this
+			// conversation's own status map (see uiContextFor), so a background
+			// chat's role can't overwrite the active footer.
+			uiContext: this.uiContextFor(conv.id),
 			onError: (err) => {
 				this.emit({ type: "notice", level: "error", text: err.error, textEn: err.error });
 			},
@@ -1952,6 +1962,47 @@ export class ClientSession {
 		this.webUi.refresh();
 		this.startWidgetsTimer();
 		this.startStallTimer();
+	}
+
+	/** Per-conversation extension UI context. Everything delegates to the shared
+	 *  webUi (widgets/notifications/dialogs) EXCEPT setStatus, which is routed
+	 *  into the given conversation's own status map. This is what keeps a
+	 *  background chat's role status from overwriting the active chat's footer. */
+	private uiContextFor(convId: string): ExtensionUIContext {
+		const base = this.webUi;
+		const self = this;
+		return new Proxy(base as unknown as Record<string | symbol, unknown>, {
+			get(target, prop) {
+				if (prop === "setStatus") {
+					return (key: string, text: string | undefined): void => self.setConvStatus(convId, key, text);
+				}
+				const value = target[prop];
+				return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(base) : value;
+			},
+		}) as unknown as ExtensionUIContext;
+	}
+
+	/** Write a setStatus entry into ONE conversation's own map. When the writer
+	 *  is the active conversation, push it to the client immediately; otherwise
+	 *  record it and let switchConversation replay it when that chat becomes
+	 *  active (a background runtime must never clobber the active footer). */
+	private setConvStatus(convId: string, key: string, text: string | undefined): void {
+		const clean = text === undefined ? undefined : stripAnsi(text);
+		const out = this.convStatuses.set(convId, key, clean);
+		if (out) {
+			this.emit({ type: "statuses", statuses: out });
+		}
+	}
+
+	/** Push the ACTIVE conversation's status entries to the client (empty clears
+	 *  the footer, which is exactly what a role-less chat needs on switch). */
+	private pushActiveStatuses(): void {
+		this.emit({ type: "statuses", statuses: this.convStatuses.activeSnapshot() });
+	}
+
+	/** Status entries of the ACTIVE conversation (for replay on reconnect). */
+	private activeStatusSnapshot(): StatusEntry[] {
+		return this.convStatuses.activeSnapshot();
 	}
 
 	/** Poll extension widgets so TUI-only overlays (e.g. rpiv-todo) stay live. */
@@ -4104,6 +4155,7 @@ export class ClientSession {
 		const conv = this.convs.get(id);
 		if (!conv || id === this.activeId) return;
 		this.convs.delete(id);
+		this.convStatuses.remove(id);
 		this.clearAllToolWatchdogs(conv);
 		conv.terminals.killAll();
 		conv.unsubscribe?.();
@@ -4126,6 +4178,10 @@ export class ClientSession {
 		this.conv.promptedSinceActive = false;
 		this.conv.lastActiveAt = Date.now();
 		this.webUi.refresh();
+		// Replay the switched-to conversation's OWN extension statuses (role
+		// footer). Without this, the client keeps showing the previous chat's
+		// role even though the tools/model belong to the new chat (issue #116).
+		this.pushActiveStatuses();
 		this.emitConversations();
 		this.goalSvc.emitGoalStatus();
 		this.pushTerminals();
@@ -4913,6 +4969,8 @@ export class ClientSession {
 			await this.restoreProjectModelForCwd(targetCwd);
 			this.conv.lastActiveAt = Date.now();
 			this.webUi.refresh();
+			// Replay the resumed conversation's own statuses (role footer).
+			this.pushActiveStatuses();
 			this.emitConversations();
 			this.goalSvc.emitGoalStatus();
 			this.pushTerminals();
@@ -5268,6 +5326,9 @@ export class ClientSession {
 			this.stateStore.remember(this.clientId, abs);
 			void this.pushProjects();
 			this.webUi.refresh();
+			// Project switch also switches the active conversation — replay its
+			// own statuses so the role footer follows (issue #116).
+			this.pushActiveStatuses();
 			this.emitConversations();
 			this.goalSvc.emitGoalStatus();
 			// Skills / prompt templates are project-bound — refresh the catalog.

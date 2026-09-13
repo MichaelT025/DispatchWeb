@@ -500,8 +500,7 @@ export const Message = memo(function Message({
 						)}
 						{isEmptyStreaming && (
 							<div className="thinking-wait">
-								{t("thinkingWait")}
-								<span className="dot" />
+								<span className="thinking-wait-label shimmer">{t("thinkingWait")}</span>
 							</div>
 						)}
 						{streaming && isLast && !isEmptyStreaming && message.role === "assistant" && (

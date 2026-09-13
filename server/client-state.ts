@@ -211,11 +211,18 @@ export class ClientStateStore {
 		return this.load()[clientId] ?? { projects: [] };
 	}
 
-	/** Remember which workspace a client last used; bumps its project entry. */
-	remember(clientId: string, cwd: string): void {
+	/** Remember which workspace a client last used; bumps its project entry.
+	 *  `asProject: false` only records the restore target — used when the cwd
+	 *  changed as a side effect of opening a chat, which must not turn a random
+	 *  shell directory into a sidebar project. */
+	remember(clientId: string, cwd: string, asProject = true): void {
 		const all = this.load();
 		const state = (all[clientId] ??= { projects: [] });
 		state.lastCwd = cwd;
+		if (!asProject) {
+			this.save();
+			return;
+		}
 		const now = Date.now();
 		state.projects = [{ path: cwd, lastUsed: now }, ...state.projects.filter((p) => p.path !== cwd)].slice(0, 30);
 		// Opening the workspace again clears its removal tombstone.

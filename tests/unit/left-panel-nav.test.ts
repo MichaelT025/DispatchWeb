@@ -162,3 +162,40 @@ it("keeps persisted projectless chats available after reconnect", () => {
 	const groups = buildLeftNav([project("/work", 1)], [], new Map([["/chats", [session("/saved.jsonl")]]]), "/work");
 	expect(groups.find((g) => !g.isProject)?.sessions[0].path).toBe("/saved.jsonl");
 });
+
+describe("disambiguateLabels", () => {
+	const proj = (path: string, lastUsed = 1) => ({ path, lastUsed });
+	it("colliding project basenames grow the nearest distinguishing parent", () => {
+		const groups = buildLeftNav(
+			[proj("C:/Users/me/Documents/Personal/PiAstra", 3), proj("C:\\Users\\me\\.codex\\worktrees\\4cb0\\PiAstra", 2)],
+			[],
+			new Map(),
+			"",
+		);
+		expect(groups.map((g) => g.label)).toEqual(["Personal/PiAstra", "4cb0/PiAstra"]);
+	});
+	it("unique basenames are left alone", () => {
+		const groups = buildLeftNav([proj("/a/x"), proj("/b/y")], [], new Map(), "");
+		expect(groups.map((g) => g.label)).toEqual(["x", "y"]);
+	});
+	it("keeps growing when the parent collides too", () => {
+		const groups = buildLeftNav([proj("/one/src/app"), proj("/two/src/app")], [], new Map(), "");
+		expect(groups.map((g) => g.label).sort()).toEqual(["one/src/app", "two/src/app"]);
+	});
+});
+
+describe("case folding + live/history dedupe", () => {
+	it("case variants of one Windows cwd land in one group, history file of a running chat is hidden", () => {
+		const sess = (path: string): SessionSummary => ({ path, firstMessage: path, messageCount: 1, modified: 1 });
+		const running = { ...conv("c1", "c:/Users/me/X-Lib"), sessionPath: "C:/s/--C--X-Lib--/a.jsonl" };
+		const groups = buildLeftNav(
+			[{ path: "C:/Users/me/X-Lib", lastUsed: 1 }],
+			[running],
+			new Map([["C:/Users/me/X-Lib", [sess("C:/s/--C--X-Lib--/a.jsonl"), sess("C:/s/--C--X-Lib--/b.jsonl")]]]),
+			"",
+		);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].conversations.map((x) => x.c.id)).toEqual(["c1"]);
+		expect(groups[0].sessions.map((s) => s.path)).toEqual(["C:/s/--C--X-Lib--/b.jsonl"]);
+	});
+});

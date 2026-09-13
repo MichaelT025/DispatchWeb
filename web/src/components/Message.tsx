@@ -503,9 +503,6 @@ export const Message = memo(function Message({
 								<span className="thinking-wait-label shimmer">{t("thinkingWait")}</span>
 							</div>
 						)}
-						{streaming && isLast && !isEmptyStreaming && message.role === "assistant" && (
-							<span className="stream-cursor" />
-						)}
 					</>
 				)}
 			</div>

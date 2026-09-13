@@ -614,8 +614,8 @@ export function piSessionsRoot(): string | undefined {
 }
 
 /** Case-folded key for grouping cwd spellings on case-insensitive filesystems
- *  (`c:\users\me\x` and `C:\Users\me\X` are one directory on Windows but
- *  and one per-cwd session folder). Exact on other platforms. */
+ *  (`c:\users\me\x` and `C:\Users\me\X` are one directory on Windows, and
+ *  one per-cwd session folder). Exact on other platforms. */
 function cwdKey(dir: string): string {
 	return process.platform === "win32" ? dir.toLowerCase() : dir;
 }
@@ -3842,7 +3842,7 @@ export class ClientSession {
 	async pushProjects(): Promise<void> {
 		try {
 			const saved = this.stateStore.get(this.clientId);
-			const removedProjects = new Set(this.stateStore.getRemovedProjects(this.clientId));
+			const removedKeys = new Set(this.stateStore.getRemovedProjects(this.clientId).map(cwdKey));
 			const map = new Map<string, number>();
 			for (const p of saved.projects) map.set(p.path, p.lastUsed);
 			// Newest session per cwd across the whole store (one scan). Spellings
@@ -3878,7 +3878,7 @@ export class ClientSession {
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
 			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => path !== this.projectlessCwd && !removedProjects.has(path) && existsSync(path))
+				.filter(([path]) => path !== this.projectlessCwd && !removedKeys.has(cwdKey(path)) && existsSync(path))
 				.map(([path, lastUsed]) => ({ path, lastUsed }))
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
@@ -3886,9 +3886,9 @@ export class ClientSession {
 
 			// Detached chats: every other cwd that has sessions, most recently
 			// touched first, capped so a long CLI history can't flood the panel.
-			const known = new Set(projects.map((p) => p.path));
+			const known = new Set(projects.map((p) => cwdKey(p.path)));
 			const detached = [...latestByCwd.entries()]
-				.filter(([cwd]) => !known.has(cwd) && !removedProjects.has(cwd))
+				.filter(([cwd]) => !known.has(cwdKey(cwd)) && !removedKeys.has(cwdKey(cwd)))
 				.sort((a, b) => b[1] - a[1])
 				.slice(0, ClientSession.RECENT_CWD_CAP)
 				.map(([cwd]) => cwd);

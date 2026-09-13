@@ -69,8 +69,8 @@ export function TermXterm({
 
 		const term = new Terminal({
 			theme: buildTermTheme(),
-			fontFamily: '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
-			fontSize: 13,
+			fontFamily: '"Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace',
+			fontSize: 13.5,
 			cursorBlink: true,
 			scrollback: 8000,
 		});

@@ -1,22 +1,32 @@
-/* PiAstra composer — Codex-style restyle. Loaded after styles.css; equal-specificity
-   selectors here win by source order, so no !important is needed. */
+/* PiAstra composer — input box + tool row. Loaded after styles.css; equal-
+   specificity selectors here win by source order, so no !important is needed.
+   Only tokens, no literal colors, so downloadable themes keep working. */
 
-/* ---- box ---- */
+/* ---- box: a raised card with a hairline, lifted slightly off the canvas ---- */
 .app .inputbox {
 	gap: 4px;
 	padding: 14px 14px 10px;
 	border: 1px solid var(--border-soft);
-	border-radius: 18px;
+	border-radius: var(--radius-xl, 20px);
 	background: var(--inputbox-bg);
-	box-shadow: none;
+	box-shadow:
+		inset 0 1px 0 var(--glow-03),
+		0 8px 32px rgba(0, 0, 0, 0.35);
+	transition:
+		border-color 0.15s,
+		box-shadow 0.15s;
 }
 .app .inputbox:focus-within {
 	border-color: var(--border);
-	box-shadow: none;
+	box-shadow:
+		inset 0 1px 0 var(--glow-04),
+		0 12px 40px rgba(0, 0, 0, 0.45);
 }
 .inputbox textarea {
-	padding: 0 2px 4px;
-	font-size: 14.5px;
+	padding: 2px 4px 6px;
+	font-size: 16px;
+	line-height: 1.5;
+	letter-spacing: -0.003em;
 	caret-color: var(--text);
 }
 .inputbox textarea::placeholder {
@@ -25,7 +35,7 @@
 
 /* ---- tool row ---- */
 .composer-tools {
-	min-height: 32px;
+	min-height: 34px;
 	padding-top: 6px;
 	border-top: 0;
 	gap: 8px;
@@ -44,14 +54,14 @@
 .inputbox .btn.tpl-open,
 .agent-picker-pill,
 .composer-tools .chip {
-	height: 28px;
-	min-width: 28px;
-	padding: 0 6px;
+	height: 30px;
+	min-width: 30px;
+	padding: 0 8px;
 	border: 1px solid transparent;
 	border-radius: 999px;
 	background: transparent;
 	color: var(--text-dim);
-	font-size: 13px;
+	font-size: 13.5px;
 	font-family: var(--sans);
 	line-height: 1;
 	cursor: pointer;
@@ -61,17 +71,17 @@
 }
 .inputbox .btn.attach-img,
 .inputbox .btn.tpl-open {
-	width: 28px;
+	width: 30px;
 	padding: 0;
-	color: var(--text);
+	color: var(--text-dim);
 }
 .inputbox .btn.attach-img svg {
 	width: 18px;
 	height: 18px;
 }
 .inputbox .btn.tpl-open svg {
-	width: 15px;
-	height: 15px;
+	width: 16px;
+	height: 16px;
 }
 .inputbox .btn.attach-img:hover:not(:disabled),
 .inputbox .btn.tpl-open:hover,
@@ -85,8 +95,8 @@
 .inputbox .btn.tpl-open:focus-visible,
 .agent-picker-pill:focus-visible,
 .composer-tools .chip:focus-visible {
-	outline: 2px solid var(--accent);
-	outline-offset: 1px;
+	outline: 0;
+	box-shadow: var(--ring);
 }
 
 /* ---- agent pill + menu ---- */
@@ -98,25 +108,27 @@
 	border: 0;
 	border-radius: 999px;
 	background: transparent;
-	font-size: 13px;
+	font-size: 13.5px;
 }
 .agent-picker-pill {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	padding: 0 8px;
+	padding: 0 10px 0 8px;
 	max-width: 220px;
 	color: var(--text);
+	font-weight: 500;
 }
 .agent-picker-pill > svg {
-	width: 15px;
-	height: 15px;
+	width: 16px;
+	height: 16px;
 	flex-shrink: 0;
 	color: var(--text-dim);
 }
 .agent-picker-pill .dd-caret {
 	width: 13px;
 	height: 13px;
+	color: var(--text-faint);
 }
 .agent-picker-pill-label {
 	overflow: hidden;
@@ -127,15 +139,15 @@
 	display: none;
 	position: absolute;
 	left: 0;
-	bottom: calc(100% + 6px);
+	bottom: calc(100% + 8px);
 	flex-direction: column;
 	gap: 2px;
-	min-width: 168px;
+	min-width: 180px;
 	padding: 6px;
 	border: 1px solid var(--border);
-	border-radius: 10px;
+	border-radius: var(--radius-md, 10px);
 	background: var(--menu-bg, var(--bg-elev2));
-	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+	box-shadow: var(--shadow-menu);
 	z-index: 60;
 }
 .agent-picker.open .agent-picker-menu {
@@ -146,10 +158,10 @@
 	justify-content: flex-start;
 	padding: 7px 10px;
 	border: 1px solid transparent;
-	border-radius: 7px;
+	border-radius: var(--radius-sm, 6px);
 	background: transparent;
 	color: var(--text);
-	font-size: 13px;
+	font-size: 13.5px;
 	box-shadow: none;
 }
 .agent-picker-btn:hover:not(:disabled) {
@@ -175,16 +187,16 @@
 	color: var(--text-dim);
 }
 .agent-picker-unavailable {
-	height: 28px;
+	height: 30px;
 	padding: 0 8px;
 	gap: 6px;
-	font-size: 13px;
+	font-size: 13.5px;
 	color: var(--text-faint);
 	border: 0;
 }
 .agent-picker-unavailable svg {
-	width: 15px;
-	height: 15px;
+	width: 16px;
+	height: 16px;
 }
 
 /* ---- model · thinking phrase (two triggers reading as one) ---- */
@@ -202,20 +214,21 @@
 }
 .model-thinking.compact .chip {
 	gap: 4px;
-	height: 28px;
-	padding: 0 6px;
+	height: 30px;
+	padding: 0 8px;
 	color: var(--text);
 }
 .model-thinking.compact .chip .chip-model {
 	color: var(--text);
-	font-weight: 400;
+	font-weight: 500;
 }
 .model-thinking.compact .chip .chip-sub {
 	color: var(--text-dim);
+	font-weight: 400;
 }
 /* model trigger: no caret, tighter right edge so the thinking word sits next to it */
 .model-thinking.compact > .dropdown:first-child .chip {
-	padding-right: 2px;
+	padding-right: 4px;
 	border-top-right-radius: 4px;
 	border-bottom-right-radius: 4px;
 }
@@ -230,7 +243,7 @@
 .model-thinking.compact .dd-caret {
 	width: 13px;
 	height: 13px;
-	color: var(--text-dim);
+	color: var(--text-faint);
 }
 .model-thinking.compact .dd-menu {
 	right: 0;
@@ -246,8 +259,8 @@
 .app .inputbox .btn.send,
 .app .inputbox .btn.stop,
 .app .inputbox .split-send {
-	width: 28px;
-	height: 28px;
+	width: 30px;
+	height: 30px;
 	border: 0;
 	border-radius: 50%;
 	background: var(--send-blue);
@@ -256,19 +269,23 @@
 	transform: none;
 	transition:
 		background 0.15s,
-		color 0.15s;
+		color 0.15s,
+		transform 0.1s;
 }
 .app .inputbox .btn.send svg,
 .app .inputbox .btn.stop svg,
 .app .inputbox .split-send button svg {
-	width: 15px;
-	height: 15px;
+	width: 16px;
+	height: 16px;
 }
 .app .inputbox .btn.send:hover:not(:disabled) {
 	background: var(--send-blue-hover);
 	color: var(--send-fg);
 	transform: none;
 	box-shadow: none;
+}
+.app .inputbox .btn.send:active:not(:disabled) {
+	transform: scale(0.96);
 }
 .app .inputbox .btn.send:disabled {
 	opacity: 1;
@@ -290,11 +307,11 @@
 	height: 12px;
 }
 .app .inputbox .split-send {
-	width: 60px;
+	width: 62px;
 	border-radius: 999px;
 }
 .app .inputbox .split-send.single {
-	width: 28px;
+	width: 30px;
 }
 .app .inputbox .split-send button {
 	color: var(--send-fg);

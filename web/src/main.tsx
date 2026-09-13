@@ -7,6 +7,7 @@ import "./css/shell.css";
 import "./css/messages.css";
 import "./css/composer.css";
 import "./css/workspace.css";
+import "./css/polish.css";
 import "highlight.js/styles/github-dark.css";
 import { initAuthToken } from "./auth-token";
 import { installScrollbarGutterVar } from "./scrollbar-gutter";

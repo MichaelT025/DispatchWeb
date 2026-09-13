@@ -10836,6 +10836,12 @@ button.source-default-toggle {
 	--scroll-thumb: #2a2a2f;
 	--scroll-thumb-hover: #3a3a41;
 	--md-strong: #ffffff;
+	/* per-agent accents: the composer border and the pressed picker row take
+	   the confirmed role's hue (set as --composer-agent on .inputbar[data-agent]) */
+	--agent-orchestrator: #a78bfa;
+	--agent-general: #60a5fa;
+	--agent-fast: #fbbf24;
+	--agent-review: #34d399;
 	/* shared shape + elevation scale (see css/polish.css) */
 	--radius-sm: 6px;
 	--radius-md: 10px;

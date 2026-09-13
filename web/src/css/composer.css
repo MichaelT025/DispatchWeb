@@ -22,6 +22,47 @@
 		inset 0 1px 0 var(--glow-04),
 		0 12px 40px rgba(0, 0, 0, 0.45);
 }
+/* ---- agent tint: the border takes the confirmed role's hue ---- */
+.inputbar[data-agent="orchestrator"] {
+	--composer-agent: var(--agent-orchestrator);
+}
+.inputbar[data-agent="general"] {
+	--composer-agent: var(--agent-general);
+}
+.inputbar[data-agent="fast"] {
+	--composer-agent: var(--agent-fast);
+}
+.inputbar[data-agent="review"] {
+	--composer-agent: var(--agent-review);
+}
+.app .inputbar[data-agent="orchestrator"] .inputbox,
+.app .inputbar[data-agent="general"] .inputbox,
+.app .inputbar[data-agent="fast"] .inputbox,
+.app .inputbar[data-agent="review"] .inputbox {
+	border-color: color-mix(in srgb, var(--composer-agent) 55%, var(--border-soft));
+	box-shadow:
+		inset 0 1px 0 var(--glow-03),
+		0 0 0 1px color-mix(in srgb, var(--composer-agent) 12%, transparent),
+		0 8px 32px rgba(0, 0, 0, 0.35);
+}
+.app .inputbar[data-agent="orchestrator"] .inputbox:focus-within,
+.app .inputbar[data-agent="general"] .inputbox:focus-within,
+.app .inputbar[data-agent="fast"] .inputbox:focus-within,
+.app .inputbar[data-agent="review"] .inputbox:focus-within {
+	border-color: color-mix(in srgb, var(--composer-agent) 75%, var(--border));
+	box-shadow:
+		inset 0 1px 0 var(--glow-04),
+		0 0 0 1px color-mix(in srgb, var(--composer-agent) 18%, transparent),
+		0 12px 40px rgba(0, 0, 0, 0.45);
+}
+/* the pill icon carries the same hue so the picker reads as the source */
+.inputbar[data-agent="orchestrator"] .agent-picker-pill > svg,
+.inputbar[data-agent="general"] .agent-picker-pill > svg,
+.inputbar[data-agent="fast"] .agent-picker-pill > svg,
+.inputbar[data-agent="review"] .agent-picker-pill > svg {
+	color: var(--composer-agent);
+}
+
 .inputbox textarea {
 	padding: 2px 4px 6px;
 	font-size: 16px;

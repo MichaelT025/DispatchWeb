@@ -39,7 +39,8 @@ surfaces have room to read as tonal steps.
 | --shadow-menu / --shadow-modal | —                  | Overlay elevation                                 |
 | --ring                         | —                  | Shared `:focus-visible` box-shadow                |
 
-Agent identity uses labels and pressed state, not hue. Status colors remain
+Agent identity is a label plus a per-role hue on the composer border only;
+message content never encodes the role by color. Status colors remain
 semantic (connection, errors, warnings, diff). Light/custom themes retain their
 existing palette mappings. Send and `.btn.primary` use text/background
 inversion for contrast.
@@ -81,7 +82,10 @@ composer controls and allow bubbles up to 90% width.
   selected row uses neutral raised surface. Rename/delete remain available.
 - Header: existing ghost icon controls, title truncation, mobile menu button.
 - Composer: existing AgentPicker, model/thinking dropdowns, attachment/template
-  actions, send/stop/queue controls. Focus lightens border without a colored glow.
+  actions, send/stop/queue controls. The border (and the picker's icon) take
+  the confirmed agent's hue — `--agent-orchestrator` violet, `--agent-general`
+  blue, `--agent-fast` amber, `--agent-review` green — mixed ~55% into the
+  hairline at rest and ~75% on focus; no confirmed role keeps the neutral border.
 - Message: user bubble right-aligned; assistant/tool content keeps existing
   rendering, selection, edit, copy, retry and lazy-window behavior.
 - Tool call: collapsed by default (`toolsWrap` off) as a quiet one-line

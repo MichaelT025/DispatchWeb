@@ -9,7 +9,14 @@ import { parseDelegateArgs, shortenPath, toolArgHints } from "../../web/src/tool
 describe("toolArgHints — 脏输入不抛错", () => {
 	it("undefined / 空串 / 纯空白 → 全空", () => {
 		for (const v of [undefined, "", "   ", "\n"]) {
-			expect(toolArgHints(v)).toEqual({ path: undefined, timeout: undefined, command: undefined });
+			expect(toolArgHints(v)).toEqual({
+				path: undefined,
+				timeout: undefined,
+				command: undefined,
+				agent: undefined,
+				pattern: undefined,
+				commandPreview: undefined,
+			});
 		}
 	});
 

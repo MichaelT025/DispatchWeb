@@ -84,6 +84,12 @@ composer controls and allow bubbles up to 90% width.
   actions, send/stop/queue controls. Focus lightens border without a colored glow.
 - Message: user bubble right-aligned; assistant/tool content keeps existing
   rendering, selection, edit, copy, retry and lazy-window behavior.
+- Tool call: collapsed by default (`toolsWrap` off) as a quiet one-line
+  summary from `tool-summary.ts` — verb + target ("Reading src/app.ts",
+  "Ran git status"), present tense while running with a shimmer sweep
+  painted through the glyphs, past tense once the result lands. Errors stay
+  expanded and tinted red. Expanding shows the raw tool name, arguments and
+  output in a card; the "Show full tools" setting keeps everything open.
 - Workspace/terminal: existing tabs, file preview and terminal lifecycle.
 
 ## 6. Motion & interaction

@@ -338,6 +338,132 @@
 .toolcall.err {
 	border-color: color-mix(in srgb, var(--red) 30%, var(--border-soft));
 }
+
+/* ---- tool call, collapsed: a quiet one-line summary, no card chrome.
+   Consecutive tools stack as a tight list ("Reading a.ts / Ran git status /
+   Edited b.ts") the way a terminal harness prints its activity. ---- */
+.toolcall.collapsed {
+	margin: 0;
+	border-color: transparent;
+	background: transparent;
+	border-radius: var(--radius-sm, 6px);
+}
+.toolcall.collapsed + .toolcall.collapsed {
+	margin-top: 0;
+}
+.toolcall.collapsed .chead {
+	min-height: 28px;
+	padding: 0 8px 0 2px;
+	font-weight: 400;
+	color: var(--text-dim);
+}
+.toolcall.collapsed .chead:hover {
+	background: var(--bg-elev);
+	color: var(--text);
+}
+.toolcall.collapsed .toolcall-toggle {
+	opacity: 0;
+	width: 22px;
+}
+.toolcall.collapsed .chead:hover .toolcall-toggle,
+.toolcall.collapsed .toolcall-toggle:focus-visible {
+	opacity: 1;
+}
+.toolcall.collapsed .chead-icon {
+	width: 20px;
+	color: var(--text-faint);
+}
+.toolcall.collapsed .chead:hover .chead-icon {
+	color: var(--text-dim);
+}
+.toolcall.collapsed .toolcall-copy {
+	opacity: 0;
+}
+.toolcall.collapsed .chead:hover .toolcall-copy {
+	opacity: 0.6;
+}
+.toolcall.collapsed.err .chead {
+	color: var(--red-text, var(--red));
+}
+
+/* summary text: verb in the UI face, target in mono, single line */
+.toolcall-summary {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	flex: 0 1 auto;
+	min-width: 0;
+	font-size: 14px;
+	line-height: 1.4;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.toolcall-verb {
+	flex: none;
+}
+.toolcall-target {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.toolcall-target.mono {
+	font-family: var(--mono);
+	font-size: 13px;
+}
+.toolcall.expanded .toolcall-summary {
+	color: var(--text);
+	font-weight: 500;
+}
+.toolcall.expanded .toolcall-target.mono {
+	font-weight: 400;
+	color: var(--text-dim);
+}
+
+/* ---- shimmer: a light band sweeps across the label while the tool runs.
+   Gradient is painted through the glyphs (background-clip: text), so the
+   text itself glows rather than a bar behind it. ---- */
+.toolcall-summary.shimmer {
+	color: transparent;
+	background-image: linear-gradient(
+		100deg,
+		var(--text-faint) 0%,
+		var(--text-faint) 35%,
+		var(--text) 50%,
+		var(--text-faint) 65%,
+		var(--text-faint) 100%
+	);
+	background-size: 250% 100%;
+	background-repeat: no-repeat;
+	-webkit-background-clip: text;
+	background-clip: text;
+	animation: toolcall-shimmer 1.8s ease-in-out infinite;
+}
+.toolcall-summary.shimmer .toolcall-target {
+	color: inherit;
+}
+.toolcall.collapsed .chead:hover .toolcall-summary.shimmer {
+	/* keep the sweep on hover; the row tint carries the hover state */
+	color: transparent;
+}
+@keyframes toolcall-shimmer {
+	0% {
+		background-position: 120% 0;
+	}
+	100% {
+		background-position: -120% 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.toolcall-summary.shimmer {
+		animation: none;
+		color: var(--text-dim);
+		background-image: none;
+	}
+}
+
+/* ---- expanded card ---- */
 .chead {
 	min-height: 38px;
 	padding: 4px 10px 4px 8px;
@@ -348,7 +474,7 @@
 }
 .toolcall .chead {
 	min-height: 38px;
-	padding: 4px 10px 4px 8px;
+	padding: 4px 10px 4px 6px;
 	font-size: 14px;
 }
 .toolcall-name {
@@ -373,13 +499,37 @@
 	font-size: 13px;
 	color: var(--text-dim);
 }
-.toolcall.ok .toolcall-status {
+.toolcall-status,
+.toolcall.err .toolcall-status {
+	width: auto;
+	margin-left: 2px;
+	color: var(--red);
+}
+.toolcall-timeout {
+	font-family: var(--mono);
+	font-size: 12px;
 	color: var(--text-faint);
 }
 .toolcall-body,
 .toolcall:not(.err) .toolcall-body {
 	border-top: 1px solid var(--border-soft);
 	padding: 10px 14px 12px;
+}
+.toolcall-raw-name {
+	margin: 0 0 8px;
+	font-size: 11.5px;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+.toolcall-raw-name code {
+	font-size: 11.5px;
+	letter-spacing: 0;
+	text-transform: none;
+	background: var(--code-inline-bg);
+	border-radius: 4px;
+	padding: 1px 6px;
+	color: var(--text-dim);
 }
 .toolcall-args pre,
 .toolcall-output pre {
@@ -416,6 +566,11 @@
 .toolcall-open,
 .toolcall-kill {
 	border-radius: var(--radius-sm, 6px);
+}
+.toolcall-kill {
+	height: 24px;
+	padding: 0 8px;
+	font-size: 12px;
 }
 
 /* bash: command line as the header, output as the body */

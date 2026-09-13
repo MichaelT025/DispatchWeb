@@ -304,7 +304,7 @@ export class ClientStateStore {
 					? deriveLegacy(legacyToDisabled(stored)).questionnaireEnabled
 					: (stored?.questionnaireEnabled ?? true),
 			thinkingWrap: stored?.thinkingWrap ?? false,
-			toolsWrap: stored?.toolsWrap ?? true,
+			toolsWrap: stored?.toolsWrap ?? false,
 			skillsFullText: normalizeSkillList(stored?.skillsFullText),
 			retryMaxAttempts: normalizeRetryMaxAttempts(stored?.retryMaxAttempts),
 		};
@@ -328,7 +328,7 @@ export class ClientStateStore {
 			terminalBashIdleMs: settings.terminalBashIdleMs ?? cur.terminalBashIdleMs ?? 15_000,
 			questionnaireEnabled: settings.questionnaireEnabled ?? cur.questionnaireEnabled ?? true,
 			thinkingWrap: settings.thinkingWrap ?? cur.thinkingWrap ?? false,
-			toolsWrap: settings.toolsWrap ?? cur.toolsWrap ?? true,
+			toolsWrap: settings.toolsWrap ?? cur.toolsWrap ?? false,
 			skillsFullText: normalizeSkillList(settings.skillsFullText ?? cur.skillsFullText),
 			retryMaxAttempts: normalizeRetryMaxAttempts(
 				settings.retryMaxAttempts ?? cur.retryMaxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS,

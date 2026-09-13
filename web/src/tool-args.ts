@@ -25,6 +25,10 @@ const PATH_RE = /"(path|file_path|filePath|filename|file)"\s*:\s*"((?:[^"\\\n]|\
 
 /** 派单目标模板名（delegate_task 的 `agent` 参数；流式半截 JSON 也能 early 显示）。 */
 const AGENT_RE = /"agent"\s*:\s*"((?:[^"\\\n]|\\.){0,200})"/;
+/** 搜索类参数（grep / find / glob 的 pattern、query、regex、glob）。 */
+const PATTERN_RE = /"(pattern|query|regex|glob|search)"\s*:\s*"((?:[^"\\\n]|\\.){0,4000})"/;
+/** bash 命令行的流式早显：JSON 未到齐时也能从半截参数里取到开头。 */
+const COMMAND_RE = /"command"\s*:\s*"((?:[^"\\\n]|\\.){0,4000})/;
 const TIMEOUT_RE =
 	/"(timeout|timeoutSeconds|timeout_seconds|timeoutSec|timeoutMs|timeout_ms|timeoutMilliseconds)"\s*:\s*(-?\d+(?:\.\d+)?)(?![0-9eE.])/;
 
@@ -40,6 +44,11 @@ export interface ToolArgHints {
 	command?: string;
 	/** 派单目标模板名（delegate_task 卡头用）。 */
 	agent?: string;
+	/** 搜索类工具的 pattern / query（折叠摘要用）。 */
+	pattern?: string;
+	/** bash 命令行的早显版本：半截 JSON 也能取到，供折叠摘要在流式期间显示。
+	 *  完整可解析后与 command 相同。 */
+	commandPreview?: string;
 }
 
 /**
@@ -54,7 +63,21 @@ export function toolArgHints(argsText?: string): ToolArgHints {
 		timeout: timeoutHint(text),
 		command: commandHint(argsText),
 		agent: agentHint(text),
+		pattern: stringHint(text, PATTERN_RE, 2),
+		commandPreview: stringHint(text, COMMAND_RE, 1),
 	};
+}
+
+/** 通用字符串参数提示：解码 JSON 转义、控制字符归一、超长截断；扫不到静默 undefined。 */
+function stringHint(text: string, re: RegExp, group: number): string | undefined {
+	const m = re.exec(text);
+	if (!m) return undefined;
+	const cleaned = decodeJsonString(m[group])
+		.replace(/[\u0000-\u001f\u007f]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (!cleaned) return undefined;
+	return cleaned.length > VALUE_LIMIT ? `${cleaned.slice(0, VALUE_LIMIT - 1)}…` : cleaned;
 }
 
 /** agent 名：控制字符剥掉、超长截断；扫不到静默 undefined。 */

@@ -53,9 +53,9 @@ Fonts, Cascadia → system mono fallback). The xterm canvas uses the same mono
 stack at 13.5px. Form controls inherit `font-family` explicitly. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
 `components/Logo.tsx` so it follows `currentColor`.
 
-Scale: body 15px; chat prose and user bubble 15.5px / 1.65; composer 16px;
+Scale: body 15px; chat prose and user bubble 14px / 1.6 (Codex density); composer 14.5px;
 navigation, card headers and menu rows 14px; mono in cards and fenced code
-13–13.5px; inline code 13.5px; section labels 11.5px uppercase tracked; brand
+12.5px; inline code 12.5px; section labels 11.5px uppercase tracked; brand
 15px/600; header title 14px/500; empty wordmark 24px/600. Headings sit at 0 tracking. The whole `styles.css` scale sits one point above the
 original (11→12 … 16→17); anything new should land on that scale.
 Long project and title labels ellipsize; chat prose wraps naturally.

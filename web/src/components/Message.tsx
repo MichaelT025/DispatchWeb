@@ -504,7 +504,9 @@ export const Message = memo(function Message({
 								<span className="dot" />
 							</div>
 						)}
-						{streaming && isLast && !isEmptyStreaming && <span className="stream-cursor" />}
+						{streaming && isLast && !isEmptyStreaming && message.role === "assistant" && (
+							<span className="stream-cursor" />
+						)}
 					</>
 				)}
 			</div>

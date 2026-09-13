@@ -197,7 +197,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 				{exitHint && <span className="toolcall-timeout">{exitHint}</span>}
 				{hints.timeout && shown && <span className="toolcall-timeout">⏱ {hints.timeout}</span>}
 				<span className="toolcall-spacer" />
-				{isBashRunning && onKillBash && (
+				{shown && isBashRunning && onKillBash && (
 					<button
 						type="button"
 						className="toolcall-kill"
@@ -227,17 +227,19 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 						<span>{t("delegateOpenSubagent")}</span>
 					</button>
 				)}
-				<button
-					type="button"
-					className="chead-copy toolcall-copy"
-					title={t("copyArgs")}
-					onClick={(e) => {
-						e.stopPropagation();
-						copyArgs();
-					}}
-				>
-					{copied ? <FiCheckCircle /> : <FiCopy />}
-				</button>
+				{shown && (
+					<button
+						type="button"
+						className="chead-copy toolcall-copy"
+						title={t("copyArgs")}
+						onClick={(e) => {
+							e.stopPropagation();
+							copyArgs();
+						}}
+					>
+						{copied ? <FiCheckCircle /> : <FiCopy />}
+					</button>
+				)}
 			</div>
 			{shown && (
 				<div className="toolcall-body">

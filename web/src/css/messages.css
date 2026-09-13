@@ -376,12 +376,6 @@
 .toolcall.collapsed .chead:hover .chead-icon {
 	color: var(--text-dim);
 }
-.toolcall.collapsed .toolcall-copy {
-	opacity: 0;
-}
-.toolcall.collapsed .chead:hover .toolcall-copy {
-	opacity: 0.6;
-}
 .toolcall.collapsed.err .chead {
 	color: var(--red-text, var(--red));
 }
@@ -424,7 +418,8 @@
 /* ---- shimmer: a light band sweeps across the label while the tool runs.
    Gradient is painted through the glyphs (background-clip: text), so the
    text itself glows rather than a bar behind it. ---- */
-.toolcall-summary.shimmer {
+.toolcall-summary.shimmer,
+.thinking-label.shimmer {
 	color: transparent;
 	background-image: linear-gradient(
 		100deg,
@@ -456,7 +451,8 @@
 	}
 }
 @media (prefers-reduced-motion: reduce) {
-	.toolcall-summary.shimmer {
+	.toolcall-summary.shimmer,
+	.thinking-label.shimmer {
 		animation: none;
 		color: var(--text-dim);
 		background-image: none;

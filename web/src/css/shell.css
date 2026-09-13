@@ -287,6 +287,30 @@
 	box-shadow: var(--ring);
 }
 
+/* ---- running conversation: a small spinning ring instead of a pulsing dot ---- */
+.lp-nav .conv-streaming {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	border: 1.5px solid var(--border);
+	border-top-color: var(--text-dim);
+	background: transparent;
+	box-shadow: none;
+	flex-shrink: 0;
+	animation: lp-spin 0.9s linear infinite;
+}
+@keyframes lp-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.lp-nav .conv-streaming {
+		animation: none;
+		border-top-color: var(--text);
+	}
+}
+
 /* ---- footer ---- */
 .lp-footer {
 	gap: 8px;

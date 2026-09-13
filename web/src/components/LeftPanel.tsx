@@ -284,13 +284,6 @@ export const LeftPanel = memo(function LeftPanel({
 						<FiX />,
 					);
 				})()}
-				{c.isStreaming && (
-					<span
-						className="lp-row-stalled"
-						title={t("streaming")}
-						style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)" }}
-					/>
-				)}
 			</div>
 		);
 	};

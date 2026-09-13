@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySashDrag, parseWeights } from "../../web/src/panel-sash.js";
+import { applySashDrag, clampWorkspaceWidth, parseWeights, workspaceMaxPx } from "../../web/src/panel-sash.js";
 
 describe("parseWeights", () => {
 	const defaults = { files: 4, widgets: 1 };
@@ -77,5 +77,21 @@ describe("applySashDrag", () => {
 			expect(Number.isFinite(r.above)).toBe(true);
 			expect(r.above + r.below).toBeCloseTo(5, 10);
 		}
+	});
+});
+
+describe("workspace width clamp", () => {
+	it("ceiling leaves the chat column its floor", () => {
+		expect(workspaceMaxPx({ viewportPx: 1349, leftPx: 272, minPx: 280, maxPx: 1100 })).toBe(1349 - 272 - 400);
+	});
+	it("own cap wins on a wide window", () => {
+		expect(workspaceMaxPx({ viewportPx: 3000, leftPx: 240, minPx: 280, maxPx: 1100 })).toBe(1100);
+	});
+	it("never below the pane minimum even on a tiny window", () => {
+		expect(workspaceMaxPx({ viewportPx: 700, leftPx: 240, minPx: 280, maxPx: 1100 })).toBe(280);
+	});
+	it("clamps a persisted width that no longer fits", () => {
+		expect(clampWorkspaceWidth({ requested: 1000, viewportPx: 1200, leftPx: 240, minPx: 280, maxPx: 1100 })).toBe(560);
+		expect(clampWorkspaceWidth({ requested: 100, viewportPx: 1200, leftPx: 240, minPx: 280, maxPx: 1100 })).toBe(280);
 	});
 });

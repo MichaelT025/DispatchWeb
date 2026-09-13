@@ -6,6 +6,20 @@
 .astra-workspace {
 	background: var(--bg);
 	border-left: 1px solid var(--border-soft);
+	/* CSS safety net for the JS clamp (App.tsx / panel-sash.ts): the pane can
+	   never leave the chat column narrower than its floor */
+	max-width: calc(100% - 400px);
+}
+.astra-row > .main {
+	min-width: 400px;
+}
+@media (max-width: 768px) {
+	.astra-workspace {
+		max-width: none;
+	}
+	.astra-row > .main {
+		min-width: 0;
+	}
 }
 .astra-workspace-tabs {
 	min-height: 48px;

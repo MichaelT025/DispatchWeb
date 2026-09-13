@@ -148,6 +148,14 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 		if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
 		return parts.slice(0, MAX_PREVIEW_LINES);
 	}, [loaded]);
+	/** Highlighted HTML of the edit draft (whole document, joined back with
+	 *  newlines) for the editor underlay. Re-runs per keystroke; highlight.js is
+	 *  linear and highlightFile() falls back to plain above HIGHLIGHT_MAX_BYTES. */
+	const draftHtml = useMemo(
+		() => (editing ? highlightFile(draft, file.name).lines.join("\n") : ""),
+		[editing, draft, file.name],
+	);
+	const editorHlRef = useRef<HTMLPreElement>(null);
 	// Per-line highlighted HTML, aligned 1:1 with `lines` (same trailing-line
 	// and preview-cap rules). Binary and oversized files come back plain.
 	const highlighted = useMemo(() => {
@@ -461,14 +469,33 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 				)}
 
 				{!loading && editing && kind === "text" && !isBinary && loaded && (
-					<textarea
-						className={`fp-editor ${wrap ? "" : "no-wrap"}`}
-						value={draft}
-						onChange={(e) => setDraft(e.target.value)}
-						wrap={wrap ? "soft" : "off"}
-						spellCheck={false}
-						autoFocus
-					/>
+					// Highlighted editor: the textarea keeps input, selection and the
+					// caret but paints its text transparent; a <pre> with the same
+					// metrics sits underneath showing the highlighted draft, scroll-
+					// synced so the two never drift.
+					<div className={`fp-editor-wrap ${wrap ? "" : "no-wrap"}`}>
+						<pre
+							ref={editorHlRef}
+							className="fp-editor-hl hljs"
+							aria-hidden="true"
+							// highlight.js output: text already escaped, only span tags
+							dangerouslySetInnerHTML={{ __html: `${draftHtml}\n` }}
+						/>
+						<textarea
+							className="fp-editor"
+							value={draft}
+							onChange={(e) => setDraft(e.target.value)}
+							onScroll={(e) => {
+								const hl = editorHlRef.current;
+								if (!hl) return;
+								hl.scrollTop = e.currentTarget.scrollTop;
+								hl.scrollLeft = e.currentTarget.scrollLeft;
+							}}
+							wrap={wrap ? "soft" : "off"}
+							spellCheck={false}
+							autoFocus
+						/>
+					</div>
 				)}
 
 				{!loading &&

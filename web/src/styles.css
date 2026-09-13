@@ -42,8 +42,10 @@
 	--term-bright-white: #ffffff;
 	--mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 	--mermaid-font-size: 13px;
-	/* mono-everywhere UI: the sans slot resolves to the same face as --mono */
-	--sans: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+	/* system UI face: Segoe UI Variable on Windows 11, SF on macOS, Roboto on Android */
+	--sans:
+		"Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial,
+		sans-serif;
 
 	/* ---- 主题相关派生色：浅色/自定义主题仅需覆盖这些变量 + --bg/--accent 等基础变量。
 	   styles.css 是唯一布局文件，改布局永不碰主题文件。 ---- */

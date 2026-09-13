@@ -218,6 +218,10 @@
 	background: var(--bg-elev2);
 	color: var(--text);
 }
+.lp-nav .session-item.pending {
+	background: var(--bg-elev2);
+	color: var(--text-dim);
+}
 .lp-nav .session-info {
 	flex-direction: row;
 	align-items: center;

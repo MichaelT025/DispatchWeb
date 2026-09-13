@@ -87,8 +87,8 @@ function makeGroup(
  *   echoes each `sessions` push with its queried cwd, so the left panel can
  *   load any project's history on expand without switching the active chat.
  *
- * Order: current project first, then known projects by last-used desc, then
- * ungrouped cwds by label asc.
+ * Order: known projects by last-used desc, then ungrouped cwds by label asc
+ * (the panel then pins that order for the session - see stableProjectOrder).
  */
 /**
  * Which project groups currently need a scoped `list_sessions { cwd }`
@@ -195,13 +195,30 @@ export function buildLeftNav(
 	}
 
 	groups.sort((a, b) => {
-		if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
 		if (a.isProject !== b.isProject) return a.isProject ? -1 : 1;
 		if (a.isProject) return b.lastUsed - a.lastUsed;
 		return a.label < b.label ? -1 : a.label > b.label ? 1 : 0;
 	});
 	disambiguateLabels(groups);
 	return groups;
+}
+
+/**
+ * Keep project rows where the user last saw them. `lastUsed` bumps on every
+ * switch, so sorting by it alone makes the project you just clicked leap to
+ * the top; instead the first order seen this session is remembered and only
+ * genuinely new projects are inserted (at the top). `order` is mutated.
+ */
+export function stableProjectOrder(groups: NavGroup[], order: string[]): NavGroup[] {
+	const projects = groups.filter((g) => g.isProject);
+	const rest = groups.filter((g) => !g.isProject);
+	const present = new Set(projects.map((g) => cwdKey(g.path)));
+	const kept = order.filter((k) => present.has(k));
+	const fresh = projects.map((g) => cwdKey(g.path)).filter((k) => !kept.includes(k));
+	order.splice(0, order.length, ...fresh, ...kept);
+	const index = new Map(order.map((k, i) => [k, i]));
+	projects.sort((a, b) => (index.get(cwdKey(a.path)) ?? 0) - (index.get(cwdKey(b.path)) ?? 0));
+	return [...projects, ...rest];
 }
 
 /** Path segments, tolerant of mixed separators, root-first. */

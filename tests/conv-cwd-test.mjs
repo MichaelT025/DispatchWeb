@@ -160,8 +160,8 @@ check(
 	`${conversations.length} listed`,
 );
 check(
-	"workspace-switch notices fired",
-	notices.some((n) => n.includes("Switched to directory:")),
+	"workspace switches are silent (no info notice)",
+	!notices.some((n) => /Switched to directory|Already in directory|Restored the last/.test(n)),
 	notices.join(" | "),
 );
 

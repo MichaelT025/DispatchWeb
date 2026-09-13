@@ -30,6 +30,7 @@ import type {
 
 import { applyMessageDelta, type MessageDeltaMsg } from "./message-delta";
 import { resolvePendingQuestion, type QuestionSource } from "./pending-question";
+import { cwdKey } from "./components/left-panel-nav";
 import { setAppGlobals, setAppSend } from "./app-globals";
 import { PROTOCOL_VERSION } from "./protocol-version";
 
@@ -494,6 +495,11 @@ function reducer(state: ChatState, action: Action): ChatState {
 			};
 		case "sessions": {
 			const sessionsByCwd = new Map(state.sessionsByCwd);
+			// One directory, one list: a refresh echoed under another spelling of
+			// the same Windows path (c:/... vs C:/...) must replace the stale one,
+			// not sit beside it - otherwise a deleted transcript keeps showing.
+			const key = cwdKey(action.cwd);
+			for (const k of [...sessionsByCwd.keys()]) if (cwdKey(k) === key) sessionsByCwd.delete(k);
 			sessionsByCwd.set(action.cwd, action.sessions);
 			return { ...state, sessionsByCwd };
 		}

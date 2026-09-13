@@ -4,6 +4,7 @@ import {
 	buildLeftNav,
 	flattenConversations,
 	pendingSessionCwds,
+	stableProjectOrder,
 	type NavGroup,
 } from "../../web/src/components/left-panel-nav.js";
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
@@ -58,9 +59,10 @@ describe("buildLeftNav", () => {
 		expect(groups[1].conversations).toEqual([]);
 	});
 
-	it("当前项目优先，其余按 lastUsed 降序", () => {
+	it("projects by lastUsed desc; the current one does not jump ahead", () => {
 		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], new Map(), "/mid");
-		expect(groups.map((g) => g.path)).toEqual(["/mid", "/new", "/old"]);
+		expect(groups.map((g) => g.path)).toEqual(["/new", "/mid", "/old"]);
+		expect(groups[1].isCurrent).toBe(true);
 	});
 
 	it("未登记项目的运行对话保留为未分组（不静默丢弃）", () => {
@@ -197,5 +199,24 @@ describe("case folding + live/history dedupe", () => {
 		expect(groups).toHaveLength(1);
 		expect(groups[0].conversations.map((x) => x.c.id)).toEqual(["c1"]);
 		expect(groups[0].sessions.map((s) => s.path)).toEqual(["C:/s/--C--X-Lib--/b.jsonl"]);
+	});
+});
+
+describe("stableProjectOrder", () => {
+	it("keeps the first-seen order when lastUsed later reorders; new projects enter at the top", () => {
+		const order: string[] = [];
+		const first = stableProjectOrder(buildLeftNav([project("/a", 3), project("/b", 2)], [], new Map(), "/a"), order);
+		expect(first.map((g) => g.path)).toEqual(["/a", "/b"]);
+		// /b was just switched to and got the newest lastUsed — it must stay second
+		const bumped = stableProjectOrder(buildLeftNav([project("/a", 3), project("/b", 9)], [], new Map(), "/b"), order);
+		expect(bumped.map((g) => g.path)).toEqual(["/a", "/b"]);
+		// a newly opened project appears at the top; a removed one drops out
+		const next = stableProjectOrder(buildLeftNav([project("/c", 10), project("/b", 9)], [], new Map(), "/c"), order);
+		expect(next.map((g) => g.path)).toEqual(["/c", "/b"]);
+	});
+	it("detached groups stay after the projects", () => {
+		const order: string[] = [];
+		const g = stableProjectOrder(buildLeftNav([project("/a", 1)], [conv("x", "/zzz")], new Map(), "/a"), order);
+		expect(g.map((x) => x.isProject)).toEqual([true, false]);
 	});
 });

@@ -19,6 +19,7 @@ import {
 import type { FileContent } from "../types";
 import { Markdown } from "./Markdown";
 import { useT } from "../i18n";
+import { highlightFile } from "../highlight-lines";
 import { getClientId } from "../use-chat";
 import { withToken } from "../auth-token";
 import { appUrl } from "../base-url";
@@ -147,6 +148,14 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 		if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
 		return parts.slice(0, MAX_PREVIEW_LINES);
 	}, [loaded]);
+	// Per-line highlighted HTML, aligned 1:1 with `lines` (same trailing-line
+	// and preview-cap rules). Binary and oversized files come back plain.
+	const highlighted = useMemo(() => {
+		if (!loaded || loaded.kind !== "text" || loaded.binary) return null;
+		const out = highlightFile(loaded.text, file.name).lines;
+		if (out.length > 0 && out[out.length - 1] === "") out.pop();
+		return out.slice(0, MAX_PREVIEW_LINES);
+	}, [loaded, file.name]);
 
 	const lineCount = loaded?.lines ?? 0;
 	const truncatedLines = lineCount > MAX_PREVIEW_LINES;
@@ -497,7 +506,12 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 									}}
 								>
 									<span className="fp-num">{n}</span>
-									<span className="fp-code-text">{text}</span>
+									{highlighted && highlighted[i] !== undefined ? (
+										// highlight.js output: text already escaped, only span tags
+										<span className="fp-code-text hljs" dangerouslySetInnerHTML={{ __html: highlighted[i] }} />
+									) : (
+										<span className="fp-code-text">{text}</span>
+									)}
 								</div>
 							);
 						})}

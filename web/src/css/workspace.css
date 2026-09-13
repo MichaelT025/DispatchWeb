@@ -187,6 +187,15 @@
 	font-size: 0.88em;
 }
 
+/* code preview rows carry highlight.js token classes; the theme's block
+   background/padding must not apply per line */
+.fp-code-text.hljs {
+	display: inline;
+	padding: 0;
+	background: transparent;
+	color: var(--code-text, var(--text));
+}
+
 /* ---- bottom terminal: 38px strip, canvas tone, quiet tabs ---- */
 .astra-bottom-terminal {
 	border-top: 1px solid var(--border-soft);

@@ -40,11 +40,10 @@
 	--term-bright-magenta: #c084fc;
 	--term-bright-cyan: #22d3ee;
 	--term-bright-white: #ffffff;
-	--mono: "Geist Mono", "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+	--mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 	--mermaid-font-size: 13px;
-	--sans:
-		"Geist", "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial,
-		sans-serif;
+	/* mono-everywhere UI: the sans slot resolves to the same face as --mono */
+	--sans: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 
 	/* ---- 主题相关派生色：浅色/自定义主题仅需覆盖这些变量 + --bg/--accent 等基础变量。
 	   styles.css 是唯一布局文件，改布局永不碰主题文件。 ---- */

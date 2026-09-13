@@ -3,7 +3,7 @@
    specificity selectors win by source order; no !important. Only tokens, no
    literal colors, so downloadable themes keep working. */
 
-/* ---- text rendering: Geist wants slightly tighter tracking at UI sizes ---- */
+/* ---- text rendering: mono UI, ligatures off so code and prose read the same ---- */
 .app,
 .modal-backdrop,
 .gs-backdrop {
@@ -11,8 +11,15 @@
 	-moz-osx-font-smoothing: grayscale;
 	text-rendering: optimizeLegibility;
 	font-feature-settings:
-		"ss01" 0,
-		"cv11" 1;
+		"calt" 1,
+		"liga" 0;
+}
+/* form controls don't inherit the page face by default */
+button,
+input,
+select,
+textarea {
+	font-family: inherit;
 }
 code,
 kbd,
@@ -182,7 +189,7 @@ textarea.mono {
 .modal-head h2 {
 	font-size: 17px;
 	font-weight: 600;
-	letter-spacing: -0.01em;
+	letter-spacing: 0;
 }
 .modal-head-icon {
 	color: var(--text-dim);
@@ -216,7 +223,7 @@ textarea.mono {
 }
 .set-section-title {
 	font-weight: 600;
-	letter-spacing: -0.01em;
+	letter-spacing: 0;
 }
 .set-catalog-add,
 .set-card,

@@ -46,16 +46,15 @@ inversion for contrast.
 
 ## 3. Typography
 
-`--sans` is Geist (Google Fonts, Inter → Segoe UI fallback); `--mono` is Geist
-Mono (JetBrains Mono fallback). The xterm canvas uses the same mono stack at
-13.5px. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
+`--sans` and `--mono` both resolve to JetBrains Mono (Google Fonts, Cascadia
+Code → system mono fallback): the whole shell is set in mono for a terminal-
+harness feel. The xterm canvas uses the same stack at 13.5px. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
 `components/Logo.tsx` so it follows `currentColor`.
 
-Scale: body 15px; chat prose and user bubble 15.5px / 1.65; composer 16px;
+Scale: body 15px; chat prose and user bubble 14.5px / 1.7; composer 15px;
 navigation, card headers and menu rows 14px; mono in cards and fenced code
 13–13.5px; inline code 13.5px; section labels 11.5px uppercase tracked; brand
-15px/600; header title 14px/500; empty wordmark 24px/600. Headings use
--0.015em tracking. The whole `styles.css` scale sits one point above the
+15px/600; header title 14px/500; empty wordmark 24px/600. Mono needs no negative tracking; headings sit at 0. The whole `styles.css` scale sits one point above the
 original (11→12 … 16→17); anything new should land on that scale.
 Long project and title labels ellipsize; chat prose wraps naturally.
 

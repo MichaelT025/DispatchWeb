@@ -47,6 +47,7 @@ import { recordModelUsage } from "./model-usage";
 import { useWideChat } from "./chat-width-settings";
 import { projectNameFromCwd, useProjectTitle } from "./title-settings";
 import { notify } from "./notify";
+import { workspaceMaxPx } from "./panel-sash";
 
 export interface PendingAttachment {
 	path: string;
@@ -106,13 +107,16 @@ const PANEL_DEFAULT = 240;
 /** Astra 右侧工作台：首次打开默认占主区约一半（参考 Codex 右栏比例），可拖更宽。 */
 const RIGHT_MIN = 280;
 const RIGHT_MAX = 1100;
+function defaultWorkspaceWidth(): number {
+	const half = Math.round(window.innerWidth * 0.42);
+	return Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, half));
+}
 function readWorkspaceWidth(): number {
 	try {
 		const v = Number(localStorage.getItem(panelWidthKey("right")));
 		if (Number.isFinite(v) && v >= RIGHT_MIN && v <= RIGHT_MAX) return v;
 	} catch {}
-	const half = Math.round(window.innerWidth * 0.42);
-	return Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, half));
+	return defaultWorkspaceWidth();
 }
 type PanelSide = "left" | "right";
 const panelWidthKey = (side: PanelSide) => `pi-web-ui:${side}-panel-width`;
@@ -129,12 +133,17 @@ function readPanelCollapsed(side: PanelSide): boolean {
 function ResizeHandle({
 	side,
 	width,
+	min = PANEL_MIN,
 	max = PANEL_MAX,
+	reset,
 	onResize,
 }: {
 	side: PanelSide;
 	width: number;
+	min?: number;
 	max?: number;
+	/** Width restored on double-click (defaults to the sidebar default). */
+	reset?: () => number;
 	onResize: (w: number) => void;
 }) {
 	const t = useT();
@@ -147,7 +156,7 @@ function ResizeHandle({
 			const move = (ev: PointerEvent) => {
 				// 左侧手柄向右拖变宽，右侧相反
 				const delta = side === "left" ? ev.clientX - startX : startX - ev.clientX;
-				last = Math.min(max, Math.max(PANEL_MIN, Math.round(startW + delta)));
+				last = Math.min(max, Math.max(min, Math.round(startW + delta)));
 				onResize(last);
 			};
 			const up = () => {
@@ -160,14 +169,18 @@ function ResizeHandle({
 			window.addEventListener("pointerup", up);
 			document.body.classList.add("panel-resizing");
 		},
-		[side, width, onResize],
+		[side, width, min, max, onResize],
 	);
 	return (
 		<div
 			className={`resize-handle resize-${side}`}
 			title={t("dragToResize")}
 			onPointerDown={onPointerDown}
-			onDoubleClick={() => onResize(PANEL_DEFAULT)}
+			onDoubleClick={() => {
+				const w = reset ? reset() : PANEL_DEFAULT;
+				onResize(w);
+				localStorage.setItem(panelWidthKey(side), String(w));
+			}}
 		/>
 	);
 }
@@ -292,6 +305,15 @@ export function App() {
 	const [rightWidth, setRightWidth] = useState(readWorkspaceWidth);
 	const resizeLeft = useCallback((w: number) => setLeftWidth(w), []);
 	const resizeRight = useCallback((w: number) => setRightWidth(w), []);
+	// The workspace pane may never squeeze the chat column under MAIN_MIN_PX:
+	// its ceiling follows the window and the sidebar, and the stored width is
+	// re-clamped whenever either changes (see panel-sash.ts).
+	const [viewportW, setViewportW] = useState(() => window.innerWidth);
+	useEffect(() => {
+		const onResize = () => setViewportW(window.innerWidth);
+		window.addEventListener("resize", onResize);
+		return () => window.removeEventListener("resize", onResize);
+	}, []);
 	// 左右面板折叠状态（桌面端）：localStorage 持久化，点击面板内收起按钮折叠，
 	// 靠边缘的展开条恢复；移动端抽屉不受影响（始终由顶栏按钮开关）。
 	const [leftCollapsed, setLeftCollapsed] = useState(() => readPanelCollapsed("left"));
@@ -310,6 +332,13 @@ export function App() {
 	// (matches the CSS breakpoint) — used to lazy-load panel data only when
 	// a drawer is actually open on mobile.
 	const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 768px)").matches);
+	const rightMax = workspaceMaxPx({
+		viewportPx: viewportW,
+		leftPx: isMobile || leftCollapsed ? 0 : leftWidth,
+		minPx: RIGHT_MIN,
+		maxPx: RIGHT_MAX,
+	});
+	const rightWidthClamped = Math.min(rightWidth, rightMax);
 	useEffect(() => {
 		const mq = window.matchMedia("(max-width: 768px)");
 		const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
@@ -764,7 +793,7 @@ export function App() {
 						bottomTerminalOpen={bottomTerminalOpen}
 						onToggleBottomTerminal={toggleBottomTerminal}
 					/>
-					<div className="astra-row" style={{ "--right-w": `${rightWidth}px` } as CSSProperties}>
+					<div className="astra-row" style={{ "--right-w": `${rightWidthClamped}px` } as CSSProperties}>
 						<main className={wide ? "main wide-chat" : "main"}>
 							{viewState ? (
 								<MessageList
@@ -815,7 +844,16 @@ export function App() {
 						</main>
 						{workspaceOpen && (
 							<>
-								{!isMobile && <ResizeHandle side="right" width={rightWidth} max={RIGHT_MAX} onResize={resizeRight} />}
+								{!isMobile && (
+									<ResizeHandle
+										side="right"
+										width={rightWidthClamped}
+										min={RIGHT_MIN}
+										max={rightMax}
+										reset={defaultWorkspaceWidth}
+										onResize={resizeRight}
+									/>
+								)}
 								<aside className={`astra-workspace${isMobile ? " overlay" : ""}`} aria-label={t("astraWorkspace")}>
 									<div className="astra-workspace-tabs" role="tablist" aria-label={t("astraWorkspace")}>
 										{workspaceTab !== null && (

@@ -915,8 +915,8 @@ export function SettingsModal({ chat, terminal, onSwitchToTerminal, onClose }: S
 								<ToggleRow
 									title={t("toolsWrap")}
 									tip={t("toolsWrapDesc")}
-									enabled={settings.toolsWrap ?? true}
-									onToggle={() => setPartial({ toolsWrap: !(settings.toolsWrap ?? true) })}
+									enabled={settings.toolsWrap ?? false}
+									onToggle={() => setPartial({ toolsWrap: !(settings.toolsWrap ?? false) })}
 								/>
 								<hr className="set-sep" />
 								<ToggleRow

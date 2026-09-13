@@ -27,11 +27,14 @@ function check(name, ok, extra = "") {
 }
 
 // 两个工作区：workDir 是 PI_WEB_CWD；otherDir 只作为最近项目条目存在
+// A directory only becomes a sidebar project when it was opened explicitly or
+// is a git repo root with sessions — otherDir is never opened here, so it
+// gets a .git marker to qualify (a plain dir with sessions lands in Recents).
 const baseTmp = mkdtempSync(join(tmpdir(), "pi-web-lp-del-"));
 const workDir = join(baseTmp, "proj");
 const otherDir = join(baseTmp, "other");
 mkdirSync(workDir, { recursive: true });
-mkdirSync(otherDir, { recursive: true });
+mkdirSync(join(otherDir, ".git"), { recursive: true });
 writeFileSync(join(workDir, "a.txt"), "keep me");
 
 const dataDir = mkdtempSync(join(tmpdir(), "pi-web-lp-del-data-"));

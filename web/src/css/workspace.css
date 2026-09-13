@@ -1,27 +1,43 @@
-/* PiAstra workspace + terminal — Codex-style restyle. Loaded after styles.css;
-   equal-specificity selectors here win by source order, so no !important. */
+/* PiAstra workspace + terminal — right pane and bottom strip. Loaded after
+   styles.css; equal-specificity selectors here win by source order, so no
+   !important. Only tokens, no literal colors, so downloadable themes keep working. */
 
-/* ---- right workspace pane: black, quiet tab strip, no colored chrome ---- */
+/* ---- right workspace pane: canvas tone, quiet tab strip, no colored chrome ---- */
 .astra-workspace {
 	background: var(--bg);
 	border-left: 1px solid var(--border-soft);
+	/* CSS safety net for the JS clamp (App.tsx / panel-sash.ts): the pane can
+	   never leave the chat column narrower than its floor */
+	max-width: calc(100% - 400px);
+}
+.astra-row > .main {
+	min-width: 400px;
+}
+@media (max-width: 768px) {
+	.astra-workspace {
+		max-width: none;
+	}
+	.astra-row > .main {
+		min-width: 0;
+	}
 }
 .astra-workspace-tabs {
-	min-height: 44px;
-	padding: 6px 8px;
+	min-height: 48px;
+	padding: 8px 10px;
 	gap: 4px;
 	border-bottom: 1px solid var(--border-soft);
 }
 .astra-workspace-tabs button {
-	height: 28px;
+	height: 30px;
 	padding: 0 10px;
-	border-radius: 8px;
-	font-size: 13px;
+	border-radius: var(--radius-sm, 6px);
+	font-size: 13.5px;
+	font-weight: 500;
 	color: var(--text-dim);
 }
 .astra-workspace-tabs button svg {
-	width: 15px;
-	height: 15px;
+	width: 16px;
+	height: 16px;
 }
 .astra-workspace-tabs button.active {
 	background: var(--bg-elev2);
@@ -29,7 +45,7 @@
 }
 .astra-workspace-back,
 .astra-workspace-close {
-	width: 28px;
+	width: 30px;
 	padding: 0;
 	justify-content: center;
 }
@@ -39,26 +55,27 @@
 	gap: 4px;
 }
 .astra-workspace-hint {
-	font-size: 12px;
+	font-size: 13px;
 	color: var(--text-faint);
 }
 .astra-workspace-item {
-	height: 36px;
-	padding: 0 12px;
-	border: 0;
-	border-radius: 10px;
-	background: var(--bg-elev);
+	height: 38px;
+	padding: 0 14px;
+	border: 1px solid var(--border-soft);
+	border-radius: var(--radius-md, 10px);
+	background: var(--card-bg);
 	color: var(--text);
-	font-size: 13px;
+	font-size: 14px;
 }
 .astra-workspace-item:hover,
 .astra-workspace-item.active {
 	background: var(--bg-elev2);
+	border-color: var(--border);
 }
 .astra-workspace-item kbd {
 	font-family: var(--sans);
-	font-size: 11px;
-	color: var(--text-dim);
+	font-size: 12px;
+	color: var(--text-faint);
 	background: transparent;
 	border: 0;
 	padding: 0;
@@ -66,33 +83,33 @@
 
 /* ---- file preview: breadcrumb-like head, ghost controls ---- */
 .fp-head {
-	min-height: 40px;
-	padding: 6px 12px;
+	min-height: 42px;
+	padding: 6px 14px;
 	gap: 8px;
 	border-bottom: 1px solid var(--border-soft);
 	background: var(--bg);
 }
 .fp-name {
 	font-family: var(--sans);
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 500;
 }
 .fp-path {
 	font-family: var(--sans);
-	font-size: 12px;
+	font-size: 13px;
 }
 .fp-meta {
-	font-size: 11.5px;
+	font-size: 12.5px;
 }
 .fp-head-actions {
 	gap: 2px;
 }
 .fp-attach,
 .fp-close {
-	width: 26px;
-	height: 26px;
+	width: 28px;
+	height: 28px;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--radius-sm, 6px);
 	background: transparent;
 	color: var(--text-dim);
 }
@@ -111,7 +128,7 @@
 	border: 0;
 	background: transparent;
 	color: var(--text-faint);
-	font-size: 11.5px;
+	font-size: 12.5px;
 	min-width: 38px;
 }
 
@@ -119,8 +136,8 @@
 .fp-markdown,
 .fp-inline .fp-markdown {
 	background: var(--bg);
-	padding: 20px clamp(16px, 3vw, 40px) 40px;
-	font-size: 14px;
+	padding: 24px clamp(16px, 3vw, 40px) 48px;
+	font-size: 15.5px;
 	line-height: 1.65;
 }
 .fp-markdown h1,
@@ -130,27 +147,27 @@
 .fp-markdown h5,
 .fp-markdown h6 {
 	font-weight: 600;
-	letter-spacing: -0.01em;
+	letter-spacing: 0;
 	margin: 1.4em 0 0.5em;
 }
 .fp-markdown h1 {
-	font-size: 22px;
+	font-size: 24px;
 	border-bottom: 0;
 	padding-bottom: 0;
 }
 .fp-markdown h2 {
-	font-size: 18px;
+	font-size: 19px;
 	border-bottom: 0;
 	padding-bottom: 0;
 }
 .fp-markdown h3 {
-	font-size: 15.5px;
+	font-size: 16.5px;
 	color: var(--text);
 }
 .fp-markdown h4,
 .fp-markdown h5,
 .fp-markdown h6 {
-	font-size: 14px;
+	font-size: 15.5px;
 }
 .fp-markdown p {
 	margin: 0.7em 0;
@@ -158,7 +175,7 @@
 }
 .fp-markdown blockquote {
 	border: 0;
-	border-left: 3px solid var(--border);
+	border-left: 2px solid var(--border);
 	border-radius: 0;
 	background: transparent;
 	padding: 0.2em 1em;
@@ -176,25 +193,95 @@
 .fp-html-js:hover {
 	border-color: var(--text-dim);
 }
+.fp-markdown :not(pre) > code {
+	border: 0;
+	border-radius: 5px;
+	background: var(--code-inline-bg);
+	color: var(--code-text, var(--text));
+	font-size: 0.88em;
+}
 
-/* ---- bottom terminal: 36px strip, black canvas, quiet tabs ---- */
+/* code preview rows carry highlight.js token classes; the theme's block
+   background/padding must not apply per line */
+.fp-code-text.hljs {
+	display: inline;
+	padding: 0;
+	background: transparent;
+	color: var(--code-text, var(--text));
+}
+
+/* editor overlay: textarea on top (transparent text, live caret/selection),
+   highlighted <pre> underneath with identical metrics */
+.fp-editor-wrap {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+	display: flex;
+	background: rgba(0, 0, 0, 0.22);
+}
+.fp-editor-wrap .fp-editor,
+.fp-editor-hl {
+	margin: 0;
+	padding: 12px 14px;
+	border: 0;
+	font-family: var(--mono);
+	font-size: calc(12px * var(--fp-zoom, 1));
+	line-height: 1.6;
+	tab-size: 4;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	box-sizing: border-box;
+}
+.fp-editor-hl {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+	background: transparent;
+	color: var(--code-text, var(--text));
+}
+.fp-editor-wrap .fp-editor {
+	position: relative;
+	flex: 1;
+	width: 100%;
+	min-height: 0;
+	background: transparent;
+	color: transparent;
+	caret-color: var(--text);
+	resize: none;
+	outline: none;
+}
+.fp-editor-wrap .fp-editor::selection {
+	background: var(--term-selection, rgba(255, 255, 255, 0.2));
+}
+.fp-editor-wrap.no-wrap .fp-editor,
+.fp-editor-wrap.no-wrap .fp-editor-hl {
+	white-space: pre;
+	overflow-wrap: normal;
+}
+.fp-editor-wrap.no-wrap .fp-editor {
+	overflow: auto;
+}
+
+/* ---- bottom terminal: 38px strip, canvas tone, quiet tabs ---- */
 .astra-bottom-terminal {
 	border-top: 1px solid var(--border-soft);
 	background: var(--bg);
 }
 .term-strip {
-	min-height: 36px;
-	padding: 4px 8px;
+	min-height: 38px;
+	padding: 4px 10px;
 	background: var(--bg);
 	border-bottom: 0;
 }
 .term-strip .term-tab {
-	height: 26px;
-	padding: 0 8px;
-	border-radius: 6px;
+	height: 28px;
+	padding: 0 10px;
+	border-radius: var(--radius-sm, 6px);
 	gap: 6px;
 	font-family: var(--mono);
-	font-size: 12px;
+	font-size: 12.5px;
 }
 .term-strip .term-tab.active {
 	background: var(--bg-elev2);
@@ -202,21 +289,14 @@
 }
 .term-strip-new,
 .term-strip-group-toggle {
-	border-radius: 6px;
+	border-radius: var(--radius-sm, 6px);
 	color: var(--text-dim);
 }
 .term-empty-title {
-	font-size: 14px;
+	font-size: 15px;
 	font-weight: 500;
 }
 .term-empty-sub {
-	font-size: 12.5px;
+	font-size: 13.5px;
 	color: var(--text-faint);
-}
-.fp-markdown :not(pre) > code {
-	border: 0;
-	border-radius: 4px;
-	background: var(--code-inline-bg);
-	color: var(--text);
-	font-size: 0.9em;
 }

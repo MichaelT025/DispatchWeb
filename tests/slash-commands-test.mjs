@@ -142,12 +142,11 @@ async function main() {
 	c.send({ type: "prompt", text: `/cwd ${TMP_CWD}` });
 	// 协议 v2：动作后的快照可能是全量 snapshot，也可能是 snapshot_delta
 	// （light state 同样携带 cwd）——两者都必须接受（见 conv-cwd-test 写法）。
-	await c.wait((m) => (m.type === "snapshot" || m.type === "snapshot_delta") && norm(m.state?.cwd) === norm(TMP_CWD));
-	const cwdOk = await c.wait((m) => m.type === "notice", 6000).catch(() => null);
-	if (!cwdOk || !cwdOk.text.includes("Switched to directory:")) {
-		throw new Error("FAIL: /cwd valid path did not switch workspace");
-	}
-	console.log(`[3] /cwd valid → ${cwdOk.text}`);
+	const cwdSnap = await c.wait(
+		(m) => (m.type === "snapshot" || m.type === "snapshot_delta") && norm(m.state?.cwd) === norm(TMP_CWD),
+	);
+	// The switch is silent (no info notice) — the snapshot's cwd is the signal.
+	console.log(`[3] /cwd valid → ${cwdSnap.state.cwd}`);
 
 	c.send({ type: "prompt", text: "/cwd /nonexistent-zzz" });
 	const cwdBad = await c.wait((m) => m.type === "notice", 6000);

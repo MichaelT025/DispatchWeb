@@ -613,6 +613,22 @@ export function piSessionsRoot(): string | undefined {
 	return process.env.PI_CODING_AGENT_SESSION_DIR || undefined;
 }
 
+/** Case-folded key for grouping cwd spellings on case-insensitive filesystems
+ *  (`c:\users\me\x` and `C:\Users\me\X` are one directory on Windows, and
+ *  one per-cwd session folder). Exact on other platforms. */
+function cwdKey(dir: string): string {
+	return process.platform === "win32" ? dir.toLowerCase() : dir;
+}
+
+/** `.git` directory (or worktree/submodule pointer file) directly under `dir`. */
+function isRepoRoot(dir: string): boolean {
+	try {
+		return existsSync(join(dir, ".git"));
+	} catch {
+		return false;
+	}
+}
+
 export class ClientSession {
 	readonly clientId: string;
 	/** Set by AgentService.attach: reflects the SERVICE-wide quiesce flag
@@ -3187,7 +3203,9 @@ export class ClientSession {
 			} catch {
 				/* hook failure must not break the switch */
 			}
-			this.stateStore.remember(this.clientId, newCwd);
+			// Follow the chat's workspace, but don't promote it to a project —
+			// a CLI session from an arbitrary shell directory stays under Recents.
+			this.stateStore.remember(this.clientId, newCwd, false);
 			void this.pushProjects();
 			void this.refreshSessions();
 			void this.listFiles(undefined);
@@ -3206,9 +3224,11 @@ export class ClientSession {
 			if (!conv.listed) continue;
 			let messageCount = 0;
 			let isStreaming = false;
+			let sessionPath: string | undefined;
 			try {
 				messageCount = conv.session.getSessionStats().totalMessages;
 				isStreaming = conv.session.isStreaming;
+				sessionPath = conv.session.sessionFile ?? undefined;
 			} catch {
 				// session being replaced — report defaults
 			}
@@ -3218,6 +3238,7 @@ export class ClientSession {
 				cwd: conv.cwd,
 				messageCount,
 				isStreaming,
+				sessionPath,
 			});
 		}
 		this.emit({
@@ -3243,7 +3264,20 @@ export class ClientSession {
 	 * never pollutes or races the active cwd's fridge.
 	 */
 	private sessionInfosCache = new Map<string, { infos: SessionInfo[]; at: number }>();
+
+	/** Folded cwd key → the spelling the sidebar groups under. Transcripts can
+	 *  store a cwd in another case (`c:\...` from a CLI run); listings and
+	 *  refreshes must be echoed under the canonical spelling or the client ends
+	 *  up with two lists for one directory. Rebuilt by pushProjects(). */
+	private canonicalCwd = new Map<string, string>();
+
+	private canonicalize(cwd: string): string {
+		return this.canonicalCwd.get(cwdKey(cwd)) ?? cwd;
+	}
 	private static readonly SESSION_INFO_CACHE_TTL = 3000;
+
+	/** How many non-project directories get their sessions pushed for "Recents". */
+	private static readonly RECENT_CWD_CAP = 12;
 
 	private async loadSessionInfos(cwd: string = this.cwd): Promise<SessionInfo[]> {
 		const now = Date.now();
@@ -3275,7 +3309,7 @@ export class ClientSession {
 
 	private async pushSessions(cwd?: string): Promise<void> {
 		if (!this.sessionsRequested) return;
-		const targetCwd = cwd ?? this.cwd;
+		const targetCwd = this.canonicalize(cwd ?? this.cwd);
 		try {
 			// Sessions live in the SDK default per-project dir
 			// (<agentDir>/sessions/--<cwd>--/), the same files the pi CLI/TUI
@@ -3306,6 +3340,9 @@ export class ClientSession {
 	async removeProject(path: string): Promise<void> {
 		this.stateStore.removeProject(this.clientId, path);
 		await this.pushProjects();
+		// The client still holds this cwd's last listing; an empty echo clears
+		// it so the removed project's chats don't resurface under Recents.
+		this.emit({ type: "sessions", cwd: this.canonicalize(path), sessions: [] });
 	}
 
 	/** Permanently delete a persisted session transcript file (history list ✕).
@@ -3794,34 +3831,69 @@ export class ClientSession {
 	}
 
 	/**
-	 * Push the recent-project list (persisted per client, merged with every cwd
-	 * that has persisted sessions in this client's session store — so workspaces
-	 * opened before the recent-list feature existed still show up).
+	 * Push the project list. A directory is a project when this client opened
+	 * it explicitly (picker / set_cwd / launch cwd) OR it is a git repository
+	 * root that has sessions — a repo you only ever ran the pi CLI in is still
+	 * a project. Anything else with sessions (a shell's default cwd like
+	 * system32 or $HOME, the projectless chats dir, deleted workspaces) is not
+	 * promoted; those listings are pushed right after so the sidebar can show
+	 * them flat under "Recents".
 	 */
 	async pushProjects(): Promise<void> {
 		try {
 			const saved = this.stateStore.get(this.clientId);
-			const removedProjects = new Set(this.stateStore.getRemovedProjects(this.clientId));
+			const removedKeys = new Set(this.stateStore.getRemovedProjects(this.clientId).map(cwdKey));
 			const map = new Map<string, number>();
 			for (const p of saved.projects) map.set(p.path, p.lastUsed);
-			const all = await SessionManager.listAll(piSessionsRoot());
-			for (const s of all) {
-				if (s.cwd) {
-					const t = s.modified.getTime();
-					const prev = map.get(s.cwd);
-					if (prev === undefined || t > prev) map.set(s.cwd, t);
+			// Newest session per cwd across the whole store (one scan). Spellings
+			// that differ only by case fold into one entry (the saved project's
+			// spelling wins, else the first seen): on Windows they are the same
+			// directory AND the same per-cwd session folder, so one listing under
+			// the canonical spelling covers all of them.
+			const canonical = new Map<string, string>();
+			for (const p of saved.projects) canonical.set(cwdKey(p.path), p.path);
+			canonical.set(cwdKey(this.cwd), this.cwd);
+			const latestByCwd = new Map<string, number>();
+			for (const s of await SessionManager.listAll(piSessionsRoot())) {
+				if (!s.cwd) continue;
+				const key = cwdKey(s.cwd);
+				let cwd = canonical.get(key);
+				if (cwd === undefined) {
+					cwd = s.cwd;
+					canonical.set(key, cwd);
+				}
+				const t = s.modified.getTime();
+				const prev = latestByCwd.get(cwd);
+				if (prev === undefined || t > prev) latestByCwd.set(cwd, t);
+			}
+			this.canonicalCwd = canonical;
+			for (const [cwd, t] of latestByCwd) {
+				if (map.has(cwd)) {
+					if (t > (map.get(cwd) ?? 0)) map.set(cwd, t);
+				} else if (isRepoRoot(cwd)) {
+					map.set(cwd, t);
 				}
 			}
 			// Only keep directories that still exist — a deleted/unmounted workspace
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
 			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => path !== this.projectlessCwd && !removedProjects.has(path) && existsSync(path))
+				.filter(([path]) => path !== this.projectlessCwd && !removedKeys.has(cwdKey(path)) && existsSync(path))
 				.map(([path, lastUsed]) => ({ path, lastUsed }))
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
 			this.emit({ type: "projects", projects });
-			await this.refreshSessions(this.projectlessCwd);
+
+			// Detached chats: every other cwd that has sessions, most recently
+			// touched first, capped so a long CLI history can't flood the panel.
+			const known = new Set(projects.map((p) => cwdKey(p.path)));
+			const detached = [...latestByCwd.entries()]
+				.filter(([cwd]) => !known.has(cwdKey(cwd)) && !removedKeys.has(cwdKey(cwd)))
+				.sort((a, b) => b[1] - a[1])
+				.slice(0, ClientSession.RECENT_CWD_CAP)
+				.map(([cwd]) => cwd);
+			if (!detached.includes(this.projectlessCwd)) detached.push(this.projectlessCwd);
+			for (const cwd of detached) await this.refreshSessions(cwd);
 		} catch {
 			this.emit({ type: "projects", projects: [] });
 		}
@@ -3953,11 +4025,6 @@ export class ClientSession {
 			if (abs === this.cwd) {
 				this.stateStore.remember(this.clientId, abs);
 				void this.pushProjects();
-				this.emit({
-					type: "notice",
-					level: "info",
-					text: `Already in directory: ${abs}`,
-				});
 				this.flushSnapshot();
 				return;
 			}
@@ -4023,11 +4090,6 @@ export class ClientSession {
 			this.emitConversations();
 			// Skills / prompt templates are project-bound — refresh the catalog.
 			void this.pushSlashCommands();
-			this.emit({
-				type: "notice",
-				level: "info",
-				text: `Switched to directory: ${abs}`,
-			});
 			void this.refreshSessions();
 			void this.listFiles(undefined);
 			// Commands are per-project (.pi/commands.json in the current cwd).
@@ -4328,13 +4390,6 @@ export class AgentService {
 				this.clients.set(clientId, cs);
 				// Make sure the restored/default workspace appears in the project list.
 				this.stateStore.remember(clientId, cwd);
-				if (cwd !== this.cwd) {
-					send({
-						type: "notice",
-						level: "info",
-						text: `Restored the last working directory: ${cwd}`,
-					});
-				}
 			}
 		}
 		// First attach after a restart: report runs that were interrupted when

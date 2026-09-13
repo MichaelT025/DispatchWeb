@@ -71,3 +71,42 @@ export function applySashDrag(input: SashDragInput): SashPair {
 	);
 	return { above, below: pairTotal - above };
 }
+
+/* ------------------------------------------------------------------ */
+/* Horizontal: right workspace pane vs. the chat column                */
+/* ------------------------------------------------------------------ */
+
+/** Narrowest the chat column may get before the workspace pane has to give
+ *  way — enough for the composer's tool row and a readable message. */
+export const MAIN_MIN_PX = 400;
+
+export interface WorkspaceWidthInput {
+	/** Width the user asked for (drag position or persisted value). */
+	requested: number;
+	/** Window inner width. */
+	viewportPx: number;
+	/** Left sidebar width, 0 when collapsed / mobile drawer. */
+	leftPx: number;
+	minPx: number;
+	maxPx: number;
+	/** Chat column floor; defaults to MAIN_MIN_PX. */
+	mainMinPx?: number;
+}
+
+/**
+ * The widest the workspace pane can be right now: its own cap, but never so
+ * wide that the chat column drops under its floor. Falls back to the pane's
+ * minimum when the window itself is too small for both (the pane then wins
+ * because the user opened it deliberately; the row scrolls instead).
+ */
+export function workspaceMaxPx(input: Omit<WorkspaceWidthInput, "requested">): number {
+	const mainMin = input.mainMinPx ?? MAIN_MIN_PX;
+	const room = input.viewportPx - input.leftPx - mainMin;
+	return Math.max(input.minPx, Math.min(input.maxPx, Math.floor(room)));
+}
+
+/** Clamp a requested width into [min, workspaceMaxPx]. */
+export function clampWorkspaceWidth(input: WorkspaceWidthInput): number {
+	const max = workspaceMaxPx(input);
+	return Math.min(max, Math.max(input.minPx, Math.round(input.requested)));
+}

@@ -15,7 +15,7 @@ import type { ConversationSummary, ProjectSummary, SessionSummary } from "../typ
 import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { useAppField } from "../app-globals";
-import { buildLeftNav, pendingSessionCwds, type NavGroup } from "./left-panel-nav";
+import { buildLeftNav, pendingSessionCwds, stableProjectOrder, type NavGroup } from "./left-panel-nav";
 
 /** Props are deliberately NARROW (no whole-ChatState object): every field is
  *  stable while tokens stream in, so the shallow-compared memo() below skips
@@ -151,10 +151,25 @@ export const LeftPanel = memo(function LeftPanel({
 		wasLive.current = live;
 	}, [ready, status]);
 
+	const projectOrder = useRef<string[]>([]);
 	const navGroups = useMemo(
-		() => buildLeftNav(projects, conversations, sessionsByCwd, currentCwd),
+		() => stableProjectOrder(buildLeftNav(projects, conversations, sessionsByCwd, currentCwd), projectOrder.current),
 		[projects, conversations, sessionsByCwd, currentCwd],
 	);
+	/** Row the user just clicked, highlighted before the server finishes the
+	 *  switch (opening a chat in another project boots a fresh runtime, which
+	 *  takes a couple of seconds - the click must not look ignored). Cleared
+	 *  when the switch lands or fails. */
+	const [pendingTarget, setPendingTarget] = useState<string | null>(null);
+	useEffect(() => {
+		if (pendingTarget === null) return;
+		if (pendingTarget === currentFile || pendingTarget === activeConversationId) setPendingTarget(null);
+	}, [pendingTarget, currentFile, activeConversationId]);
+	useEffect(() => {
+		if (pendingTarget === null) return;
+		const id = window.setTimeout(() => setPendingTarget(null), 15000);
+		return () => window.clearTimeout(id);
+	}, [pendingTarget]);
 
 	// 可见且展开的项目都在这里惰性拉取历史：新发现的非当前项目、默认展开但从未
 	// 加载的分组都会补上；折叠分组不动。已加载成功的分组仅在重连刷新时重拉一次。
@@ -204,6 +219,7 @@ export const LeftPanel = memo(function LeftPanel({
 
 	const renderConversationRow = (c: ConversationSummary, depth: number) => {
 		const active = activeConversationId === c.id;
+		const pending = pendingTarget === c.id && !active;
 		const key = `conv:${c.id}`;
 		return (
 			<div
@@ -214,10 +230,12 @@ export const LeftPanel = memo(function LeftPanel({
 			>
 				<button
 					type="button"
-					className={`session-item ${active ? "active" : ""}`}
+					className={`session-item ${active ? "active" : ""}${pending ? " pending" : ""}`}
 					title={c.title}
 					onClick={() => {
-						if (!active) panelSend({ type: "switch_conversation", id: c.id });
+						if (active) return;
+						setPendingTarget(c.id);
+						panelSend({ type: "switch_conversation", id: c.id });
 					}}
 				>
 					<span className="session-info">
@@ -248,7 +266,7 @@ export const LeftPanel = memo(function LeftPanel({
 							<span className="session-sub">{active ? t("current") : t("messageCount", { n: c.messageCount })}</span>
 						)}
 					</span>
-					{c.isStreaming && <span className="conv-streaming" title={t("streaming")} />}
+					{(c.isStreaming || pending) && <span className="conv-streaming" title={t("streaming")} />}
 				</button>
 				<button
 					type="button"
@@ -284,29 +302,24 @@ export const LeftPanel = memo(function LeftPanel({
 						<FiX />,
 					);
 				})()}
-				{c.isStreaming && (
-					<span
-						className="lp-row-stalled"
-						title={t("streaming")}
-						style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)" }}
-					/>
-				)}
 			</div>
 		);
 	};
 
 	const renderSessionRow = (s: SessionSummary) => {
 		const active = currentFile === s.path;
+		const pending = pendingTarget === s.path && !active;
 		const key = `sess:${s.path}`;
 		return (
 			<div className="lp-row" key={s.path} onMouseLeave={() => setConfirmDel((k) => (k === key ? null : k))}>
 				<button
 					type="button"
-					className={`session-item ${active ? "active" : ""}`}
+					className={`session-item ${active ? "active" : ""}${pending ? " pending" : ""}`}
 					title={s.path}
 					onClick={() => {
-						if (renaming) return;
-						if (!active) panelSend({ type: "switch_session", path: s.path });
+						if (renaming || active) return;
+						setPendingTarget(s.path);
+						panelSend({ type: "switch_session", path: s.path });
 					}}
 				>
 					<span className="session-info">
@@ -345,6 +358,7 @@ export const LeftPanel = memo(function LeftPanel({
 						)}
 					</span>
 					<span className="session-time">{formatModified(s.modified)}</span>
+					{pending && <span className="conv-streaming" aria-hidden="true" />}
 				</button>
 				<button
 					type="button"

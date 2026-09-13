@@ -783,6 +783,9 @@ export interface ConversationSummary {
 	cwd: string;
 	messageCount: number;
 	isStreaming: boolean;
+	/** Transcript file backing this conversation, so the sidebar can hide the
+	 *  matching history row instead of listing the same chat twice. */
+	sessionPath?: string;
 }
 
 // ---------------------------------------------------------------------------

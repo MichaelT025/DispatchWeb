@@ -4,6 +4,7 @@ import {
 	buildLeftNav,
 	flattenConversations,
 	pendingSessionCwds,
+	stableProjectOrder,
 	type NavGroup,
 } from "../../web/src/components/left-panel-nav.js";
 import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
@@ -58,9 +59,10 @@ describe("buildLeftNav", () => {
 		expect(groups[1].conversations).toEqual([]);
 	});
 
-	it("当前项目优先，其余按 lastUsed 降序", () => {
+	it("projects by lastUsed desc; the current one does not jump ahead", () => {
 		const groups = buildLeftNav([project("/old", 1), project("/new", 9), project("/mid", 5)], [], new Map(), "/mid");
-		expect(groups.map((g) => g.path)).toEqual(["/mid", "/new", "/old"]);
+		expect(groups.map((g) => g.path)).toEqual(["/new", "/mid", "/old"]);
+		expect(groups[1].isCurrent).toBe(true);
 	});
 
 	it("未登记项目的运行对话保留为未分组（不静默丢弃）", () => {
@@ -161,4 +163,60 @@ describe("pendingSessionCwds", () => {
 it("keeps persisted projectless chats available after reconnect", () => {
 	const groups = buildLeftNav([project("/work", 1)], [], new Map([["/chats", [session("/saved.jsonl")]]]), "/work");
 	expect(groups.find((g) => !g.isProject)?.sessions[0].path).toBe("/saved.jsonl");
+});
+
+describe("disambiguateLabels", () => {
+	const proj = (path: string, lastUsed = 1) => ({ path, lastUsed });
+	it("colliding project basenames grow the nearest distinguishing parent", () => {
+		const groups = buildLeftNav(
+			[proj("C:/Users/me/Documents/Personal/PiAstra", 3), proj("C:\\Users\\me\\.codex\\worktrees\\4cb0\\PiAstra", 2)],
+			[],
+			new Map(),
+			"",
+		);
+		expect(groups.map((g) => g.label)).toEqual(["Personal/PiAstra", "4cb0/PiAstra"]);
+	});
+	it("unique basenames are left alone", () => {
+		const groups = buildLeftNav([proj("/a/x"), proj("/b/y")], [], new Map(), "");
+		expect(groups.map((g) => g.label)).toEqual(["x", "y"]);
+	});
+	it("keeps growing when the parent collides too", () => {
+		const groups = buildLeftNav([proj("/one/src/app"), proj("/two/src/app")], [], new Map(), "");
+		expect(groups.map((g) => g.label).sort()).toEqual(["one/src/app", "two/src/app"]);
+	});
+});
+
+describe("case folding + live/history dedupe", () => {
+	it("case variants of one Windows cwd land in one group, history file of a running chat is hidden", () => {
+		const sess = (path: string): SessionSummary => ({ path, firstMessage: path, messageCount: 1, modified: 1 });
+		const running = { ...conv("c1", "c:/Users/me/X-Lib"), sessionPath: "C:/s/--C--X-Lib--/a.jsonl" };
+		const groups = buildLeftNav(
+			[{ path: "C:/Users/me/X-Lib", lastUsed: 1 }],
+			[running],
+			new Map([["C:/Users/me/X-Lib", [sess("C:/s/--C--X-Lib--/a.jsonl"), sess("C:/s/--C--X-Lib--/b.jsonl")]]]),
+			"",
+		);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].conversations.map((x) => x.c.id)).toEqual(["c1"]);
+		expect(groups[0].sessions.map((s) => s.path)).toEqual(["C:/s/--C--X-Lib--/b.jsonl"]);
+	});
+});
+
+describe("stableProjectOrder", () => {
+	it("keeps the first-seen order when lastUsed later reorders; new projects enter at the top", () => {
+		const order: string[] = [];
+		const first = stableProjectOrder(buildLeftNav([project("/a", 3), project("/b", 2)], [], new Map(), "/a"), order);
+		expect(first.map((g) => g.path)).toEqual(["/a", "/b"]);
+		// /b was just switched to and got the newest lastUsed — it must stay second
+		const bumped = stableProjectOrder(buildLeftNav([project("/a", 3), project("/b", 9)], [], new Map(), "/b"), order);
+		expect(bumped.map((g) => g.path)).toEqual(["/a", "/b"]);
+		// a newly opened project appears at the top; a removed one drops out
+		const next = stableProjectOrder(buildLeftNav([project("/c", 10), project("/b", 9)], [], new Map(), "/c"), order);
+		expect(next.map((g) => g.path)).toEqual(["/c", "/b"]);
+	});
+	it("detached groups stay after the projects", () => {
+		const order: string[] = [];
+		const g = stableProjectOrder(buildLeftNav([project("/a", 1)], [conv("x", "/zzz")], new Map(), "/a"), order);
+		expect(g.map((x) => x.isProject)).toEqual([true, false]);
+	});
 });

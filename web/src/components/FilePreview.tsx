@@ -19,6 +19,7 @@ import {
 import type { FileContent } from "../types";
 import { Markdown } from "./Markdown";
 import { useT } from "../i18n";
+import { highlightFile } from "../highlight-lines";
 import { getClientId } from "../use-chat";
 import { withToken } from "../auth-token";
 import { appUrl } from "../base-url";
@@ -147,6 +148,22 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 		if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
 		return parts.slice(0, MAX_PREVIEW_LINES);
 	}, [loaded]);
+	/** Highlighted HTML of the edit draft (whole document, joined back with
+	 *  newlines) for the editor underlay. Re-runs per keystroke; highlight.js is
+	 *  linear and highlightFile() falls back to plain above HIGHLIGHT_MAX_BYTES. */
+	const draftHtml = useMemo(
+		() => (editing ? highlightFile(draft, file.name).lines.join("\n") : ""),
+		[editing, draft, file.name],
+	);
+	const editorHlRef = useRef<HTMLPreElement>(null);
+	// Per-line highlighted HTML, aligned 1:1 with `lines` (same trailing-line
+	// and preview-cap rules). Binary and oversized files come back plain.
+	const highlighted = useMemo(() => {
+		if (!loaded || loaded.kind !== "text" || loaded.binary) return null;
+		const out = highlightFile(loaded.text, file.name).lines;
+		if (out.length > 0 && out[out.length - 1] === "") out.pop();
+		return out.slice(0, MAX_PREVIEW_LINES);
+	}, [loaded, file.name]);
 
 	const lineCount = loaded?.lines ?? 0;
 	const truncatedLines = lineCount > MAX_PREVIEW_LINES;
@@ -452,14 +469,33 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 				)}
 
 				{!loading && editing && kind === "text" && !isBinary && loaded && (
-					<textarea
-						className={`fp-editor ${wrap ? "" : "no-wrap"}`}
-						value={draft}
-						onChange={(e) => setDraft(e.target.value)}
-						wrap={wrap ? "soft" : "off"}
-						spellCheck={false}
-						autoFocus
-					/>
+					// Highlighted editor: the textarea keeps input, selection and the
+					// caret but paints its text transparent; a <pre> with the same
+					// metrics sits underneath showing the highlighted draft, scroll-
+					// synced so the two never drift.
+					<div className={`fp-editor-wrap ${wrap ? "" : "no-wrap"}`}>
+						<pre
+							ref={editorHlRef}
+							className="fp-editor-hl hljs"
+							aria-hidden="true"
+							// highlight.js output: text already escaped, only span tags
+							dangerouslySetInnerHTML={{ __html: `${draftHtml}\n` }}
+						/>
+						<textarea
+							className="fp-editor"
+							value={draft}
+							onChange={(e) => setDraft(e.target.value)}
+							onScroll={(e) => {
+								const hl = editorHlRef.current;
+								if (!hl) return;
+								hl.scrollTop = e.currentTarget.scrollTop;
+								hl.scrollLeft = e.currentTarget.scrollLeft;
+							}}
+							wrap={wrap ? "soft" : "off"}
+							spellCheck={false}
+							autoFocus
+						/>
+					</div>
 				)}
 
 				{!loading &&
@@ -497,7 +533,12 @@ export function FilePreview({ file, content, onAddLines, onAttach, onClose, inli
 									}}
 								>
 									<span className="fp-num">{n}</span>
-									<span className="fp-code-text">{text}</span>
+									{highlighted && highlighted[i] !== undefined ? (
+										// highlight.js output: text already escaped, only span tags
+										<span className="fp-code-text hljs" dangerouslySetInnerHTML={{ __html: highlighted[i] }} />
+									) : (
+										<span className="fp-code-text">{text}</span>
+									)}
 								</div>
 							);
 						})}

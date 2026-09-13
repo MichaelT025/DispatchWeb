@@ -1,21 +1,27 @@
-import { memo, useState } from "react";
+import { memo, useState, type ComponentType } from "react";
 import {
 	FiArrowRight,
-	FiCheck,
 	FiCheckCircle,
 	FiChevronDown,
 	FiChevronRight,
-	FiClock,
+	FiCompass,
 	FiCopy,
-	FiLoader,
-	FiMinus,
+	FiEdit3,
+	FiFilePlus,
+	FiFileText,
+	FiFolder,
+	FiGlobe,
+	FiSearch,
 	FiSquare,
 	FiTerminal,
+	FiTool,
+	FiUsers,
 	FiX,
 } from "react-icons/fi";
 import type { ToolStatus, UiMessage, UiToolCallBlock } from "../types";
 import { useT } from "../i18n";
-import { parseDelegateArgs, shortenPath, toolArgHints, type DelegateField } from "../tool-args";
+import { parseDelegateArgs, toolArgHints, type DelegateField } from "../tool-args";
+import { toolSummary } from "../tool-summary";
 
 export interface ToolView {
 	/** Tool result message if the tool already finished. */
@@ -32,20 +38,25 @@ export interface ToolView {
 /** Kill just the running bash command(s) — the agent run itself continues. */
 export type KillBashHandler = () => void;
 
-const TOOL_ICONS: Record<string, string> = {
-	bash: "$",
-	delegate_task: "◈",
-	read: "📄",
-	write: "✍️",
-	edit: "✏️",
-	edit_soft: "✏️",
-	grep: "🔍",
-	find: "🧭",
-	ls: "📂",
+const TOOL_ICONS: Record<string, ComponentType> = {
+	bash: FiTerminal,
+	delegate_task: FiUsers,
+	read: FiFileText,
+	write: FiFilePlus,
+	edit: FiEdit3,
+	edit_soft: FiEdit3,
+	grep: FiSearch,
+	find: FiCompass,
+	glob: FiCompass,
+	ls: FiFolder,
+	web_fetch: FiGlobe,
+	fetch: FiGlobe,
+	web_search: FiGlobe,
 };
 
-function toolIcon(name: string): string {
-	return TOOL_ICONS[name] ?? "🛠";
+function ToolIcon({ name }: { name: string }) {
+	const Icon = TOOL_ICONS[name] ?? FiTool;
+	return <Icon />;
 }
 
 export const ToolCallBlock = memo(function ToolCallBlock({
@@ -123,9 +134,10 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 	// delegate_task 额外取 agent 名。
 	const hints = toolArgHints(block.argumentsText);
 	const bashCommand = block.name === "bash" ? hints.command : undefined;
-	// 折叠预览：只取首行（空白压成单空格），80 字截断；多行折成 +N 后缀。
-	// 完整命令放 title 悬浮里；展开时正文有完整终端行，这里不再显示。
-	const collapsedCmd = !shown && bashCommand ? collapsedBashPreview(bashCommand) : undefined;
+	// 折叠摘要：「Reading src/app.ts」「Running git status」——运行中用现在时并
+	// 加流光，结束后改过去时。展开态也用同一行做标题，正文再给原始参数。
+	const summary = toolSummary(block.name, hints, running || waitingModel ? "running" : "done");
+	const summaryTitle = summary.title ?? summary.target;
 
 	const copyArgs = () => {
 		if (block.argumentsText) {
@@ -136,7 +148,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 	};
 
 	return (
-		<div className={`toolcall ${statusClass}`}>
+		<div className={`toolcall ${statusClass}${shown ? " expanded" : " collapsed"}`}>
 			<div
 				className="chead toolcall-head"
 				role="button"
@@ -165,33 +177,27 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 				>
 					{shown ? <FiChevronDown /> : <FiChevronRight />}
 				</button>
-				<span className="chead-icon toolcall-icon">{toolIcon(block.name)}</span>
-				<span className="chead-title toolcall-name">{block.name}</span>
-				<span
-					className="toolcall-status"
-					title={exitHint ? `${statusLabel} · ${exitHint}` : statusLabel}
-					aria-label={exitHint ? `${statusLabel} · ${exitHint}` : statusLabel}
-				>
-					{isError ? <FiX /> : done ? <FiCheck /> : running ? <FiLoader /> : waitingModel ? <FiClock /> : <FiMinus />}
+				<span className="chead-icon toolcall-icon">
+					<ToolIcon name={block.name} />
 				</span>
-				{collapsedCmd && (
-					<span className="toolcall-cmd" title={bashCommand}>
-						$ {collapsedCmd}
+				<span
+					className={`toolcall-summary${running ? " shimmer" : ""}`}
+					title={summaryTitle ? `${block.name} · ${summaryTitle}` : block.name}
+					aria-label={`${statusLabel}: ${summary.verb} ${summary.target ?? ""}`.trim()}
+				>
+					<span className="toolcall-verb">{summary.verb}</span>
+					{summary.target && <span className={`toolcall-target${summary.mono ? " mono" : ""}`}>{summary.target}</span>}
+				</span>
+				{isError && (
+					<span className="toolcall-status" title={statusLabel} aria-hidden="true">
+						<FiX />
 					</span>
 				)}
-				{hints.path && (
-					<span className="toolcall-path" title={hints.path}>
-						{shortenPath(hints.path)}
-					</span>
-				)}
-				{hints.timeout && <span className="toolcall-timeout">⏱ {hints.timeout}</span>}
-				{isDelegate && hints.agent && (
-					<span className="toolcall-agent" title={hints.agent}>
-						◈ {hints.agent}
-					</span>
-				)}
+				{waitingModel && duration && <span className="toolcall-timeout">{duration}</span>}
+				{exitHint && <span className="toolcall-timeout">{exitHint}</span>}
+				{hints.timeout && shown && <span className="toolcall-timeout">⏱ {hints.timeout}</span>}
 				<span className="toolcall-spacer" />
-				{isBashRunning && onKillBash && (
+				{shown && isBashRunning && onKillBash && (
 					<button
 						type="button"
 						className="toolcall-kill"
@@ -221,20 +227,25 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 						<span>{t("delegateOpenSubagent")}</span>
 					</button>
 				)}
-				<button
-					type="button"
-					className="chead-copy toolcall-copy"
-					title={t("copyArgs")}
-					onClick={(e) => {
-						e.stopPropagation();
-						copyArgs();
-					}}
-				>
-					{copied ? <FiCheckCircle /> : <FiCopy />}
-				</button>
+				{shown && (
+					<button
+						type="button"
+						className="chead-copy toolcall-copy"
+						title={t("copyArgs")}
+						onClick={(e) => {
+							e.stopPropagation();
+							copyArgs();
+						}}
+					>
+						{copied ? <FiCheckCircle /> : <FiCopy />}
+					</button>
+				)}
 			</div>
 			{shown && (
 				<div className="toolcall-body">
+					<div className="toolcall-raw-name">
+						<code>{block.name}</code>
+					</div>
 					{isDelegate ? (
 						<DelegateBrief args={delegateArgs} />
 					) : (
@@ -302,17 +313,6 @@ function DelegateBrief({ args }: { args: Partial<Record<DelegateField | "agent" 
 			))}
 		</div>
 	);
-}
-
-/** 折叠态 bash 命令预览：首行空白归一后取 80 字，多行追加 `+N` 后缀。
- *  输入脏（空串/全空白）返回 undefined——卡头不显示。 */
-export function collapsedBashPreview(command: string): string | undefined {
-	const lines = command.split("\n");
-	const first = lines[0].replace(/\s+/g, " ").trim();
-	if (!first) return undefined;
-	const rest = lines.length - 1;
-	const short = first.length > 80 ? `${first.slice(0, 80)}…` : first;
-	return rest > 0 ? `${short} +${rest}` : short;
 }
 
 /** "0.3s" / "12.0s" / "1m 05s" — for the tool_status duration hint. */

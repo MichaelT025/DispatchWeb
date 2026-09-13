@@ -1,11 +1,12 @@
-/* PiAstra messages — Codex-style restyle. Loaded after styles.css; equal-specificity
-   selectors here win by source order, so no !important is needed. */
+/* PiAstra messages — conversation surface. Loaded after styles.css; equal-
+   specificity selectors here win by source order, so no !important is needed.
+   Only tokens, no literal colors, so downloadable themes keep working. */
 
-/* ---- turn rhythm: plain prose turns, ~24px apart ---- */
+/* ---- turn rhythm: plain prose turns, ~28px apart ---- */
 .msg {
 	position: relative;
 	padding: 0;
-	margin: 0 0 24px;
+	margin: 0 0 22px;
 }
 .msg:last-child {
 	margin-bottom: 8px;
@@ -18,7 +19,7 @@
 	margin: 0;
 	gap: 6px;
 	opacity: 1;
-	font-size: 11px;
+	font-size: 12px;
 	justify-content: flex-end;
 	min-height: 0;
 }
@@ -51,14 +52,15 @@
 .msg-user .msg-body {
 	margin-left: auto;
 	width: fit-content;
-	max-width: min(70%, 640px);
-	padding: 8px 14px;
+	max-width: min(72%, 640px);
+	padding: 9px 14px;
 	border: 1px solid var(--border-soft);
-	border-radius: 18px;
+	border-radius: var(--radius-xl, 20px);
+	border-bottom-right-radius: var(--radius-sm, 6px);
 	background: var(--chip-bg);
 	color: var(--text);
 	font-size: 14px;
-	line-height: 1.55;
+	line-height: 1.5;
 	box-shadow: none;
 }
 /* the copy control leaves the bubble and floats to its left on hover */
@@ -80,13 +82,13 @@
 }
 /* edit / re-ask sits under the bubble, hover-only, muted */
 .msg-actions {
-	margin-top: 4px;
+	margin-top: 6px;
 	gap: 4px;
 }
 .msg-action {
-	font-size: 12px;
-	padding: 3px 8px;
-	border-radius: 6px;
+	font-size: 12.5px;
+	padding: 4px 8px;
+	border-radius: var(--radius-sm, 6px);
 }
 .msg-action:hover {
 	color: var(--text);
@@ -118,20 +120,24 @@
 .msg-text li > p {
 	margin: 2px 0;
 }
+.msg-text li::marker {
+	color: var(--text-faint);
+}
 .msg-text h1,
 .msg-text h2,
 .msg-text h3,
 .msg-text h4 {
 	font-weight: 600;
-	line-height: 1.35;
+	line-height: 1.3;
+	letter-spacing: 0;
 	color: var(--md-strong);
-	margin: 18px 0 8px;
+	margin: 18px 0 6px;
 }
 .msg-text h1 {
-	font-size: 20px;
+	font-size: 19px;
 }
 .msg-text h2 {
-	font-size: 17px;
+	font-size: 16.5px;
 }
 .msg-text h3 {
 	font-size: 15px;
@@ -151,65 +157,78 @@
 	color: var(--text);
 	text-decoration: underline;
 	text-decoration-color: var(--text-faint);
-	text-underline-offset: 2px;
+	text-underline-offset: 3px;
+	text-decoration-thickness: 1px;
 }
 .msg-text a:hover {
 	text-decoration-color: var(--text);
 }
 .msg-text code {
+	font-family: var(--mono);
 	font-size: 12.5px;
 	background: var(--code-inline-bg);
 	border: 0;
-	border-radius: 4px;
-	padding: 1px 5px;
+	border-radius: 5px;
+	padding: 2px 6px;
+	color: var(--code-text, var(--text));
 }
 .msg-text blockquote {
 	border-left: 2px solid var(--border);
-	padding: 2px 12px;
+	padding: 2px 14px;
+	margin: 12px 0;
 	color: var(--text-dim);
+}
+.msg-text table {
+	border-collapse: collapse;
+	border-radius: var(--radius-md, 10px);
+	overflow: hidden;
 }
 .msg-text th,
 .msg-text td {
 	border-color: var(--border-soft);
-	padding: 5px 10px;
+	padding: 6px 10px;
+	font-size: 13.5px;
 }
 .msg-text th {
 	color: var(--text-dim);
 	font-weight: 500;
+	background: var(--card-bg);
 }
 .msg-text hr {
 	border: 0;
 	border-top: 1px solid var(--border-soft);
-	margin: 16px 0;
+	margin: 20px 0;
 }
 /* fenced code: same card surface as tool cards */
 .codeblock {
-	margin: 12px 0;
+	margin: 14px 0;
 }
 .codeblock pre {
 	border: 1px solid var(--border-soft);
-	border-radius: 12px;
+	border-radius: var(--radius-lg, 14px);
 	background: var(--card-bg, #0c0c0c) !important;
+	font-size: 12.5px;
+	line-height: 1.55;
 }
 
 /* assistant copy control: hidden until hover, then a small muted icon row
    under the prose (the reference shows its action icons beneath the turn) */
 .msg-assistant .msg-text:not(.single) {
-	padding-bottom: 28px;
+	padding-bottom: 30px;
 }
 .msg-assistant .msg-text-copy {
 	top: auto;
 	bottom: 0;
 	left: -6px;
 	right: auto;
-	width: 26px;
-	height: 26px;
-	border-radius: 6px;
+	width: 28px;
+	height: 28px;
+	border-radius: var(--radius-sm, 6px);
 	opacity: 0;
 }
 .msg-assistant .msg-text.single {
 	display: block;
-	padding-bottom: 28px;
+	padding-bottom: 30px;
 }
 .msg-assistant .msg-text.single .msg-text-copy {
 	position: absolute;
@@ -227,9 +246,9 @@
 /* ---- collapsed turns: one quiet muted line with a chevron, no card ---- */
 .msg-collapsed {
 	margin: 0 0 6px;
-	padding: 4px 0;
+	padding: 5px 0;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--radius-sm, 6px);
 	background: transparent;
 	color: var(--text-faint);
 	font-size: 13px;
@@ -254,9 +273,11 @@
 	display: none;
 }
 .msg-collapsed-chip {
-	font-size: 11px;
-	padding: 0 6px;
+	font-size: 11.5px;
+	padding: 1px 7px;
+	border-radius: 999px;
 	border-color: var(--border-soft);
+	background: var(--card-bg);
 	color: var(--text-faint);
 }
 .msg-collapsed-action {
@@ -274,18 +295,19 @@
 	color: var(--text-dim);
 }
 
-/* ---- thinking: quiet line, opens into an italic muted body ---- */
+/* ---- thinking: quiet line, opens into a muted body ---- */
 .thinking {
-	margin: 6px 0;
+	margin: 8px 0;
 	border: 0;
-	border-radius: 8px;
+	border-radius: var(--radius-md, 10px);
 	background: transparent;
 }
 .thinking .chead {
-	min-height: 28px;
+	min-height: 30px;
 	padding: 0 4px 0 0;
 	color: var(--text-faint);
-	font-size: 13px;
+	font-size: 13.5px;
+	font-weight: 400;
 }
 .thinking .chead:hover {
 	color: var(--text-dim);
@@ -296,7 +318,8 @@
 .thinking-body {
 	border-top: 0;
 	padding: 2px 0 8px 30px;
-	font-size: 13px;
+	font-size: 13.5px;
+	line-height: 1.55;
 	color: var(--text-faint);
 }
 
@@ -306,27 +329,151 @@
 .attachcard,
 .skillcard,
 .compaction-card {
-	margin: 10px 0;
+	margin: 12px 0;
 	border: 1px solid var(--border-soft);
-	border-radius: 12px;
+	border-radius: var(--radius-lg, 14px);
 	background: var(--card-bg, #0c0c0c);
 	overflow: hidden;
 }
 .toolcall.err {
 	border-color: color-mix(in srgb, var(--red) 30%, var(--border-soft));
 }
+
+/* ---- tool call, collapsed: a quiet one-line summary, no card chrome.
+   Consecutive tools stack as a tight list ("Reading a.ts / Ran git status /
+   Edited b.ts") the way a terminal harness prints its activity. ---- */
+.toolcall.collapsed {
+	margin: 0;
+	border-color: transparent;
+	background: transparent;
+	border-radius: var(--radius-sm, 6px);
+}
+.toolcall.collapsed + .toolcall.collapsed {
+	margin-top: 0;
+}
+.toolcall.collapsed .chead {
+	min-height: 28px;
+	padding: 0 8px 0 2px;
+	font-weight: 400;
+	color: var(--text-dim);
+}
+.toolcall.collapsed .chead:hover {
+	background: var(--bg-elev);
+	color: var(--text);
+}
+.toolcall.collapsed .toolcall-toggle {
+	opacity: 0;
+	width: 22px;
+}
+.toolcall.collapsed .chead:hover .toolcall-toggle,
+.toolcall.collapsed .toolcall-toggle:focus-visible {
+	opacity: 1;
+}
+.toolcall.collapsed .chead-icon {
+	width: 20px;
+	color: var(--text-faint);
+}
+.toolcall.collapsed .chead:hover .chead-icon {
+	color: var(--text-dim);
+}
+.toolcall.collapsed.err .chead {
+	color: var(--red-text, var(--red));
+}
+
+/* summary text: verb in the UI face, target in mono, single line */
+.toolcall-summary {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	flex: 0 1 auto;
+	min-width: 0;
+	font-size: 13.5px;
+	line-height: 1.4;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.toolcall-verb {
+	flex: none;
+}
+.toolcall-target {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.toolcall-target.mono {
+	font-family: var(--mono);
+	font-size: 12.5px;
+}
+.toolcall.expanded .toolcall-summary {
+	color: var(--text);
+	font-weight: 500;
+}
+.toolcall.expanded .toolcall-target.mono {
+	font-weight: 400;
+	color: var(--text-dim);
+}
+
+/* ---- shimmer: a light band sweeps across the label while the tool runs.
+   Gradient is painted through the glyphs (background-clip: text), so the
+   text itself glows rather than a bar behind it. ---- */
+.toolcall-summary.shimmer,
+.thinking-label.shimmer,
+.thinking-wait-label.shimmer {
+	color: transparent;
+	background-image: linear-gradient(
+		100deg,
+		var(--text-faint) 0%,
+		var(--text-faint) 35%,
+		var(--text) 50%,
+		var(--text-faint) 65%,
+		var(--text-faint) 100%
+	);
+	background-size: 250% 100%;
+	background-repeat: no-repeat;
+	-webkit-background-clip: text;
+	background-clip: text;
+	animation: toolcall-shimmer 1.8s ease-in-out infinite;
+}
+.toolcall-summary.shimmer .toolcall-target {
+	color: inherit;
+}
+.toolcall.collapsed .chead:hover .toolcall-summary.shimmer {
+	/* keep the sweep on hover; the row tint carries the hover state */
+	color: transparent;
+}
+@keyframes toolcall-shimmer {
+	0% {
+		background-position: 120% 0;
+	}
+	100% {
+		background-position: -120% 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.toolcall-summary.shimmer,
+	.thinking-label.shimmer,
+	.thinking-wait-label.shimmer {
+		animation: none;
+		color: var(--text-dim);
+		background-image: none;
+	}
+}
+
+/* ---- expanded card ---- */
 .chead {
-	min-height: 36px;
-	padding: 4px 10px 4px 6px;
+	min-height: 38px;
+	padding: 4px 10px 4px 8px;
 	border-radius: 0;
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 500;
 	color: var(--text);
 }
 .toolcall .chead {
-	min-height: 36px;
+	min-height: 38px;
 	padding: 4px 10px 4px 6px;
-	font-size: 13px;
+	font-size: 14px;
 }
 .toolcall-name {
 	font-family: var(--sans);
@@ -335,7 +482,7 @@
 .chead-toggle,
 .chead-copy,
 .msg-text-copy {
-	border-radius: 6px;
+	border-radius: var(--radius-sm, 6px);
 }
 .chead-toggle:hover,
 .chead-copy:hover {
@@ -347,16 +494,40 @@
 }
 .toolcall-cmd,
 .toolcall-path {
-	font-size: 12px;
+	font-size: 13px;
 	color: var(--text-dim);
 }
-.toolcall.ok .toolcall-status {
+.toolcall-status,
+.toolcall.err .toolcall-status {
+	width: auto;
+	margin-left: 2px;
+	color: var(--red);
+}
+.toolcall-timeout {
+	font-family: var(--mono);
+	font-size: 12px;
 	color: var(--text-faint);
 }
 .toolcall-body,
 .toolcall:not(.err) .toolcall-body {
 	border-top: 1px solid var(--border-soft);
-	padding: 8px 12px 10px;
+	padding: 10px 14px 12px;
+}
+.toolcall-raw-name {
+	margin: 0 0 8px;
+	font-size: 11.5px;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+.toolcall-raw-name code {
+	font-size: 11.5px;
+	letter-spacing: 0;
+	text-transform: none;
+	background: var(--code-inline-bg);
+	border-radius: 4px;
+	padding: 1px 6px;
+	color: var(--text-dim);
 }
 .toolcall-args pre,
 .toolcall-output pre {
@@ -372,30 +543,37 @@
 	background: transparent;
 	border: 0;
 	border-radius: 0;
-	padding: 2px 0 6px;
+	padding: 2px 0 8px;
+	font-size: 12.5px;
 	color: var(--text);
 }
 .termline-icon {
 	color: var(--text-faint);
 }
 .toolcall-output {
-	margin-top: 6px;
+	margin-top: 8px;
 }
 .toolcall-output-label {
-	font-size: 11px;
-	letter-spacing: 0.4px;
+	font-size: 11.5px;
+	font-weight: 500;
+	letter-spacing: 0.05em;
 	color: var(--text-faint);
 	border-top: 1px solid var(--border-soft);
-	padding-top: 6px;
+	padding-top: 8px;
 }
 .toolcall-open,
 .toolcall-kill {
-	border-radius: 6px;
+	border-radius: var(--radius-sm, 6px);
+}
+.toolcall-kill {
+	height: 24px;
+	padding: 0 8px;
+	font-size: 12px;
 }
 
 /* bash: command line as the header, output as the body */
 .bashblock-command {
-	padding: 8px 12px;
+	padding: 10px 14px;
 	font-size: 12.5px;
 	border-bottom-color: var(--border-soft);
 }
@@ -406,11 +584,12 @@
 .bashblock-exit {
 	border: 0;
 	padding: 0;
-	font-size: 11.5px;
+	font-size: 12px;
 }
 .bashblock-output {
-	padding: 8px 12px 10px;
+	padding: 10px 14px 12px;
 	font-size: 12.5px;
+	line-height: 1.5;
 	color: var(--text-dim);
 }
 
@@ -428,15 +607,32 @@
 .msg-error {
 	background: color-mix(in srgb, var(--red) 8%, transparent);
 	border-color: color-mix(in srgb, var(--red) 30%, transparent);
-	border-radius: 10px;
+	border-radius: var(--radius-md, 10px);
 }
 
-/* ---- streaming / waiting indicators ---- */
+/* ---- waiting for the first token: a shimmering line, no caret ---- */
 .thinking-wait {
+	display: flex;
+	align-items: center;
+	min-height: 28px;
+	font-size: 13.5px;
 	color: var(--text-faint);
 }
+.thinking-wait .dot,
 .stream-cursor {
-	background: var(--text-dim);
+	display: none;
+}
+
+/* ---- empty state: wordmark + hint, centred above the composer ---- */
+.astra-empty-mark {
+	font-size: 24px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	color: var(--text);
+}
+.astra-empty-hint {
+	font-size: 14.5px;
+	color: var(--text-faint);
 }
 
 @media (max-width: 768px) {

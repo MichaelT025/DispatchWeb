@@ -65,17 +65,8 @@ export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = fa
 				<span className="chead-icon thinking-icon">
 					<FiCpu />
 				</span>
-				<span className="chead-title thinking-label">
-					{streaming && shown ? (
-						<span className="thinking-live-label">
-							{t("thinkingNow")}
-							<span className="dots" />
-						</span>
-					) : shown ? (
-						t("thinking")
-					) : (
-						t("thinkingPreview", { preview })
-					)}
+				<span className={`chead-title thinking-label${streaming ? " shimmer" : ""}`}>
+					{streaming && shown ? t("thinkingNow") : shown ? t("thinking") : t("thinkingPreview", { preview })}
 				</span>
 				<button
 					type="button"

@@ -668,6 +668,15 @@ wss.on("connection", (ws) => {
 			case "abort_bash":
 				void cs.abortBash();
 				break;
+			case "open_worker":
+				void cs.openWorker(msg.workerId);
+				break;
+			case "close_worker":
+				cs.closeWorker(msg.workerId);
+				break;
+			case "cancel_worker":
+				cs.cancelWorker(msg.workerId);
+				break;
 			case "retry_last":
 				void cs.retryLast();
 				break;

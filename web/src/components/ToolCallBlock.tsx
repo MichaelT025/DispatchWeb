@@ -1,4 +1,4 @@
-import { memo, useState, type ComponentType } from "react";
+import { memo, useEffect, useMemo, useState, type ComponentType } from "react";
 import {
 	FiArrowRight,
 	FiCheckCircle,
@@ -18,10 +18,25 @@ import {
 	FiUsers,
 	FiX,
 } from "react-icons/fi";
-import type { ToolStatus, UiMessage, UiToolCallBlock } from "../types";
+import type { ToolStatus, UiMessage, UiToolCallBlock, UiWorker } from "../types";
 import { useT } from "../i18n";
-import { parseDelegateArgs, toolArgHints, type DelegateField } from "../tool-args";
+import { parseDelegateTasks, toolArgHints } from "../tool-args";
 import { toolSummary } from "../tool-summary";
+import {
+	formatElapsed,
+	isWorkerActive,
+	workerElapsedSec,
+	workersForCall,
+	workerStatusLabel,
+	workerStatusTone,
+} from "../workers";
+import { useWorkers } from "../workers-store";
+import { RoleChip } from "./RoleChip";
+
+/** Window event the delegate card fires to open one worker in the Workers
+ *  pane (App.tsx listens; the card sits deep in the memoized message tree).
+ *  detail = worker id, or null for the pane's list. */
+export const OPEN_WORKER_EVENT = "pi-web-ui:open-worker";
 
 export interface ToolView {
 	/** Tool result message if the tool already finished. */
@@ -40,7 +55,7 @@ export type KillBashHandler = () => void;
 
 const TOOL_ICONS: Record<string, ComponentType> = {
 	bash: FiTerminal,
-	delegate_task: FiUsers,
+	delegate: FiUsers,
 	read: FiFileText,
 	write: FiFilePlus,
 	edit: FiEdit3,
@@ -101,16 +116,10 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 		? view.result.content.map((b) => (b.type === "text" ? b.text : "")).join("")
 		: (view.liveOutput ?? "");
 	const output = rawOutput.replace(/…\[LIVE_OMIT:(\d+)\]…\n/, (_, n) => t("liveOutputOmitted", { n }));
-	const isDelegate = block.name === "delegate_task";
-	const delegateArgs = isDelegate ? parseDelegateArgs(block.argumentsText) : {};
-	// 跳到子代理对话：首选结果 details 里的 convId（服务端拼装时写入），
-	// 老快照没有 details 时从结果文本里认 sa-<8hex>（与 spawn 文案格式对应）。
-	const detailsConv =
-		isDelegate && view.result && typeof view.result.details === "object" && view.result.details !== null
-			? ((view.result.details as Record<string, unknown>).convId as string | undefined)
-			: undefined;
-	const delegateConvId =
-		typeof detailsConv === "string" && detailsConv ? detailsConv : /sa-[0-9a-f]{8}/.exec(rawOutput)?.[0];
+	// PiAstra delegate: the card body is the live worker roster (workers-store),
+	// not the raw arguments; the result text is a status dump, so hide it
+	// unless the call itself failed.
+	const isDelegate = block.name === "delegate";
 
 	const statusClass = isError ? "err" : done ? "ok" : running || waitingModel ? "run" : "idle";
 	let statusLabel = isError
@@ -211,20 +220,18 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 						<span>{t("stopBash")}</span>
 					</button>
 				)}
-				{isDelegate && done && delegateConvId && (
+				{isDelegate && (
 					<button
 						type="button"
 						className="toolcall-open"
-						title={t("delegateOpenSubagent")}
+						title={t("workersOpenPane")}
 						onClick={(e) => {
 							e.stopPropagation();
-							window.dispatchEvent(
-								new CustomEvent<string>("pi-web-ui:switch-conversation", { detail: delegateConvId }),
-							);
+							window.dispatchEvent(new CustomEvent<number | null>(OPEN_WORKER_EVENT, { detail: null }));
 						}}
 					>
 						<FiArrowRight />
-						<span>{t("delegateOpenSubagent")}</span>
+						<span>{t("workersOpenPane")}</span>
 					</button>
 				)}
 				{shown && (
@@ -247,7 +254,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 						<code>{block.name}</code>
 					</div>
 					{isDelegate ? (
-						<DelegateBrief args={delegateArgs} />
+						<DelegateWorkers toolCallId={block.id} argumentsText={block.argumentsText} result={view.result} />
 					) : (
 						block.argumentsText && (
 							<div className="toolcall-args">
@@ -255,7 +262,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 							</div>
 						)
 					)}
-					{output.length > 0 && (
+					{(!isDelegate || isError) && output.length > 0 && (
 						<div className="toolcall-output">
 							<div className="toolcall-output-label">
 								{isError ? t("errorOutput") : t("output")}
@@ -264,7 +271,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 							<pre>{output}</pre>
 						</div>
 					)}
-					{running && output.length === 0 && (
+					{!isDelegate && running && output.length === 0 && (
 						<div className="toolcall-waiting">
 							<span className="cursor" /> {t("waitingOutput")}
 						</div>
@@ -290,27 +297,91 @@ function TerminalCommand({ command }: { command: string }) {
 	);
 }
 
-/** 派单卡片正文：六段式结构化展示（只渲染非空段；脏参数解析出空对象时回落原文）。 */
-function DelegateBrief({ args }: { args: Partial<Record<DelegateField | "agent" | "model", string>> }) {
+/**
+ * Delegate card body: one row per worker of THIS call (live from the workers
+ * store, or the roster saved in the result for old sessions), each opening
+ * that worker's transcript in the Workers pane. Before the extension has
+ * reported anything, the tasks the orchestrator wrote stand in.
+ */
+function DelegateWorkers({
+	toolCallId,
+	argumentsText,
+	result,
+}: {
+	toolCallId: string;
+	argumentsText?: string;
+	result?: UiMessage;
+}) {
 	const t = useT();
-	const sections: { field: DelegateField; label: string }[] = [
-		{ field: "task", label: t("delegateSecTask") },
-		{ field: "expected_outcome", label: t("delegateSecExpected") },
-		{ field: "required_tools", label: t("delegateSecTools") },
-		{ field: "must_do", label: t("delegateSecMustDo") },
-		{ field: "must_not_do", label: t("delegateSecMustNotDo") },
-		{ field: "context", label: t("delegateSecContext") },
-	];
-	const shown = sections.filter(({ field }) => args[field]?.trim());
-	if (shown.length === 0) return null;
+	const all = useWorkers();
+	const workers = useMemo(() => workersForCall(all, toolCallId, result), [all, toolCallId, result]);
+	const tasks = useMemo(
+		() => (workers.length === 0 ? parseDelegateTasks(argumentsText) : []),
+		[workers.length, argumentsText],
+	);
+	const anyActive = workers.some((w) => isWorkerActive(w.status));
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!anyActive) return;
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, [anyActive]);
+	if (workers.length === 0) {
+		if (tasks.length === 0) return null;
+		return (
+			<div className="delegate-workers">
+				{tasks.map((task, i) => (
+					<div className="delegate-worker pending" key={i}>
+						<div className="delegate-worker-head">
+							<RoleChip role={task.role} />
+							{task.access && <span className="delegate-worker-access">{task.access}</span>}
+							<span className="worker-status">{t("workersPending")}</span>
+						</div>
+						<div className="delegate-worker-task">{task.task}</div>
+					</div>
+				))}
+			</div>
+		);
+	}
 	return (
-		<div className="delegate-brief">
-			{shown.map(({ field, label }) => (
-				<div className="delegate-sec" key={field}>
-					<div className="delegate-sec-label">{label}</div>
-					<div className="delegate-sec-text">{args[field]}</div>
-				</div>
+		<div className="delegate-workers">
+			{workers.map((w) => (
+				<DelegateWorkerRow key={w.id} worker={w} now={now} />
 			))}
+		</div>
+	);
+}
+
+function DelegateWorkerRow({ worker, now }: { worker: UiWorker; now: number }) {
+	const t = useT();
+	const running = isWorkerActive(worker.status);
+	const open = () => window.dispatchEvent(new CustomEvent<number | null>(OPEN_WORKER_EVENT, { detail: worker.id }));
+	return (
+		<div
+			className={`delegate-worker tone-${workerStatusTone(worker.status)}`}
+			role="button"
+			tabIndex={0}
+			title={t("workersOpenOne")}
+			onClick={open}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					open();
+				}
+			}}
+		>
+			<div className="delegate-worker-head">
+				<RoleChip role={worker.role} />
+				<span className="worker-id">#{worker.id}</span>
+				<span className={`worker-status${running ? " shimmer" : ""}`}>{workerStatusLabel(worker.status)}</span>
+				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
+				<span className="worker-spacer" />
+				<FiArrowRight className="delegate-worker-go" aria-hidden="true" />
+			</div>
+			<div className="delegate-worker-task" title={worker.task}>
+				{worker.task}
+			</div>
+			<div className="delegate-worker-activity">{worker.activity}</div>
 		</div>
 	);
 }

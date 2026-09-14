@@ -97,6 +97,7 @@ import {
 	type AgentMessage,
 } from "./serialize.js";
 import { loadCommands, saveCommandsFile, TerminalManager } from "./terminals.js";
+import { isBridgeEvent, WORKER_CHANNEL, WorkerHub } from "./workers.js";
 
 const SNAPSHOT_INTERVAL_MS = 60;
 /** While assistant deltas are flowing, live rendering is carried by
@@ -403,6 +404,12 @@ function extractPartialText(partial: unknown): string | null {
 	return null;
 }
 
+/** PiAstra delegate progress: partial results carry `details.workers`. */
+function hasWorkerDetails(partial: unknown): boolean {
+	const details = (partial as { details?: { workers?: unknown } } | null | undefined)?.details;
+	return Array.isArray(details?.workers);
+}
+
 export { workspacePath };
 // ---------------------------------------------------------------------------
 // Per-client persisted UI state (<dataDir>/client-state.json)
@@ -498,6 +505,9 @@ const TOOL_WATCHDOG_TIMEOUT_MS = (() => {
  *  runtime alive; conversations of other projects keep their own lists).
  *  子代理不计入：子代理是 inMemory 后台任务，不参与此上限，既不占位也不被此上限拦截。 */
 const MAX_OPEN_CONVERSATIONS = 8;
+/** Coalescing window for worker_transcript pushes: a streaming worker emits
+ *  a bridge event per token; followers need a few refreshes a second. */
+const WORKER_PUSH_INTERVAL_MS = 200;
 const DEFAULT_CONV_TITLE = "新对话";
 
 /** First user text in a session, truncated for the conversation list. */
@@ -681,6 +691,17 @@ export class ClientSession {
 		flushSnapshot: () => this.flushSnapshot(),
 		isDisposed: () => this.disposed,
 	});
+	/** Delegated-worker state per conversation id (PiAstra `delegate` tool),
+	 *  fed by the extension's `piastra:workers` event channel through the
+	 *  inline pi-webui-workers extension (see makeRuntimeFactory). Keyed
+	 *  separately from `convs`: bridge events can arrive before the
+	 *  Conversation record exists and the hub must survive runtime swaps. */
+	private readonly workerHubs = new Map<string, WorkerHub>();
+	/** The extension event bus of each conversation's runtime — lets the
+	 *  server send `discover` / `cancel` requests back to the extension. */
+	private readonly workerBuses = new Map<string, { emit: (channel: string, data: unknown) => void }>();
+	/** Throttle state for worker_transcript pushes, keyed `<convId>:<workerId>`. */
+	private readonly workerPushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	/** The active conversation (all session operations target it). */
 	private get conv(): Conversation {
@@ -1187,6 +1208,19 @@ export class ClientSession {
 					// 的 systemPromptOptions，永远最新）。
 					extensionFactories: [
 						{
+							// Worker bridge: subscribe to PiAstra's public worker channel on
+							// the runtime's shared extension event bus. Routed by ownerId
+							// (conversation id) — a background chat's workers never leak
+							// into the active pane.
+							name: "pi-webui-workers",
+							hidden: true,
+							factory: (pi) => {
+								if (!ownerId) return;
+								this.workerBuses.set(ownerId, pi.events);
+								pi.events.on(WORKER_CHANNEL, (event: unknown) => this.onWorkerEvent(ownerId, event));
+							},
+						},
+						{
 							name: "pi-webui-persona",
 							hidden: true,
 							factory: (pi) => {
@@ -1295,6 +1329,88 @@ export class ClientSession {
 		};
 	}
 
+	// ---- delegated workers (PiAstra) ---------------------------------------
+
+	private workerHub(convId: string): WorkerHub {
+		let hub = this.workerHubs.get(convId);
+		if (!hub) {
+			hub = new WorkerHub(this.agentDir);
+			this.workerHubs.set(convId, hub);
+		}
+		return hub;
+	}
+
+	private dropWorkerState(convId: string): void {
+		this.workerHubs.delete(convId);
+		this.workerBuses.delete(convId);
+		for (const key of [...this.workerPushTimers.keys()]) {
+			if (key.startsWith(`${convId}:`)) {
+				clearTimeout(this.workerPushTimers.get(key));
+				this.workerPushTimers.delete(key);
+			}
+		}
+	}
+
+	/** A `piastra:workers` bridge event from the conversation's extension. */
+	private onWorkerEvent(convId: string, event: unknown): void {
+		if (this.disposed || !isBridgeEvent(event)) return;
+		const hub = this.workerHub(convId);
+		if (event.type === "workers") {
+			if (!hub.applyList(event.workers)) return;
+			if (convId === this.activeId) this.scheduleSnapshot();
+			// Status flips (finished, cancelled) matter to followers too.
+			for (const id of hub.open) this.scheduleWorkerPush(convId, id);
+			return;
+		}
+		if (hub.applyTranscript(event.workerId, event.messages, event.streaming) && hub.open.has(event.workerId)) {
+			this.scheduleWorkerPush(convId, event.workerId);
+		}
+	}
+
+	/** Coalesce transcript pushes per worker (token deltas arrive per event). */
+	private scheduleWorkerPush(convId: string, workerId: number): void {
+		const key = `${convId}:${workerId}`;
+		if (this.workerPushTimers.has(key)) return;
+		this.workerPushTimers.set(
+			key,
+			setTimeout(() => {
+				this.workerPushTimers.delete(key);
+				void this.pushWorkerTranscript(convId, workerId);
+			}, WORKER_PUSH_INTERVAL_MS),
+		);
+	}
+
+	private async pushWorkerTranscript(convId: string, workerId: number): Promise<void> {
+		const hub = this.workerHubs.get(convId);
+		if (!hub || !hub.open.has(workerId) || this.disposed) return;
+		const transcript = await hub.transcript(workerId);
+		if (this.disposed || !hub.open.has(workerId)) return;
+		this.emit({ type: "worker_transcript", conversationId: convId, transcript });
+	}
+
+	/** Follow one worker of the ACTIVE conversation: reply now, push on change. */
+	async openWorker(workerId: number): Promise<void> {
+		const convId = this.activeId;
+		const hub = this.workerHub(convId);
+		if (!hub.has(workerId)) return;
+		hub.open.add(workerId);
+		// A worker that finished in memory may not have streamed to us yet
+		// (opened after the fact): ask the extension for its final messages.
+		this.workerBuses.get(convId)?.emit(WORKER_CHANNEL, { version: 1, type: "transcript_request", workerId });
+		await this.pushWorkerTranscript(convId, workerId);
+	}
+
+	closeWorker(workerId: number): void {
+		this.workerHubs.get(this.activeId)?.open.delete(workerId);
+	}
+
+	/** Abort ONE running worker (the extension reports it as `cancelled`). */
+	cancelWorker(workerId: number): void {
+		const hub = this.workerHubs.get(this.activeId);
+		if (!hub?.has(workerId)) return;
+		this.workerBuses.get(this.activeId)?.emit(WORKER_CHANNEL, { version: 1, type: "cancel", workerId });
+	}
+
 	/** Summaries of conversations currently streaming — captured at shutdown
 	 *  so the next attach can tell the user their run was interrupted. */
 	streamingSummaries(): { title: string; cwd: string }[] {
@@ -1388,6 +1504,9 @@ export class ClientSession {
 		});
 		this.pushActiveStatuses();
 		conv.unsubscribe = conv.session.subscribe((event) => this.onEvent(conv, event));
+		// A replacement runtime (or a reload) re-registers the extension with an
+		// empty worker map; ask it to republish so the pane matches.
+		this.workerBuses.get(conv.id)?.emit(WORKER_CHANNEL, { version: 1, type: "discover" });
 		// 新会话 / 切换会话 / 强杀重建的必经之路：刚创建的 runtime 用的是 SDK
 		// 默认重试 3 次——这里把面板的 retryMaxAttempts 覆盖注入，否则“设了 6
 		// 次还是按 3 次重试”。已存在会话重复注入是幂等的（同值覆盖）。
@@ -1595,6 +1714,10 @@ export class ClientSession {
 				break;
 			}
 			case "tool_execution_update": {
+				// PiAstra delegate progress travels structured over the worker
+				// bridge (UiState.workers); its text form is a whole-status
+				// snapshot per tick, not a delta, and would pile up in the card.
+				if (hasWorkerDetails(event.partialResult)) break;
 				const text = extractPartialText(event.partialResult);
 				if (text) {
 					this.emit({
@@ -1953,6 +2076,7 @@ export class ClientSession {
 			retry: conv.retryState ?? null,
 			compaction: conv.compactionState ?? null,
 			pendingQuestion: this.pendingQuestionForSnapshot(),
+			workers: this.workerHub(conv.id).list(),
 			tools: state.tools.map((t) => t.name),
 			version: ++this.version,
 			piConfigured: this.isPiConfigured(),
@@ -3162,6 +3286,7 @@ export class ClientSession {
 		if (!conv || id === this.activeId) return;
 		this.convs.delete(id);
 		this.convStatuses.remove(id);
+		this.dropWorkerState(id);
 		this.clearAllToolWatchdogs(conv);
 		conv.terminals.killAll();
 		conv.unsubscribe?.();
@@ -4240,6 +4365,8 @@ export class ClientSession {
 			clearInterval(this.stallTimer);
 			this.stallTimer = null;
 		}
+		for (const timer of this.workerPushTimers.values()) clearTimeout(timer);
+		this.workerPushTimers.clear();
 		this.files.unwatchDir();
 		this.files.unwatchGit();
 		this.webUi.dispose();

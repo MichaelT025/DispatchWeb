@@ -4,7 +4,7 @@
  * 带控制字符、缺字段、脏 timeout 值——一律静默降级，绝不抛错。
  */
 import { describe, expect, it } from "vitest";
-import { parseDelegateArgs, shortenPath, toolArgHints } from "../../web/src/tool-args.js";
+import { parseDelegateTasks, shortenPath, toolArgHints } from "../../web/src/tool-args.js";
 
 describe("toolArgHints — 脏输入不抛错", () => {
 	it("undefined / 空串 / 纯空白 → 全空", () => {
@@ -13,7 +13,7 @@ describe("toolArgHints — 脏输入不抛错", () => {
 				path: undefined,
 				timeout: undefined,
 				command: undefined,
-				agent: undefined,
+				roles: undefined,
 				pattern: undefined,
 				commandPreview: undefined,
 			});
@@ -197,32 +197,29 @@ describe("shortenPath", () => {
 	});
 });
 
-describe("delegate_task 参数解析", () => {
-	it("agent 名流式 early 显示 + 超长截断", () => {
-		expect(toolArgHints('{"agent": "oracle", "task": "').agent).toBe("oracle");
-		expect(toolArgHints('{"task": "x"}').agent).toBeUndefined();
-		expect(toolArgHints('{"agent": 42}').agent).toBeUndefined();
+describe("delegate (PiAstra) 参数解析", () => {
+	it("roles stream in early, in task order", () => {
+		const half = '{"tasks":[{"role":"general","access":"write","task":"a"},{"role":"review","ta';
+		expect(toolArgHints(half).roles).toEqual(["general", "review"]);
+		expect(toolArgHints('{"tasks":[{"task":"x"}]}').roles).toBeUndefined();
+		expect(toolArgHints('{"tasks":[{"role": 42}]}').roles).toBeUndefined();
 	});
 
-	it("parseDelegateArgs 取出六段 + model；脏输入回空对象", () => {
+	it("parseDelegateTasks keeps well-formed tasks; dirty input → []", () => {
 		const args = JSON.stringify({
-			agent: "oracle",
-			task: "Do X",
-			expected_outcome: "Y",
-			required_tools: "read",
-			must_do: "a",
-			must_not_do: "b",
-			context: "c",
-			model: "p/m",
-			extra: 42,
+			tasks: [
+				{ role: "general", access: "write", task: "Do X" },
+				{ role: "fast", task: "Look" },
+				{ role: "review", task: 42 },
+				"junk",
+			],
 		});
-		const got = parseDelegateArgs(args);
-		expect(got.agent).toBe("oracle");
-		expect(got.task).toBe("Do X");
-		expect(got.model).toBe("p/m");
-		expect("extra" in got).toBe(false);
-		for (const bad of [undefined, "", "not json", "[1]", '{"task": 42}']) {
-			expect(parseDelegateArgs(bad)).toEqual({});
+		expect(parseDelegateTasks(args)).toEqual([
+			{ role: "general", access: "write", task: "Do X" },
+			{ role: "fast", access: undefined, task: "Look" },
+		]);
+		for (const bad of [undefined, "", "not json", "[1]", '{"tasks": 42}']) {
+			expect(parseDelegateTasks(bad)).toEqual([]);
 		}
 	});
 });

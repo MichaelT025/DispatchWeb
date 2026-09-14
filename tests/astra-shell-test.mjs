@@ -59,7 +59,7 @@ try {
 	await page.locator(".modal-close").click();
 	await page.locator(".astra-workspace-toggle").click();
 	await page.locator(".astra-workspace-chooser").waitFor();
-	check("chooser has files/review/terminal", (await page.locator(".astra-workspace-item").count()) === 3);
+	check("chooser has files/review/workers/terminal", (await page.locator(".astra-workspace-item").count()) === 4);
 	await page.locator(".astra-workspace-item").filter({ hasText: "Files" }).click();
 	await page.locator("button.file-name").filter({ hasText: "readme.md" }).click();
 	await page.locator(".fp-inline").waitFor();

@@ -41,12 +41,18 @@ describe("toolSummary", () => {
 		expect(sum("grep", '{"pattern":"TODO"}', "done").target).toBe('"TODO"');
 	});
 
-	it("delegate_task: agent name, proportional face", () => {
-		expect(sum("delegate_task", '{"agent":"review","task":"x"}', "running")).toMatchObject({
+	it("delegate: role counts, proportional face", () => {
+		const args = '{"tasks":[{"role":"general","task":"a"},{"role":"general","task":"b"},{"role":"review","task":"c"}]}';
+		expect(sum("delegate", args, "running")).toMatchObject({
 			verb: "Delegating to",
-			target: "review",
+			target: "2 general + review",
 			mono: false,
+			title: "3 workers: 2 general + review",
 		});
+		const half = sum("delegate", '{"tasks":[', "running");
+		expect(half.verb).toBe("Delegating");
+		expect(half.target).toBeUndefined();
+		expect(sum("delegate", "{}", "done").verb).toBe("Delegated");
 	});
 
 	it("unknown tool: Calling <name>", () => {

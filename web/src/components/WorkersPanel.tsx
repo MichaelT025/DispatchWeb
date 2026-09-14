@@ -144,6 +144,7 @@ function WorkerRow({ worker, now, onClick }: { worker: UiWorker; now: number; on
 		<button
 			type="button"
 			className={`worker-row tone-${workerStatusTone(worker.status)}`}
+			data-role={worker.role}
 			role="listitem"
 			onClick={onClick}
 		>

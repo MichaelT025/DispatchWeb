@@ -84,6 +84,38 @@
 	}
 }
 
+/* ---- role-tinted borders: the same mix the composer uses for the active
+   agent (~55% hue into the hairline at rest, a touch more on hover) ---- */
+.worker-row,
+.delegate-worker {
+	--worker-hue: var(--border-soft);
+}
+.worker-row[data-role="orchestrator"],
+.delegate-worker[data-role="orchestrator"] {
+	--worker-hue: var(--agent-orchestrator);
+}
+.worker-row[data-role="general"],
+.delegate-worker[data-role="general"] {
+	--worker-hue: var(--agent-general);
+}
+.worker-row[data-role="fast"],
+.delegate-worker[data-role="fast"] {
+	--worker-hue: var(--agent-fast);
+}
+.worker-row[data-role="review"],
+.delegate-worker[data-role="review"] {
+	--worker-hue: var(--agent-review);
+}
+.worker-row[data-role],
+.delegate-worker[data-role] {
+	border-color: color-mix(in srgb, var(--worker-hue) 55%, var(--border-soft));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--worker-hue) 12%, transparent);
+}
+.worker-row[data-role]:hover,
+.delegate-worker[data-role]:not(.pending):hover {
+	border-color: color-mix(in srgb, var(--worker-hue) 75%, var(--border-soft));
+}
+
 /* ---- Workers tab badge (running count) ---- */
 .astra-workspace-badge {
 	min-width: 18px;

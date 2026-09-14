@@ -331,7 +331,7 @@ function DelegateWorkers({
 		return (
 			<div className="delegate-workers">
 				{tasks.map((task, i) => (
-					<div className="delegate-worker pending" key={i}>
+					<div className="delegate-worker pending" data-role={task.role} key={i}>
 						<div className="delegate-worker-head">
 							<RoleChip role={task.role} />
 							{task.access && <span className="delegate-worker-access">{task.access}</span>}
@@ -359,6 +359,7 @@ function DelegateWorkerRow({ worker, now }: { worker: UiWorker; now: number }) {
 	return (
 		<div
 			className={`delegate-worker tone-${workerStatusTone(worker.status)}`}
+			data-role={worker.role}
 			role="button"
 			tabIndex={0}
 			title={t("workersOpenOne")}

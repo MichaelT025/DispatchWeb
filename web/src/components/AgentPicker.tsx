@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { FiChevronDown, FiTarget } from "react-icons/fi";
+import { RoleIcon } from "./RoleIcon";
 import { AGENT_ROLES, type AgentRole } from "../agents";
 import { useT } from "../i18n";
 
@@ -81,7 +82,7 @@ export const AgentPicker = memo(function AgentPicker({ activeRole, available, bu
 				title={reason ?? t("agentPickerLabel")}
 				onClick={() => setOpen((v) => !v)}
 			>
-				<FiTarget aria-hidden="true" />
+				<RoleIcon role={activeRole} />
 				<span className="agent-picker-pill-label">{pillLabel}</span>
 				<FiChevronDown className={`dd-caret${open ? " up" : ""}`} aria-hidden="true" />
 			</button>
@@ -102,6 +103,7 @@ export const AgentPicker = memo(function AgentPicker({ activeRole, available, bu
 								setOpen(false);
 							}}
 						>
+							<RoleIcon role={role} className="agent-picker-btn-icon" />
 							{t(ROLE_LABEL_KEY[role])}
 						</button>
 					);

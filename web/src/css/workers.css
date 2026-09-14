@@ -1,8 +1,8 @@
 /* Delegated workers (PiAstra `delegate`): the Workers pane in the right
    workspace and the worker rows inside the delegate tool card. Loaded after
    styles.css; tokens only, no literal colors, so themes keep working. The
-   role hue is a small dot + label, never the only signal (status text and
-   tone classes carry the state). */
+   role hue tints the role glyph and the row border; the label and status
+   text always carry the state too. */
 
 /* ---- shared bits: role chip, status, elapsed ---- */
 .worker-role {
@@ -26,11 +26,10 @@
 .worker-role[data-role="review"] {
 	--worker-role-hue: var(--agent-review);
 }
-.worker-role-dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--worker-role-hue);
+.worker-role-icon {
+	width: 13px;
+	height: 13px;
+	color: var(--worker-role-hue);
 	flex: none;
 }
 .worker-id {

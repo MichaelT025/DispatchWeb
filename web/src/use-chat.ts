@@ -26,12 +26,14 @@ import type {
 	UiServiceInfo,
 	UiSettingsState,
 	UiState,
+	UiWorkerTranscript,
 } from "./types";
 
 import { applyMessageDelta, type MessageDeltaMsg } from "./message-delta";
 import { resolvePendingQuestion, type QuestionSource } from "./pending-question";
 import { cwdKey } from "./components/left-panel-nav";
 import { setAppGlobals, setAppSend } from "./app-globals";
+import { setWorkers } from "./workers-store";
 import { PROTOCOL_VERSION } from "./protocol-version";
 
 export type ConnStatus = "connecting" | "open" | "closed";
@@ -184,6 +186,10 @@ export interface ChatState {
 	/** Server wire-protocol version differs from ours — the page was loaded
 	 *  before/after an app update; show a persistent refresh banner. */
 	protocolMismatch: boolean;
+	/** Transcripts of the delegated workers the Workers pane follows
+	 *  (open_worker → worker_transcript pushes), keyed by worker id. Scoped to
+	 *  the ACTIVE conversation: cleared whenever the snapshot switches chats. */
+	workerTranscripts: Map<number, UiWorkerTranscript>;
 }
 
 type Action =
@@ -250,6 +256,7 @@ type Action =
 			};
 	  }
 	| { type: "scm_changed" }
+	| { type: "worker_transcript"; conversationId: string; transcript: UiWorkerTranscript }
 	| { type: "install_result"; result: { ok: boolean; detail: string } }
 	| {
 			type: "path_completions";
@@ -429,6 +436,10 @@ function reducer(state: ChatState, action: Action): ChatState {
 				activeConversationId: action.state.conversationId,
 				liveOutputs: pruneLiveOutputs(state.liveOutputs, action.state),
 				toolStatuses: pruneToolStatuses(state.toolStatuses, action.state),
+				// Another chat's followed workers are meaningless here; the pane
+				// re-opens the selected one after the switch.
+				workerTranscripts:
+					state.state?.conversationId === action.state.conversationId ? state.workerTranscripts : new Map(),
 			};
 		case "snapshot_delta": {
 			// Incremental checkpoint from the server. Apply ONLY when it chains
@@ -541,6 +552,12 @@ function reducer(state: ChatState, action: Action): ChatState {
 			return { ...state, sessionSearch: action.result };
 		case "scm_changed":
 			return { ...state, scmDirty: state.scmDirty + 1 };
+		case "worker_transcript": {
+			if (state.state?.conversationId !== action.conversationId) return state;
+			const workerTranscripts = new Map(state.workerTranscripts);
+			workerTranscripts.set(action.transcript.workerId, action.transcript);
+			return { ...state, workerTranscripts };
+		}
 		case "path_completions":
 			return { ...state, pathCompletions: action.completions };
 		case "widgets":
@@ -717,6 +734,7 @@ export function useChat() {
 		sessionSearch: null,
 		scmDirty: 0,
 		protocolMismatch: false,
+		workerTranscripts: new Map(),
 	});
 	const wsRef = useRef<WebSocket | null>(null);
 	/** Terminal output bridge (writers keyed by terminalId). */
@@ -1033,6 +1051,9 @@ export function useChat() {
 				case "scm_changed":
 					dispatch({ type: "scm_changed" });
 					break;
+				case "worker_transcript":
+					dispatch({ type: "worker_transcript", conversationId: msg.conversationId, transcript: msg.transcript });
+					break;
 				case "install_result":
 					dispatch({ type: "install_result", result: msg });
 					break;
@@ -1197,6 +1218,11 @@ export function useChat() {
 	useEffect(() => {
 		setAppGlobals({ ready: chat.ready, status: chat.status, cwd: chat.state?.cwd ?? "" });
 	}, [chat.ready, chat.status, chat.state?.cwd]);
+	// Delegated workers mirror for the delegate tool cards (workers-store.ts):
+	// the store dedups by content, so the cards only re-render on real change.
+	useEffect(() => {
+		setWorkers(chat.state?.workers);
+	}, [chat.state?.workers]);
 
 	const dismissNotice = useCallback((id: number) => dispatch({ type: "dismiss_notice", id }), []);
 

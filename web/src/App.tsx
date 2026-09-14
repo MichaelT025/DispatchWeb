@@ -13,12 +13,14 @@ import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
-import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar } from "react-icons/fi";
+import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar, FiUsers } from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
 import { QuestionDialog } from "./components/QuestionDialog";
 // 终端视图懒加载：xterm.js 体积大且只在切到终端时才需要，拆出主包
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
+import { WorkersPanel } from "./components/WorkersPanel";
+import { OPEN_WORKER_EVENT } from "./components/ToolCallBlock";
 import { registerAttachmentSink } from "./composer-bridge";
 import { appendDraftAttachments } from "./composer-draft";
 import { PiSetupModal } from "./components/PiSetupModal";
@@ -29,7 +31,7 @@ import { GlobalSearchModal } from "./components/GlobalSearchModal";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
 import { parseAgentRole, hasPiastraExtension } from "./agents";
-import type { ClientMessage, PromptAttachment, UiMessage } from "./types";
+import type { ClientMessage, PromptAttachment, UiMessage, UiWorker } from "./types";
 import { useT } from "./i18n";
 import {
 	FiAlertCircle,
@@ -196,8 +198,11 @@ function PanelRail({ side, onClick }: { side: PanelSide; onClick: () => void }) 
 	);
 }
 
-/** Right workspace pane: files / git review. The terminal is the bottom strip. */
-type WorkspaceTab = "files" | "git";
+/** Stable empty roster (a fresh [] per render would defeat WorkersPanel's memo). */
+const EMPTY_WORKERS: UiWorker[] = [];
+
+/** Right workspace pane: files / git review / delegated workers. The terminal is the bottom strip. */
+type WorkspaceTab = "files" | "git" | "workers";
 
 /** Compact conversation header: project name plus the workspace toggles. */
 function AstraHeader({
@@ -288,6 +293,9 @@ export function App() {
 	/** Right workspace pane (Astra shell): open/closed + which panel tab. */
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab | null>(null);
+	/** Worker shown in the Workers pane (null = the Active / Done lists). Owned
+	 *  here so a delegate card in the chat can open one directly. */
+	const [selectedWorker, setSelectedWorker] = useState<number | null>(null);
 	/** Independent bottom terminal strip under the chat/right area. */
 	const [bottomTerminalOpen, setBottomTerminalOpen] = useState(false);
 	/** Full-window file drag in progress (issue #19) — shows the app-wide
@@ -676,6 +684,11 @@ export function App() {
 		openBottomTerminal();
 	}, [bottomTerminalOpen, openBottomTerminal]);
 
+	/** Running delegated workers — the Workers tab shows the count. */
+	const activeWorkers = (chat.state?.workers ?? EMPTY_WORKERS).filter(
+		(w) => w.status === "starting" || w.status === "running",
+	).length;
+
 	/** Open (and focus) a workspace panel tab. */
 	const openWorkspace = useCallback((tab: WorkspaceTab) => {
 		setWorkspaceOpen(true);
@@ -693,8 +706,21 @@ export function App() {
 		if (createShell()) terminalOpenRequested.current = false;
 	}, [chat.terminals.length, createShell, bottomTerminalOpen]);
 
+	// A delegate card asked for the Workers pane (detail = worker id, or null
+	// for the lists). Window event: the card is deep in the memoized tree.
+	useEffect(() => {
+		const onOpen = (e: Event) => {
+			const id = (e as CustomEvent<number | null>).detail;
+			setSelectedWorker(typeof id === "number" ? id : null);
+			openWorkspace("workers");
+		};
+		window.addEventListener(OPEN_WORKER_EVENT, onOpen);
+		return () => window.removeEventListener(OPEN_WORKER_EVENT, onOpen);
+	}, [openWorkspace]);
+
 	// Workspace / bottom-terminal keyboard shortcuts: Ctrl+P files,
-	// Ctrl+Shift+G git review, Ctrl+` bottom terminal.
+	// Ctrl+Shift+G git review, Ctrl+Shift+L workers (Ctrl+Shift+W closes the
+	// browser window), Ctrl+` bottom terminal.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (!(e.ctrlKey || e.metaKey)) return;
@@ -706,6 +732,9 @@ export function App() {
 			} else if (key === "g" && isShift) {
 				e.preventDefault();
 				openWorkspace("git");
+			} else if (key === "l" && isShift) {
+				e.preventDefault();
+				openWorkspace("workers");
 			} else if (key === "`") {
 				e.preventDefault();
 				toggleBottomTerminal();
@@ -891,6 +920,17 @@ export function App() {
 										)}
 										<button
 											type="button"
+											role="tab"
+											aria-selected={workspaceTab === "workers"}
+											className={workspaceTab === "workers" ? "active" : ""}
+											onClick={() => setWorkspaceTab("workers")}
+										>
+											<FiUsers />
+											<span>{t("astraWorkers")}</span>
+											{activeWorkers > 0 && <span className="astra-workspace-badge">{activeWorkers}</span>}
+										</button>
+										<button
+											type="button"
 											className="astra-workspace-close"
 											title={t("close")}
 											onClick={() => setWorkspaceOpen(false)}
@@ -927,6 +967,16 @@ export function App() {
 												<button
 													type="button"
 													role="menuitem"
+													className="astra-workspace-item"
+													onClick={() => setWorkspaceTab("workers")}
+												>
+													<FiUsers />
+													<span>{t("astraWorkers")}</span>
+													<kbd>Ctrl+Shift+L</kbd>
+												</button>
+												<button
+													type="button"
+													role="menuitem"
 													className={`astra-workspace-item${bottomTerminalOpen ? " active" : ""}`}
 													onClick={toggleBottomTerminal}
 												>
@@ -951,6 +1001,20 @@ export function App() {
 										{workspaceTab === "git" && (
 											<div className="astra-workspace-pane">
 												<ScmPanel chat={chat} terminal={terminal} active onSwitchToTerminal={openBottomTerminal} />
+											</div>
+										)}
+										{workspaceTab === "workers" && (
+											<div className="astra-workspace-pane">
+												<WorkersPanel
+													workers={chat.state?.workers ?? EMPTY_WORKERS}
+													transcripts={chat.workerTranscripts}
+													conversationId={chat.state?.conversationId}
+													selected={selectedWorker}
+													onSelect={setSelectedWorker}
+													send={send}
+													thinkingWrap={chat.settings?.thinkingWrap ?? true}
+													toolsWrap={chat.settings?.toolsWrap ?? false}
+												/>
 											</div>
 										)}
 										{workspaceTab === "files" && workspaceFile && (

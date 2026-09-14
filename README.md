@@ -10,15 +10,38 @@ Everything role-related (orchestrator / general / fast / review, the
 `delegate` tool, `/agent`) lives in PiAstra's own pi extension. This UI only
 renders what that extension reports.
 
+## Workers
+
+Delegated workers (PiAstra's `delegate` tool) show up in two places:
+
+- **Delegate card** in the chat: one row per worker of that call — role, status,
+  elapsed time and the extension's current activity line. A row opens that
+  worker in the pane; "Open workers" opens the lists.
+- **Workers pane** in the right workspace (Ctrl+Shift+L, or the Workers item
+  in the workspace chooser): Codex-style **Active** / **Done** lists for the
+  current conversation, and one worker's transcript rendered with the chat's
+  own message and tool components. Running workers stream in live and can be
+  stopped individually; finished ones come from the extension's in-memory
+  session, or from the saved JSONL under `<agent dir>/piastra/runs` after a
+  restart. Workers are scoped to the conversation, not the project.
+
+The data comes from the extension's `piastra:workers` event channel
+(PiAstra `extensions/piastra/worker-bridge.mjs`, version 1): the server's
+inline `pi-webui-workers` extension subscribes on each conversation's runtime,
+mirrors the worker list into `UiState.workers`, serves transcripts on
+`open_worker`, and relays `cancel_worker`. Nothing polls, and no worker text
+is scraped from tool output. Without the extension the tab is simply empty.
+
 ## What's here
 
-| Area                                           | Files                                                                              |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Server (Express + WebSocket around the pi SDK) | `server/` — `index.ts` host, `agent-service.ts` sessions, `protocol.ts` wire types |
-| Web client (React + Vite)                      | `web/src/` — `App.tsx` shell, `use-chat.ts` socket state, `components/`            |
-| Design tokens and surface styles               | `DESIGN.md`, `web/src/styles.css`, `web/src/css/*.css`                             |
-| CLI / service install                          | `bin/pi-web-ui.mjs`, `deploy/`                                                     |
-| Tests                                          | `tests/unit/*.test.ts` (vitest), `tests/*-test.mjs` (protocol smoke, browser E2E)  |
+| Area                                           | Files                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Server (Express + WebSocket around the pi SDK) | `server/` — `index.ts` host, `agent-service.ts` sessions, `protocol.ts` wire types   |
+| Web client (React + Vite)                      | `web/src/` — `App.tsx` shell, `use-chat.ts` socket state, `components/`              |
+| Design tokens and surface styles               | `DESIGN.md`, `web/src/styles.css`, `web/src/css/*.css`                               |
+| CLI / service install                          | `bin/pi-web-ui.mjs`, `deploy/`                                                       |
+| Tests                                          | `tests/unit/*.test.ts` (vitest), `tests/*-test.mjs` (protocol smoke, browser E2E)    |
+| Delegated workers                              | `server/workers.ts` hub, `web/src/components/WorkersPanel.tsx`, `web/src/workers.ts` |
 
 Removed relative to upstream: UI plugins and the plugin marketplace, the DSH
 engine, goal / review loop and wizard, inline markers / todo, built-in
@@ -56,15 +79,16 @@ npm run build
 npm test                 # unit tests
 npm run test:smoke       # protocol integration tests with local fixtures
 npx playwright-core install chromium
-npm run test:browser     # production shell, files/Git/terminal, sidebar and role bridge
+npm run test:browser     # production shell, files/Git/terminal, sidebar, role bridge, workers pane
 npm run ci               # the full local sequence, including build
 ```
 
 CI runs on every branch push, PRs into `main`, and manual dispatch. Static
 checks run on Linux; unit and protocol tests run on Linux and Windows; browser
 tests run on Linux with Chromium. Older runs of the same branch are cancelled.
-No provider credentials or sibling PiAstra checkout are required. The role
-browser test uses a test extension to verify the status bridge, not live delegation.
+No provider credentials or sibling PiAstra checkout are required. The role and
+workers browser tests use test extensions to verify the status and worker
+bridges, not live delegation.
 
 CI builds once per test job. The protocol and browser runners use isolated agent
 and UI state defaults, enforce a three-minute timeout per script, and write logs,

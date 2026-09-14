@@ -36,7 +36,7 @@ const VERBS: Record<string, Verbs> = {
 	find: { running: "Finding", done: "Found" },
 	glob: { running: "Finding", done: "Found" },
 	ls: { running: "Listing", done: "Listed" },
-	delegate_task: { running: "Delegating to", done: "Delegated to" },
+	delegate: { running: "Delegating to", done: "Delegated to" },
 	web_fetch: { running: "Fetching", done: "Fetched" },
 	fetch: { running: "Fetching", done: "Fetched" },
 	web_search: { running: "Searching the web for", done: "Searched the web for" },
@@ -75,8 +75,16 @@ export function toolSummary(name: string, hints: ToolArgHints, phase: ToolPhase)
 			}
 			return { verb, target: hints.path ? shortenPath(hints.path) : undefined, mono: true, title: hints.path };
 		}
-		case "delegate_task":
-			return { verb, target: hints.agent, mono: false, title: hints.agent };
+		case "delegate": {
+			// "2 general + review" — counts per role, in first-seen order.
+			const roles = hints.roles ?? [];
+			if (roles.length === 0) return { verb: phase === "running" ? "Delegating" : "Delegated", mono: false };
+			const counts = new Map<string, number>();
+			for (const r of roles) counts.set(r, (counts.get(r) ?? 0) + 1);
+			const target = [...counts].map(([r, n]) => (n > 1 ? `${n} ${r}` : r)).join(" + ");
+			const title = `${roles.length} worker${roles.length === 1 ? "" : "s"}: ${target}`;
+			return { verb, target, mono: false, title };
+		}
 		default: {
 			if (hints.path) return { verb, target: shortenPath(hints.path), mono: true, title: hints.path };
 			if (VERBS[name]) return { verb, mono: false };

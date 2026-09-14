@@ -163,6 +163,9 @@ export interface UiState {
 	 *  null / 缺省 = 当前对话没有待答提问。
 	 */
 	pendingQuestion?: UiPendingQuestion | null;
+	/** Delegated workers of this conversation (PiAstra `delegate` tool), live
+	 *  and saved, in start order. Empty when the extension is not loaded. */
+	workers: UiWorker[];
 	tools: string[];
 	/** Monotonic snapshot sequence — clients can use it to drop stale snapshots. */
 	version: number;
@@ -562,7 +565,14 @@ export type ClientMessage =
 	 *  conversations can be dismissed; streaming ones refuse with a notice.
 	 *  force = abort a running conversation before dismissing it. The active
 	 *  conversation may be dismissed too (the server switches away first). */
-	| { type: "dismiss_conversation"; id: string; force?: boolean };
+	| { type: "dismiss_conversation"; id: string; force?: boolean }
+	// -- delegated workers (right workspace Workers pane) ---------------------
+	/** Follow one worker's transcript: the server answers with worker_transcript
+	 *  now and keeps pushing updates while the worker runs. */
+	| { type: "open_worker"; workerId: number }
+	| { type: "close_worker"; workerId: number }
+	/** Abort ONE running worker; its siblings and the delegate call continue. */
+	| { type: "cancel_worker"; workerId: number };
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -681,6 +691,47 @@ export interface FileEntry {
 	 * never previewed — the UI doesn't open them and read_file refuses them.
 	 */
 	kind?: "image" | "video" | "text" | "none";
+}
+
+// -- delegated workers -------------------------------------------------------
+
+/** Lifecycle of a delegated worker, as reported by the PiAstra extension.
+ *  `interrupted` = restored from a saved session where it never finished. */
+export type UiWorkerStatus = "starting" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+
+/** One delegated worker (PiAstra `delegate` tool). Mirrors the extension's
+ *  public summary on the `piastra:workers` event channel. */
+export interface UiWorker {
+	/** Session-unique worker number (1-based, in start order). */
+	id: number;
+	/** The delegate tool call that started it (groups workers per card). */
+	toolCallId?: string;
+	role: string;
+	model: string;
+	task: string;
+	status: UiWorkerStatus;
+	/** One-line current activity ("→ read src/app.ts", "Thinking…", an error). */
+	activity: string;
+	started: number;
+	ended?: number;
+	/** Bounded recent tool lines kept by the extension (card preview). */
+	recent: string[];
+	/** Tail of the latest assistant text (card preview). */
+	text: string;
+	/** A transcript can be shown: the worker session is live in memory or its
+	 *  saved JSONL is readable. */
+	hasTranscript: boolean;
+}
+
+/** One worker's conversation, in the same shape as the main chat so the
+ *  pane renders it with the ordinary message components. */
+export interface UiWorkerTranscript {
+	workerId: number;
+	messages: UiMessage[];
+	/** In-flight assistant message while the worker streams. */
+	streamingMessage: UiMessage | null;
+	/** Where the messages came from; "none" = nothing readable (yet). */
+	source: "live" | "file" | "none";
 }
 
 // -- source-control panel (wire shapes shared by scm_data) -------------------
@@ -994,6 +1045,10 @@ export type ServerMessage =
 	| { type: "scm_changed" }
 	/** Sent every ~10s so clients can detect half-open connections. */
 	| { type: "heartbeat" }
+	/** A followed worker's transcript (reply to open_worker, then pushed on
+	 *  change while the worker runs). Whole-list replace; worker transcripts
+	 *  are bounded, so no delta chain is needed. */
+	| { type: "worker_transcript"; conversationId: string; transcript: UiWorkerTranscript }
 	/** Persisted session list for ONE project. `cwd` is the queried project
 	 *  directory (echoed back from `list_sessions`, or the active cwd on a
 	 *  spontaneous push); the client keys its per-project cache by this field.

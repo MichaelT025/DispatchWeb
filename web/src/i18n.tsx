@@ -1115,14 +1115,23 @@ export const en = {
 	skillFullTextDesc:
 		"Expand skill file contents inline into the system prompt (8KB per file, 32KB total cap); otherwise only a catalog is listed and the model reads files on demand",
 	skillFullTextShort: "Full",
-	/* Delegate card (delegate_task dedicated rendering) */
-	delegateOpenSubagent: "Open subagent",
-	delegateSecTask: "Task",
-	delegateSecExpected: "Expected outcome",
-	delegateSecTools: "Required tools",
-	delegateSecMustDo: "Must do",
-	delegateSecMustNotDo: "Must not do",
-	delegateSecContext: "Context",
+	/* Delegated workers (PiAstra `delegate` tool): card rows + Workers pane */
+	astraWorkers: "Workers",
+	workersOpenPane: "Open workers",
+	workersOpenOne: "Open this worker's transcript",
+	workersPending: "Queued",
+	workersActive: "Active",
+	workersDone: "Done",
+	workersNone: "None",
+	workersEmptyTitle: "No workers yet",
+	workersEmptyHint: "When the orchestrator delegates, each worker shows up here with its live transcript.",
+	workersBack: "Back to the worker list",
+	workersTask: "Task",
+	workersStop: "Stop",
+	workersStopTip: "Stop this worker (its siblings keep running)",
+	workersLoading: "Loading transcript…",
+	workersWaiting: "Waiting for the first message…",
+	workersNoTranscript: "No transcript is available for this worker.",
 } as const;
 
 export type Translate = (key: keyof typeof en, vars?: Record<string, string | number>) => string;

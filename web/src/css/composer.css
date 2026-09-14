@@ -55,6 +55,26 @@
 		0 0 0 1px color-mix(in srgb, var(--composer-agent) 18%, transparent),
 		0 12px 40px rgba(0, 0, 0, 0.45);
 }
+/* menu rows: each role's glyph in its own hue, whatever is active */
+.agent-picker-btn-icon {
+	width: 14px;
+	height: 14px;
+	margin-right: 8px;
+	vertical-align: -2px;
+	flex: none;
+}
+.agent-picker-btn[data-agent-role="orchestrator"] .agent-picker-btn-icon {
+	color: var(--agent-orchestrator);
+}
+.agent-picker-btn[data-agent-role="general"] .agent-picker-btn-icon {
+	color: var(--agent-general);
+}
+.agent-picker-btn[data-agent-role="fast"] .agent-picker-btn-icon {
+	color: var(--agent-fast);
+}
+.agent-picker-btn[data-agent-role="review"] .agent-picker-btn-icon {
+	color: var(--agent-review);
+}
 /* the pill icon carries the same hue so the picker reads as the source */
 .inputbar[data-agent="orchestrator"] .agent-picker-pill > svg,
 .inputbar[data-agent="general"] .agent-picker-pill > svg,

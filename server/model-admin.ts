@@ -111,6 +111,15 @@ export function mergeProviderConfigEntry(
 		else delete merged.contextWindow;
 		if (model.maxTokens) merged.maxTokens = Number(model.maxTokens);
 		else delete merged.maxTokens;
+		// Model-level routing/metadata fields travel with the form for cloned
+		// multi-api providers (opencode-go mixes anthropic-messages and
+		// openai-* apis). Present → override; absent → keep the stored value
+		// (hand-written overrides stay intact).
+		if (model.api?.trim()) merged.api = model.api.trim();
+		if (model.baseUrl?.trim()) merged.baseUrl = model.baseUrl.trim();
+		if (model.compat) merged.compat = model.compat;
+		if (model.cost) merged.cost = model.cost;
+		if (model.thinkingLevelMap) merged.thinkingLevelMap = model.thinkingLevelMap;
 		return merged;
 	});
 
@@ -681,19 +690,29 @@ export class ModelAdminService {
 			}
 			const noBaseUrl = !p.baseUrl;
 			// Map runtime models → models.json rows; dynamic providers ship an
-			// empty catalog until refreshed over the network.
-			const readModels = (): { api: string; entry: UiModelConfigEntry }[] => {
+			// empty catalog until refreshed over the network. Model-level api/
+			// baseUrl/compat are carried through verbatim: they decide which
+			// upstream endpoint and wire format each model uses. Providers like
+			// opencode-go mix apis (anthropic-messages → /zen/go, openai-* →
+			// /zen/go/v1), so a single provider-level api/baseUrl cannot
+			// represent the catalog and would route half the models to a dead
+			// path (see mergeProviderConfigEntry doc above).
+			const readModels = (): UiModelConfigEntry[] => {
 				try {
 					return mr.getModels(pid).map((m) => ({
-						api: m.api,
-						entry: {
-							id: m.id,
-							...(m.name && m.name !== m.id ? { name: m.name } : {}),
-							...(m.reasoning ? { reasoning: true } : {}),
-							...(m.input?.includes("image") ? { input: ["text", "image"] } : {}),
-							...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-							...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
-						},
+						id: m.id,
+						...(m.name && m.name !== m.id ? { name: m.name } : {}),
+						...(m.reasoning ? { reasoning: true } : {}),
+						...(m.input?.includes("image") ? { input: ["text", "image"] } : {}),
+						...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+						...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
+						...(m.api ? { api: m.api } : {}),
+						...(m.baseUrl ? { baseUrl: m.baseUrl } : {}),
+						...(m.compat ? { compat: m.compat as unknown as Record<string, unknown> } : {}),
+						...(m.cost ? { cost: m.cost as unknown as Record<string, unknown> } : {}),
+						...(m.thinkingLevelMap
+							? { thinkingLevelMap: m.thinkingLevelMap as unknown as Record<string, unknown> }
+							: {}),
 					}));
 				} catch {
 					return [];
@@ -708,25 +727,33 @@ export class ModelAdminService {
 				fail(`Model list for ${pid} is empty, cannot clone (retry later)`);
 				return;
 			}
-			// 供应商级 api 取占比最高，模型保留全量去重（避免 muse-spark 被过滤）
-			// 多 key 场景：复制一次即得到 opencode1/opencode2 两组，界面按供应商分组，选模型即切 key
+			// ONE deduplicated full model catalog config — no per-api split, no
+			// extra provider ids. Per-model api/baseUrl/compat/cost/
+			// thinkingLevelMap travel with each row, so a multi-api provider
+			// (opencode-go) keeps working after save. The provider-level api is
+			// the majority api as a baseline; the provider-level baseUrl comes
+			// from p.baseUrl, or the first model of that majority api that has a
+			// URL (never a fabricated localhost default).
 			const counts = new Map<string, number>();
-			for (const m of models) counts.set(m.api, (counts.get(m.api) ?? 0) + 1);
-			let api = models[0].api;
+			for (const m of models) {
+				const api = m.api ?? "openai-completions";
+				counts.set(api, (counts.get(api) ?? 0) + 1);
+			}
+			let api = "openai-completions";
 			for (const [k, v] of counts) if (v > (counts.get(api) ?? 0)) api = k;
+			const providerBaseUrl =
+				p.baseUrl || models.find((m) => (m.api ?? "openai-completions") === api && m.baseUrl)?.baseUrl;
 			const keptMap = new Map<string, UiModelConfigEntry>();
-			for (const m of models) if (!keptMap.has(m.entry.id)) keptMap.set(m.entry.id, m.entry);
+			for (const m of models) if (!keptMap.has(m.id)) keptMap.set(m.id, m);
 			const kept = [...keptMap.values()].sort((a, b) => a.id.localeCompare(b.id));
 			const taken = new Set([...Object.keys(this.readModelsConfig().providers), ...mr.getRegisteredProviderIds()]);
 			let newId = `${pid}-2`;
 			for (let n = 2; taken.has(newId); n++) newId = `${pid}-${n}`;
-			const defaultBaseUrl =
-				noBaseUrl && (pid === "opencode-go" || pid === "opencode") ? "http://127.0.0.1:4096" : undefined;
 			const config: UiProviderConfig = {
 				providerId: newId,
 				name: p.name,
 				api,
-				...(p.baseUrl ? { baseUrl: p.baseUrl } : defaultBaseUrl ? { baseUrl: defaultBaseUrl } : {}),
+				...(providerBaseUrl ? { baseUrl: providerBaseUrl } : {}),
 				models: kept,
 			};
 			this.host.emit({
@@ -857,6 +884,16 @@ export class ModelAdminService {
 						input: Array.isArray(m.input) ? (m.input as string[]) : undefined,
 						contextWindow: m.contextWindow as number | undefined,
 						maxTokens: m.maxTokens as number | undefined,
+						// Per-model routing/metadata must round-trip to the UI: the edit
+						// form re-submits what it received, and a model-level baseUrl is
+						// what keeps multi-api providers (opencode-go) off a dead path.
+						// Dropping it here makes the UI's "model overrides provider
+						// baseUrl" precedence warning vanish after save/reopen.
+						api: m.api as string | undefined,
+						baseUrl: m.baseUrl as string | undefined,
+						compat: m.compat as Record<string, unknown> | undefined,
+						cost: m.cost as Record<string, unknown> | undefined,
+						thinkingLevelMap: m.thinkingLevelMap as Record<string, unknown> | undefined,
 					}))
 				: [];
 			return {
@@ -1201,6 +1238,13 @@ export class ModelAdminService {
 				...(m.input?.length ? { input: m.input } : {}),
 				...(m.contextWindow ? { contextWindow: Number(m.contextWindow) } : {}),
 				...(m.maxTokens ? { maxTokens: Number(m.maxTokens) } : {}),
+				// Per-model routing/metadata the form carries for cloned multi-api
+				// providers: must reach mergeProviderConfigEntry so it can persist.
+				...(m.api?.trim() ? { api: m.api.trim() } : {}),
+				...(m.baseUrl?.trim() ? { baseUrl: m.baseUrl.trim() } : {}),
+				...(m.compat ? { compat: m.compat } : {}),
+				...(m.cost ? { cost: m.cost } : {}),
+				...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
 			}));
 		if (models.length === 0) {
 			this.host.emit({

@@ -46,6 +46,14 @@ interface DraftModel {
 	input: "text" | "text-image";
 	contextWindow: string;
 	maxTokens: string;
+	/** Server-provided routing metadata, passed through untouched (the form
+	 *  has no controls for them). Needed so a cloned multi-api provider
+	 *  (opencode-go) keeps each model's api/baseUrl/compat on save. */
+	api?: string;
+	baseUrl?: string;
+	compat?: Record<string, unknown>;
+	cost?: Record<string, unknown>;
+	thinkingLevelMap?: Record<string, unknown>;
 }
 
 interface Draft {
@@ -92,7 +100,31 @@ function toDraft(p: UiProviderConfig): Draft {
 			input: m.input?.includes("image") ? "text-image" : "text",
 			contextWindow: m.contextWindow ? String(m.contextWindow) : "",
 			maxTokens: m.maxTokens ? String(m.maxTokens) : "",
+			...(m.api ? { api: m.api } : {}),
+			...(m.baseUrl ? { baseUrl: m.baseUrl } : {}),
+			...(m.compat ? { compat: m.compat } : {}),
+			...(m.cost ? { cost: m.cost } : {}),
+			...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
 		})),
+	};
+}
+
+/** Draft row → wire model entry. Server-provided routing metadata (api/
+ *  baseUrl/compat/cost/thinkingLevelMap) rides along untouched so cloned
+ *  multi-api providers keep working after a save. */
+function draftModelToEntry(m: DraftModel): UiModelConfigEntry {
+	return {
+		id: m.id.trim(),
+		name: m.name.trim() || undefined,
+		reasoning: m.reasoning || undefined,
+		input: m.input === "text-image" ? ["text", "image"] : undefined,
+		contextWindow: m.contextWindow ? Number(m.contextWindow) : undefined,
+		maxTokens: m.maxTokens ? Number(m.maxTokens) : undefined,
+		...(m.api ? { api: m.api } : {}),
+		...(m.baseUrl ? { baseUrl: m.baseUrl } : {}),
+		...(m.compat ? { compat: m.compat } : {}),
+		...(m.cost ? { cost: m.cost } : {}),
+		...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
 	};
 }
 
@@ -245,16 +277,7 @@ export function ModelConfigModal({
 		if (!addKeyDraft) return;
 		const pid = addKeyDraft.providerId.trim();
 		if (!pid || !addKeyDraft.apiKey.trim()) return;
-		const models: UiModelConfigEntry[] = addKeyDraft.models
-			.filter((m) => m.id.trim())
-			.map((m) => ({
-				id: m.id.trim(),
-				name: m.name.trim() || undefined,
-				reasoning: m.reasoning || undefined,
-				input: m.input === "text-image" ? ["text", "image"] : undefined,
-				contextWindow: m.contextWindow ? Number(m.contextWindow) : undefined,
-				maxTokens: m.maxTokens ? Number(m.maxTokens) : undefined,
-			}));
+		const models: UiModelConfigEntry[] = addKeyDraft.models.filter((m) => m.id.trim()).map(draftModelToEntry);
 		const config: UiProviderConfig = {
 			providerId: pid,
 			name: addKeyDraft.name.trim() || undefined,
@@ -272,16 +295,7 @@ export function ModelConfigModal({
 	const save = () => {
 		if (!editing) return;
 		const providerId = editing.providerId.trim();
-		const models: UiModelConfigEntry[] = editing.models
-			.filter((m) => m.id.trim())
-			.map((m) => ({
-				id: m.id.trim(),
-				name: m.name.trim() || undefined,
-				reasoning: m.reasoning || undefined,
-				input: m.input === "text-image" ? ["text", "image"] : undefined,
-				contextWindow: m.contextWindow ? Number(m.contextWindow) : undefined,
-				maxTokens: m.maxTokens ? Number(m.maxTokens) : undefined,
-			}));
+		const models: UiModelConfigEntry[] = editing.models.filter((m) => m.id.trim()).map(draftModelToEntry);
 		const config: UiProviderConfig = {
 			providerId,
 			name: editing.name.trim() || undefined,
@@ -501,16 +515,7 @@ export function ModelConfigModal({
 									for (const d of batch) {
 										const pid = d.providerId.trim();
 										if (!pid) continue;
-										const models: UiModelConfigEntry[] = d.models
-											.filter((m) => m.id.trim())
-											.map((m) => ({
-												id: m.id.trim(),
-												name: m.name.trim() || undefined,
-												reasoning: m.reasoning || undefined,
-												input: m.input === "text-image" ? ["text", "image"] : undefined,
-												contextWindow: m.contextWindow ? Number(m.contextWindow) : undefined,
-												maxTokens: m.maxTokens ? Number(m.maxTokens) : undefined,
-											}));
+										const models: UiModelConfigEntry[] = d.models.filter((m) => m.id.trim()).map(draftModelToEntry);
 										const config: UiProviderConfig = {
 											providerId: pid,
 											name: d.name.trim() || undefined,
@@ -712,6 +717,11 @@ export function ModelConfigModal({
 											onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })}
 											placeholder="http://localhost:11434/v1"
 										/>
+										{editing.models.some((m) => (m.baseUrl ?? "").trim()) && (
+											<span style={{ fontSize: 11, color: "var(--warning, #d97706)" }}>
+												{`⚠️ ${editing.models.filter((m) => (m.baseUrl ?? "").trim()).length} model(s) below define their own baseUrl — those take precedence over this provider URL.`}
+											</span>
+										)}
 									</label>
 									<label className="field">
 										<span className="field-label">{t("apiKey")}</span>

@@ -733,6 +733,19 @@ export interface UiModelConfigEntry {
 	input?: string[];
 	contextWindow?: number;
 	maxTokens?: number;
+	/** Per-model api type. Multi-api providers (opencode-go) mix
+	 *  anthropic-messages with openai-completions/responses; without this the
+	 *  provider-level api would mis-route part of the catalog. */
+	api?: string;
+	/** Per-model upstream base URL — wins over the provider-level baseUrl
+	 *  (opencode-go uses /zen/go for anthropic and /zen/go/v1 for openai). */
+	baseUrl?: string;
+	/** Adapter compatibility overrides (thinkingFormat, maxTokensField, …). */
+	compat?: Record<string, unknown>;
+	/** Billing metadata, preserved verbatim. */
+	cost?: Record<string, unknown>;
+	/** pi thinking-level → provider-value mapping, preserved verbatim. */
+	thinkingLevelMap?: Record<string, unknown>;
 }
 
 /** A custom provider block in models.json (providers.<id>). */

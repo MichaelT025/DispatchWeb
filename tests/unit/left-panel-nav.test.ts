@@ -5,9 +5,10 @@ import {
 	flattenConversations,
 	pendingSessionCwds,
 	stableProjectOrder,
+	worktreeLabel,
 	type NavGroup,
 } from "../../web/src/components/left-panel-nav.js";
-import type { ConversationSummary, ProjectSummary, SessionSummary } from "../../web/src/types.js";
+import type { ConversationSummary, ProjectSummary, SessionSummary, WorktreeSummary } from "../../web/src/types.js";
 
 function conv(id: string, cwd: string): ConversationSummary {
 	return { id, title: id, cwd, messageCount: 1, isStreaming: false };
@@ -218,5 +219,72 @@ describe("stableProjectOrder", () => {
 		const order: string[] = [];
 		const g = stableProjectOrder(buildLeftNav([project("/a", 1)], [conv("x", "/zzz")], new Map(), "/a"), order);
 		expect(g.map((x) => x.isProject)).toEqual([true, false]);
+	});
+});
+
+describe("worktrees", () => {
+	const wt = (path: string, branch: string | null, isMain = false): WorktreeSummary => ({
+		path,
+		branch,
+		head: "abcdef12",
+		isMain,
+		locked: false,
+		managed: !isMain,
+	});
+	const repo = (): ProjectSummary => ({
+		path: "/repo",
+		lastUsed: 5,
+		worktrees: [wt("/repo", "main", true), wt("/home/.pi/worktrees/repo/feat-x", "feat/x"), wt("/wt/detached", null)],
+	});
+
+	it("chats and sessions in a linked worktree nest under the repository with a branch badge", () => {
+		const sessions = new Map<string, SessionSummary[]>([
+			["/repo", [session("/s/main.jsonl", 10)]],
+			["/home/.pi/worktrees/repo/feat-x", [session("/s/feat.jsonl", 20)]],
+			["/wt/detached", [session("/s/det.jsonl", 15)]],
+		]);
+		const groups = buildLeftNav(
+			[repo()],
+			[conv("c-main", "/repo"), conv("c-feat", "/home/.pi/worktrees/repo/feat-x")],
+			sessions,
+			"/repo",
+		);
+		expect(groups).toHaveLength(1);
+		const g = groups[0];
+		expect(g.isProject).toBe(true);
+		expect(g.isCurrent).toBe(true);
+		expect(g.conversations.map((r) => [r.c.id, r.worktree?.branch])).toEqual([
+			["c-main", undefined],
+			["c-feat", "feat/x"],
+		]);
+		// merged across checkouts, newest first
+		expect(g.sessions.map((s) => s.path)).toEqual(["/s/feat.jsonl", "/s/det.jsonl", "/s/main.jsonl"]);
+		expect(g.sessionWorktrees.get("/s/feat.jsonl")?.path).toBe("/home/.pi/worktrees/repo/feat-x");
+		expect(worktreeLabel(g.sessionWorktrees.get("/s/det.jsonl")!)).toBe("abcdef12"); // detached → short HEAD
+		expect(g.sessionWorktrees.has("/s/main.jsonl")).toBe(false);
+	});
+
+	it("the project is current when the active cwd is one of its worktrees", () => {
+		const g = buildLeftNav([repo()], [], new Map(), "/home/.pi/worktrees/repo/feat-x")[0];
+		expect(g.isCurrent).toBe(true);
+		// the active checkout is listed unscoped; the other two must be fetched
+		expect(g.fetchCwds).toEqual(["/repo", "/wt/detached"]);
+		expect(pendingSessionCwds([g], new Set(), new Set(), new Set())).toEqual(["/repo", "/wt/detached"]);
+	});
+
+	it("a worktree cwd never forms an ungrouped group of its own", () => {
+		const groups = buildLeftNav([repo()], [conv("x", "/wt/detached")], new Map(), "/elsewhere");
+		expect(groups.map((g) => g.path)).toEqual(["/repo"]);
+		expect(groups[0].fetchCwds).toEqual(["/repo", "/home/.pi/worktrees/repo/feat-x", "/wt/detached"]);
+	});
+
+	it("worktree paths fold case on Windows drives like any cwd", () => {
+		const p: ProjectSummary = {
+			path: "C:/Repo",
+			lastUsed: 1,
+			worktrees: [wt("C:/Repo", "main", true), wt("C:/Users/me/.pi/worktrees/Repo/feat", "feat")],
+		};
+		const g = buildLeftNav([p], [conv("k", "c:/users/me/.pi/worktrees/repo/feat")], new Map(), "C:/Repo")[0];
+		expect(g.conversations.map((r) => [r.c.id, r.worktree?.branch])).toEqual([["k", "feat"]]);
 	});
 });

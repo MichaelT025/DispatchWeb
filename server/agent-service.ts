@@ -14,6 +14,8 @@
 // provider so built-in model lists follow the official pi.dev catalog
 // wholesale (no union merge / no stale built-in leftovers).
 import "./patch-remote-catalog.js";
+// Same rule: rewrites the SDK's extension loader before it is first imported.
+import "./patch-extension-cache.js";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, rmSync, statSync, mkdirSync, watch } from "node:fs";
@@ -38,6 +40,17 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { BgServerTracker } from "./bg-servers.js";
+import {
+	createWorktree,
+	generateWorktreeName,
+	isManagedWorktree,
+	listWorktrees,
+	removeWorktree,
+	sameWorktreePath,
+	worktreeIsDirty,
+	WorktreeError,
+	type GitWorktree,
+} from "./worktrees.js";
 import { removeFirstOccurrence } from "./queue-utils.js";
 import { SettingsService } from "./settings-service.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
@@ -90,13 +103,15 @@ import type {
 	UiState,
 } from "./protocol.js";
 import { launchOrigin, toServiceInfo } from "./launch-origin.js";
-import {
-	serializeMessage,
-	serializeStreamingMessage,
-	stripTransientRetryErrors,
-	type AgentMessage,
-} from "./serialize.js";
+import { serializeStreamingMessage, stripTransientRetryErrors, type AgentMessage } from "./serialize.js";
 import { loadCommands, saveCommandsFile, TerminalManager } from "./terminals.js";
+import {
+	buildPreviewState,
+	newSerializeCache,
+	serializeCachedInto,
+	serializeTranscript,
+	type SerializeCache,
+} from "./session-preview.js";
 import { isBridgeEvent, WORKER_CHANNEL, WorkerHub } from "./workers.js";
 
 const SNAPSHOT_INTERVAL_MS = 60;
@@ -117,10 +132,6 @@ const STALL_NOTIFY_MS = (() => {
 	const v = Number(process.env.PI_WEB_STALL_NOTIFY_MS);
 	return Number.isFinite(v) && v >= 0 ? v : 180_000;
 })();
-/** Serialization-cache cap per conversation (see serializeCached): cached
- *  UiMessage objects are pure-function results, so eviction only costs a
- *  recompute on next access. Bounds memory for marathon sessions. */
-const UI_MESSAGE_CACHE_CAP = 4096;
 /** Preview panel cap: only the first 512KB of a file is ever read/sent. */
 
 /** Thrown when the service is quiesced (draining) and the request is NEW work
@@ -360,32 +371,6 @@ export function makeAskUserQuestionTool(
 	} as unknown as ToolDefinition;
 }
 
-/**
- * Cheap per-message discriminator for the serialization cache key. Persisted
- * message content never changes, so this is stable across snapshots, while
- * several same-role messages created within one millisecond (attachment
- * asides) get distinct keys. Text blocks are fingerprinted by a short hash of
- * their head (paths embedded in <file> tags can share long prefixes — e.g.
- * uploads created in the same millisecond differ only at the tail); image
- * payloads by data length (identical lengths within the same ms are far too
- * unlikely to matter).
- */
-function contentFingerprint(m: AgentMessage): string {
-	const content = (m as unknown as { content?: unknown }).content;
-	if (!Array.isArray(content) || content.length === 0) return "empty";
-	const first = content[0] as { type?: string; text?: string; data?: string };
-	if (first?.type === "image") {
-		return `img:${(first.data ?? "").length}`;
-	}
-	const text = typeof first?.text === "string" ? first.text : "";
-	// djb2 — fast enough to run per snapshot, distinct enough for asides.
-	let h = 5381;
-	for (let i = 0; i < text.length && i < 512; i++) {
-		h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
-	}
-	return `txt:${h.toString(36)}:${text.length}`;
-}
-
 // ---------------------------------------------------------------------------
 // Web UI context adapter — bridges extension UI calls (setWidget/notify) to the
 // browser. Extensions like rpiv-todo render a TUI widget via
@@ -455,9 +440,10 @@ interface Conversation {
 	deltaSeq: number;
 	/** PTYs belong to the conversation, not the browser socket or client. */
 	terminals: TerminalManager;
-	// Per-conversation serialization caches. Message ids derive from
-	// (role, timestamp); two conversations can produce identical pairs, so
-	// these must never be shared across conversations.
+	// Per-conversation serialization caches (SerializeCache, see
+	// session-preview.ts). Message ids derive from (role, timestamp); two
+	// conversations can produce identical pairs, so these must never be
+	// shared across conversations.
 	msgIds: Map<string, number>;
 	nextMsgId: number;
 	/** Per-timestamp 1-based user-message seq (drives the `u-<ts>-<seq>` id suffix). */
@@ -1020,6 +1006,12 @@ export class ClientSession {
 	private emittedConvId: string | null = null;
 	/** snapRev value at which emittedMessages was captured. */
 	private emittedRev = 0;
+	/** Conversation ids whose runtime switch_session is still booting after a
+	 *  transcript-first preview went out (see emitSessionPreview). Non-empty
+	 *  → prompts are refused: the client is looking at a conversation that
+	 *  does not exist yet, so applying the text to the still-active one would
+	 *  send it to the wrong chat. */
+	private readonly bootingSwitches = new Set<string>();
 	/**
 	 * Per-conversation serialization caches (stable message ids, UiMessage
 	 * object cache, message-array signature, queue counts) live inside each
@@ -1298,8 +1290,16 @@ export class ClientSession {
 		return `c${++this.convSeq}`;
 	}
 
-	/** Wrap a fresh runtime as a new conversation record. */
-	private makeConversation(runtime: AgentSessionRuntime, id: string, terminals: TerminalManager): Conversation {
+	/** Wrap a fresh runtime as a new conversation record. `cache` (optional)
+	 *  adopts the serialization cache a switch_session preview already built
+	 *  over the same transcript, so the real snapshot reuses the preview's
+	 *  message ids and object references instead of re-serializing. */
+	private makeConversation(
+		runtime: AgentSessionRuntime,
+		id: string,
+		terminals: TerminalManager,
+		cache: SerializeCache = newSerializeCache(),
+	): Conversation {
 		return {
 			id,
 			title: conversationTitle(runtime.session),
@@ -1316,10 +1316,10 @@ export class ClientSession {
 			stallNoticed: false,
 			deltaSeq: 0,
 			terminals,
-			msgIds: new Map(),
-			nextMsgId: 1,
-			userSeqByTs: new Map(),
-			uiMessageCache: new Map(),
+			msgIds: cache.msgIds,
+			nextMsgId: cache.nextMsgId,
+			userSeqByTs: cache.userSeqByTs,
+			uiMessageCache: cache.uiMessageCache,
 			lastMessagesSig: "",
 			lastMessagesArray: [],
 			queueSteering: [],
@@ -1932,50 +1932,11 @@ export class ClientSession {
 		return this.serializeCachedFor(this.conv, m);
 	}
 
-	/** serializeCached 的按对话版本（插件快照读非活跃对话用；缓存仍按对话隔离）。 */
+	/** serializeCached 的按对话版本（插件快照读非活跃对话用；缓存仍按对话隔离）。
+	 *  The cache logic itself lives in session-preview.ts so the switch_session
+	 *  preview can run it over a bare transcript. */
 	private serializeCachedFor(conv: Conversation, m: AgentMessage): UiMessage | null {
-		// toolResult messages are keyed by toolCallId; everything else by
-		// role+timestamp. A single prompt can emit several same-role messages
-		// within the SAME millisecond (multiple attachment asides), so the
-		// timestamp alone collides in the cache and only the first one renders
-		// — append a cheap content fingerprint to keep them distinct while
-		// staying stable across snapshots (content never changes once persisted).
-		const key = m.role === "toolResult" ? `t:${m.toolCallId}` : `${m.role}:${m.timestamp}:${contentFingerprint(m)}`;
-		let n = conv.msgIds.get(key);
-		if (n === undefined) {
-			n = conv.nextMsgId++;
-			conv.msgIds.set(key, n);
-		}
-		const cacheKey = `${key}#${n}`;
-		const cached = conv.uiMessageCache.get(cacheKey);
-		if (cached) return cached;
-		// User-message id suffix is a 1-based count of user messages sharing
-		// this timestamp (that's what resolveUserMessageEntryId() expects). n is
-		// a global per-conversation counter across ALL roles, so it can't be
-		// reused as the seq — otherwise editing anything but the first question
-		// fails to resolve ("找不到要编辑的消息").
-		let seq = n;
-		if (m.role === "user") {
-			const ts = m.timestamp ?? 0;
-			seq = (conv.userSeqByTs.get(ts) ?? 0) + 1;
-			conv.userSeqByTs.set(ts, seq);
-		}
-		const msg = serializeMessage(m, seq);
-		if (msg) {
-			conv.uiMessageCache.set(cacheKey, msg);
-			// Bound the cache (marathon sessions otherwise grow without limit;
-			// single messages can reach TEXT_CAP = 200K chars). Map iteration is
-			// insertion order, so dropping from the front evicts the oldest —
-			// recent messages (the ones every snapshot touches) always survive.
-			// Safe: a miss just recomputes an identical object on next access.
-			let excess = conv.uiMessageCache.size - UI_MESSAGE_CACHE_CAP;
-			while (excess-- > 0) {
-				const oldest = conv.uiMessageCache.keys().next().value;
-				if (oldest === undefined) break;
-				conv.uiMessageCache.delete(oldest);
-			}
-		}
-		return msg;
+		return serializeCachedInto(conv, m);
 	}
 
 	/** Current messages array (with the existing sig-reuse optimization).
@@ -2570,30 +2531,47 @@ export class ClientSession {
 	 *  own per-session model: switching back to a RUNNING / completed chat must not
 	 *  silently overwrite its model with the project default. So a fresh chat in the
 	 *  project gets the remembered model; an in-progress one keeps what it had and
-	 *  the user switches via the picker. Silent on failure (model no longer in catalog). */
-	private async restoreProjectModelForCwd(cwd: string): Promise<void> {
+	 *  the user switches via the picker. Silent on failure (model no longer in catalog).
+	 *
+	 *  Returns true when the active conversation's model was actually changed —
+	 *  callers that already emitted the switch snapshot flush again on true so
+	 *  the client's model chip catches up (see restoreProjectDefaults). */
+	private async restoreProjectModelForCwd(cwd: string): Promise<boolean> {
 		const savedModel = this.stateStore.getProjectModel(this.clientId, cwd);
-		if (!savedModel) return;
+		if (!savedModel) return false;
 		try {
-			if (this.conv.session.getSessionStats().totalMessages > 0) return;
+			if (this.conv.session.getSessionStats().totalMessages > 0) return false;
 		} catch {
-			return;
+			return false;
 		}
 		try {
 			const mr = this.runtime.services.modelRuntime;
 			const slash = savedModel.indexOf("/");
-			if (slash <= 0 || slash === savedModel.length - 1) return;
+			if (slash <= 0 || slash === savedModel.length - 1) return false;
 			const model = mr.getModel(savedModel.slice(0, slash), savedModel.slice(slash + 1));
-			if (!model) return;
+			if (!model) return false;
 			const cur = this.session.model;
 			const curId = cur ? `${cur.provider}/${cur.id}` : null;
 			// Restore the model's provider key first so setModel's auth check passes.
 			await this.restoreKeyForModel(savedModel, cwd);
-			if (curId === savedModel) return;
+			if (curId === savedModel) return false;
 			await this.session.setModel(model);
+			return true;
 		} catch {
 			// model no longer resolvable / key gone — keep the conversation default
+			return false;
 		}
+	}
+
+	/** Per-project restores that follow EVERY switch into a project (provider
+	 *  keys, then the remembered model). Both can await the model runtime, so
+	 *  they run AFTER the switch snapshot has gone out — the client shows the
+	 *  new conversation immediately and only the model chip trails. A second
+	 *  snapshot is flushed when the model actually changed; nothing else these
+	 *  restores touch is part of UiState. */
+	private async restoreProjectDefaults(cwd: string): Promise<void> {
+		await this.restoreProjectProviderKeysForCwd(cwd);
+		if (await this.restoreProjectModelForCwd(cwd)) this.flushSnapshot();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -2758,6 +2736,17 @@ export class ClientSession {
 		 */
 		queue = false,
 	): Promise<void> {
+		// A switch_session preview is on screen and its runtime is still
+		// booting: the conversation the user is typing into does not exist yet
+		// (UiState.booting). Refuse rather than deliver to the PREVIOUS chat.
+		if (this.bootingSwitches.size > 0) {
+			this.emit({
+				type: "notice",
+				level: "warning",
+				text: "The conversation is still opening — wait a moment and send again.",
+			});
+			return;
+		}
 		// Captured at the START (before any await): the conversation being
 		// addressed by this prompt. See the naming block below — a concurrent
 		// switch/new_chat while prompt() is in flight must never target a
@@ -3147,11 +3136,46 @@ export class ClientSession {
 		return join(this.stateStore.dataDir, "chats");
 	}
 
+	/**
+	 * New chat, optionally in another workspace (`cwd`; null = the projectless
+	 * chats folder). Two shapes:
+	 *
+	 * - the target already has an open conversation (or is the current
+	 *   workspace): switch there (set_cwd semantics) and then reuse / create
+	 *   the blank chat exactly as a plain new_chat would;
+	 * - the target has NO open conversation: boot the blank runtime directly
+	 *   in the new workspace (newChatInWorkspace). Going through set_cwd
+	 *   first would resume the project's most recent session — a full
+	 *   runtime — only to displace and dispose it a moment later for the
+	 *   blank one the user actually asked for.
+	 */
 	async newChat(cwd?: string | null): Promise<boolean> {
 		if (this.quiesceBlocked()) return false;
 		if (cwd !== undefined) {
-			const target = cwd === null ? this.projectlessCwd : resolve(cwd);
-			if (cwd === null) mkdirSync(target, { recursive: true });
+			let target: string | null;
+			if (cwd === null) {
+				target = this.projectlessCwd;
+				mkdirSync(target, { recursive: true });
+			} else {
+				try {
+					target = await this.resolveWorkspaceTarget(cwd);
+				} catch (err) {
+					this.emit({
+						type: "notice",
+						level: "error",
+						text: `Failed to switch directory: ${(err as Error).message}`,
+					});
+					target = null;
+				}
+				if (target === null) {
+					this.flushSnapshot();
+					return false;
+				}
+			}
+			const hasOpenConversation = [...this.convs.values()].some((c) => c.cwd === target);
+			if (target !== this.cwd && !hasOpenConversation) {
+				return this.newChatInWorkspace(target);
+			}
 			await this.setCwd(target);
 			if (this.cwd !== target) return false;
 		}
@@ -3246,6 +3270,69 @@ export class ClientSession {
 	}
 
 	/**
+	 * Blank chat in a workspace the client has no open conversation in: ONE
+	 * runtime (SessionManager.create) that is both the project switch and the
+	 * new chat. Mirrors set_cwd's project-switch side-effects (followWorkspace
+	 * / activateFreshConversation) and new_chat's bookkeeping (session-list
+	 * invalidation, model carry-over). The per-project cap cannot be hit here
+	 * — the project has zero open conversations by definition.
+	 */
+	private async newChatInWorkspace(abs: string): Promise<boolean> {
+		this.files.unwatchGit(); // stale repo's watcher must not fire across projects
+		// The outgoing conversation is left behind — apply the running-list
+		// lifecycle (removal is deferred until the new chat exists). Roll the
+		// presentation-only `listed` promotion back if the boot fails.
+		const outgoing = this.conv;
+		const oldListed = outgoing.listed;
+		const displaced = this.displaceActive();
+		// Carry the previously active chat's model over when the target project
+		// has no remembered model of its own (restoreProjectDefaults wins
+		// otherwise) — a blank runtime seeds with the ModelRuntime default.
+		const prevModel = outgoing.session.agent.state.model ?? null;
+		try {
+			const conversationId = this.nextConversationId();
+			const terminals = this.makeTerminalManager(conversationId, abs);
+			const runtime = await createAgentSessionRuntime(this.makeRuntimeFactory(terminals, conversationId), {
+				cwd: abs,
+				agentDir: this.agentDir,
+				sessionManager: SessionManager.create(abs),
+			});
+			await this.activateFreshConversation(this.makeConversation(runtime, conversationId, terminals), displaced);
+		} catch (err) {
+			outgoing.listed = oldListed;
+			this.emit({
+				type: "notice",
+				level: "error",
+				text: `Failed to create chat: ${(err as Error).message}`,
+			});
+			this.flushSnapshot();
+			return false;
+		}
+		// A fresh transcript appeared in the sessions dir — the next listing
+		// must see it, not the pre-newChat fridge snapshot.
+		this.invalidateSessionInfos();
+		this.followWorkspace(abs, true);
+		// Snapshot first, then the awaited restores (model chip may trail).
+		this.flushSnapshot();
+		await this.restoreProjectProviderKeysForCwd(abs);
+		let modelChanged = await this.restoreProjectModelForCwd(abs);
+		if (!modelChanged && prevModel && this.sharedModelRuntime) {
+			const cur = this.session.model;
+			if (!cur || cur.provider !== prevModel.provider || cur.id !== prevModel.id) {
+				try {
+					await this.session.setModel(prevModel);
+					await this.restoreKeyForModel(`${prevModel.provider}/${prevModel.id}`, abs);
+					modelChanged = true;
+				} catch {
+					// model no longer resolvable — keep the default
+				}
+			}
+		}
+		if (modelChanged) this.flushSnapshot();
+		return true;
+	}
+
+	/**
 	 * The active conversation is being left (new_chat / switch_conversation /
 	 * set_cwd). Runs the running-list lifecycle:
 	 *
@@ -3308,35 +3395,27 @@ export class ClientSession {
 		if (displaced) this.removeConversation(displaced.id);
 		this.conv.promptedSinceActive = false;
 		this.conv.lastActiveAt = Date.now();
-		this.webUi.refresh();
-		// Replay the switched-to conversation's OWN extension statuses (role
-		// footer). Without this, the client keeps showing the previous chat's
-		// role even though the tools/model belong to the new chat (issue #116).
-		this.pushActiveStatuses();
-		this.emitConversations();
-		this.pushTerminals();
-		// The switched-to conversation has its own runtime (own resource cache).
-		void this.pushSlashCommands();
 		if (cwdChanged) {
-			this.cwd = newCwd;
-			await this.restoreProjectProviderKeysForCwd(newCwd);
-			await this.restoreProjectModelForCwd(newCwd);
 			// Mirror set_cwd's project-switch side-effects so the whole UI follows
-			// the new workspace, not just the chat pane.
-			try {
-				this.onCwdChanged?.(newCwd);
-			} catch {
-				/* hook failure must not break the switch */
-			}
-			// Follow the chat's workspace, but don't promote it to a project —
-			// a CLI session from an arbitrary shell directory stays under Recents.
-			this.stateStore.remember(this.clientId, newCwd, false);
-			void this.pushProjects();
-			void this.refreshSessions();
-			void this.listFiles(undefined);
-			void this.listCommands();
+			// the new workspace, not just the chat pane. Follow the chat's
+			// workspace, but don't promote it to a project — a CLI session from
+			// an arbitrary shell directory stays under Recents.
+			this.followWorkspace(newCwd, false);
+		} else {
+			this.webUi.refresh();
+			// Replay the switched-to conversation's OWN extension statuses (role
+			// footer). Without this, the client keeps showing the previous chat's
+			// role even though the tools/model belong to the new chat (issue #116).
+			this.pushActiveStatuses();
+			this.emitConversations();
+			this.pushTerminals();
+			// The switched-to conversation has its own runtime (own resource cache).
+			void this.pushSlashCommands();
 		}
+		// The snapshot is what the user is waiting for — it goes out before the
+		// awaited per-project restores (which re-flush only if the model moved).
 		this.flushSnapshot();
+		if (cwdChanged) await this.restoreProjectDefaults(newCwd);
 	}
 
 	/** Push every running conversation across ALL projects to the client. The
@@ -3389,6 +3468,23 @@ export class ClientSession {
 	 * never pollutes or races the active cwd's fridge.
 	 */
 	private sessionInfosCache = new Map<string, { infos: SessionInfo[]; at: number }>();
+	/** `git worktree list` per repository, keyed by the folded path of EVERY
+	 *  checkout of that repository so sibling worktrees share one git call.
+	 *  Short TTL: pushProjects runs on each list_projects and after every
+	 *  project switch. */
+	private worktreeCache = new Map<string, { list: GitWorktree[]; at: number }>();
+	private static readonly WORKTREE_CACHE_TTL = 5000;
+
+	private async repoWorktrees(dir: string): Promise<GitWorktree[]> {
+		const now = Date.now();
+		const c = this.worktreeCache.get(cwdKey(dir));
+		if (c && now - c.at < ClientSession.WORKTREE_CACHE_TTL) return c.list;
+		const list = (await listWorktrees(dir)).filter((w) => !w.prunable && !w.bare);
+		const entry = { list, at: now };
+		this.worktreeCache.set(cwdKey(dir), entry);
+		for (const w of list) this.worktreeCache.set(cwdKey(w.path), entry);
+		return list;
+	}
 
 	/** Folded cwd key → the spelling the sidebar groups under. Transcripts can
 	 *  store a cwd in another case (`c:\...` from a CLI run); listings and
@@ -3458,6 +3554,107 @@ export class ClientSession {
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: sorted });
 		} catch {
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: [] });
+		}
+	}
+
+	/**
+	 * Create (or reuse) the worktree for `branch` and open a blank chat in it.
+	 * The chat is an ordinary conversation whose cwd is the worktree, so every
+	 * tool, terminal and delegated worker of that chat runs there — the main
+	 * checkout is never touched. A worktree that was created but whose chat
+	 * failed to open is kept and its path reported, as in the CLI.
+	 */
+	async addWorktree(cwd?: string, branch?: string): Promise<void> {
+		if (this.quiesceBlocked()) return;
+		const dir = cwd ? resolve(cwd) : this.cwd;
+		const name = (branch ?? "").trim() || generateWorktreeName();
+		let created: { path: string; branch: string; existed: boolean };
+		try {
+			created = await createWorktree(dir, name);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.emit({ type: "worktree_result", op: "add", ok: false, path: dir, branch: name, error: message });
+			this.emit({ type: "notice", level: "error", text: `Could not create worktree ${name}: ${message}` });
+			return;
+		}
+		this.worktreeCache.clear();
+		const opened = await this.newChat(created.path);
+		this.emit({ type: "worktree_result", op: "add", ok: opened, path: created.path, branch: created.branch });
+		if (!opened) {
+			this.emit({
+				type: "notice",
+				level: "warning",
+				text: `Worktree ${created.branch} is ready at ${created.path}, but no chat was opened there. Open it from the sidebar.`,
+			});
+		}
+		void this.pushProjects();
+	}
+
+	/**
+	 * Remove a linked worktree (branch kept). Idle chats open in it are closed
+	 * first — their runtimes hold the directory open, which on Windows makes
+	 * the delete fail — and the active chat moves to another conversation or
+	 * to a blank chat in the main checkout. A streaming chat or one with live
+	 * terminals refuses, like dismiss_conversation does.
+	 */
+	async removeWorktree(path: string, force = false): Promise<void> {
+		if (this.quiesceBlocked()) return;
+		const target = resolve(path);
+		const refuse = (error: string) => {
+			this.emit({ type: "worktree_result", op: "remove", ok: false, path: target, error });
+			this.emit({ type: "notice", level: "warning", text: error });
+		};
+		const inTarget = [...this.convs.values()].filter((c) => sameWorktreePath(c.cwd, target));
+		for (const c of inTarget) {
+			let streaming = true;
+			try {
+				streaming = c.session.isStreaming;
+			} catch {
+				/* runtime being replaced — treat as busy */
+			}
+			if (streaming) return refuse(`Chat "${c.title}" is still running in this worktree — stop it before removing`);
+			if (c.terminals.countLive() > 0) {
+				return refuse(`Chat "${c.title}" still has open terminals in this worktree — close them before removing`);
+			}
+		}
+		if (inTarget.some((c) => c.id === this.activeId)) {
+			const other = [...this.convs.values()].find((c) => c.listed && !sameWorktreePath(c.cwd, target));
+			if (other) {
+				await this.switchConversation(other.id);
+			} else {
+				const main = (await listWorktrees(target))[0]?.path;
+				if (!main || !(await this.newChat(main))) {
+					return refuse("Could not move the active chat out of the worktree; it was not removed");
+				}
+			}
+			if (inTarget.some((c) => c.id === this.activeId)) {
+				return refuse("Could not move the active chat out of the worktree; it was not removed");
+			}
+		}
+		const branch = (await listWorktrees(target)).find((w) => sameWorktreePath(w.path, target))?.branch ?? undefined;
+		try {
+			// Dirty check before closing chats, so a refused removal leaves the
+			// user's open chats exactly where they were.
+			if (!force && (await worktreeIsDirty(target))) throw new WorktreeError("uncommitted changes", true);
+			for (const c of inTarget) this.removeConversation(c.id);
+			if (inTarget.length > 0) this.emitConversations();
+			const removed = await removeWorktree(target, force);
+			this.worktreeCache.clear();
+			this.emit({ type: "worktree_result", op: "remove", ok: true, path: target, branch: removed.branch ?? undefined });
+			this.emit({
+				type: "notice",
+				level: "info",
+				text: `Removed worktree ${removed.branch ?? target} (branch kept)`,
+			});
+			// Its history rows still show under the project; the transcripts
+			// stay on disk and can be reopened (the chat then runs in a cwd
+			// that no longer exists — pi's own resume rules apply).
+			void this.pushProjects();
+		} catch (err) {
+			const dirty = err instanceof WorktreeError && err.dirty;
+			const message = err instanceof Error ? err.message : String(err);
+			this.emit({ type: "worktree_result", op: "remove", ok: false, path: target, branch, dirty, error: message });
+			if (!dirty) this.emit({ type: "notice", level: "error", text: `Could not remove worktree: ${message}` });
 		}
 	}
 
@@ -3761,6 +3958,63 @@ export class ClientSession {
 		});
 	}
 
+	/**
+	 * Transcript-first preview for switch_session: serialize the opened
+	 * transcript through a fresh SerializeCache (no runtime needed — the
+	 * serializer is pure) and emit a `snapshot` flagged `booting: true` for the
+	 * conversation id the boot will use. Server state is untouched: activeId,
+	 * cwd and the convs map still describe the previous conversation; only
+	 * the client's view moves ahead.
+	 *
+	 * Rev semantics: the preview consumes one snapRev like any snapshot, and
+	 * it invalidates the delta baseline (emittedMessages = null) so whatever
+	 * snapshot follows — the real one for this conversation, or the fallback
+	 * to the previous conversation after a failed boot — is a FULL snapshot,
+	 * never a delta whose baseRev the client cannot satisfy.
+	 *
+	 * Returns the cache so the Conversation record adopts it: the real
+	 * snapshot then reuses the preview's message ids and object references.
+	 */
+	private emitSessionPreview(
+		sessionManager: SessionManager,
+		conversationId: string,
+		sessionFile: string,
+	): SerializeCache {
+		const cache = newSerializeCache();
+		try {
+			const ctx = sessionManager.buildSessionContext();
+			const messages = serializeTranscript(cache, ctx.messages);
+			let totalMessages = 0;
+			for (const e of sessionManager.getEntries()) if (e.type === "message") totalMessages++;
+			const rev = ++this.snapRev;
+			this.emittedMessages = null;
+			this.emittedConvId = null;
+			this.emittedRev = rev;
+			this.emit({
+				type: "snapshot",
+				state: buildPreviewState({
+					clientId: this.clientId,
+					cwd: sessionManager.getCwd(),
+					sessionId: sessionManager.getSessionId(),
+					sessionFile,
+					conversationId,
+					rev,
+					version: ++this.version,
+					messages,
+					totalMessages,
+					model: ctx.model,
+					thinkingLevel: ctx.thinkingLevel,
+					piConfigured: this.isPiConfigured(),
+					piAgentInstalled: this.isPiCliInstalled(),
+				}),
+			});
+		} catch {
+			// The preview is an optimisation only — a transcript the serializer
+			// chokes on still opens through the runtime below.
+		}
+		return cache;
+	}
+
 	/** Open a persisted session as the active conversation (from listSessions).
 	 *
 	 * A persisted-session click must follow the same ownership rule as
@@ -3768,11 +4022,19 @@ export class ClientSession {
 	 * runtime. AgentSessionRuntime.switchSession() tears down (and aborts) the
 	 * current runtime, which would otherwise stop a response merely because the
 	 * user opened history while it was streaming.
+	 *
+	 * Event sequence: (1) if the session is already open → switch_conversation;
+	 * otherwise (2) a `booting` preview snapshot built from the transcript alone
+	 * (emitSessionPreview), (3) the ~1s runtime boot, (4) the real full snapshot
+	 * for the same conversation id. A refused (cap) or failed boot ends with a
+	 * notice and a full snapshot of the still-active conversation instead, so
+	 * the client falls back. Prompts are refused between (2) and (4).
 	 */
 	async switchSession(path: string): Promise<void> {
 		if (this.quiesceBlocked()) return;
 		let openedRuntime: AgentSessionRuntime | null = null;
 		let openedTerminals: TerminalManager | null = null;
+		let bootingId: string | null = null;
 		try {
 			const targetPath = resolve(path);
 
@@ -3789,6 +4051,10 @@ export class ClientSession {
 			const sessionManager = SessionManager.open(targetPath);
 			const targetCwd = sessionManager.getCwd();
 			const conversationId = this.nextConversationId();
+			// Show the transcript now; the runtime catches up below.
+			const cache = this.emitSessionPreview(sessionManager, conversationId, targetPath);
+			bootingId = conversationId;
+			this.bootingSwitches.add(conversationId);
 			openedTerminals = this.makeTerminalManager(conversationId, targetCwd);
 			openedRuntime = await createAgentSessionRuntime(this.makeRuntimeFactory(openedTerminals, conversationId), {
 				cwd: targetCwd,
@@ -3819,7 +4085,7 @@ export class ClientSession {
 				return;
 			}
 
-			const conv = this.makeConversation(openedRuntime, conversationId, openedTerminals);
+			const conv = this.makeConversation(openedRuntime, conversationId, openedTerminals, cache);
 			// Deliberately resumed — must not be dismissed when the user later
 			// switches away without sending a new message.
 			conv.promptedSinceActive = true;
@@ -3830,8 +4096,6 @@ export class ClientSession {
 			if (displaced) this.removeConversation(displaced.id);
 			await this.bindSession();
 			this.cwd = targetCwd;
-			await this.restoreProjectProviderKeysForCwd(targetCwd);
-			await this.restoreProjectModelForCwd(targetCwd);
 			this.conv.lastActiveAt = Date.now();
 			this.webUi.refresh();
 			// Replay the resumed conversation's own statuses (role footer).
@@ -3840,6 +4104,13 @@ export class ClientSession {
 			this.pushTerminals();
 			// The restored conversation has a fresh project-bound resource cache.
 			void this.pushSlashCommands();
+			// The conversation exists now — lift the prompt guard BEFORE the real
+			// snapshot goes out, then the awaited restores (model chip may trail).
+			this.bootingSwitches.delete(conversationId);
+			bootingId = null;
+			this.flushSnapshot(true);
+			await this.restoreProjectDefaults(targetCwd);
+			return;
 		} catch (err) {
 			openedTerminals?.killAll();
 			if (openedRuntime) await openedRuntime.dispose().catch(() => {});
@@ -3848,8 +4119,13 @@ export class ClientSession {
 				level: "error",
 				text: `Failed to switch session: ${(err as Error).message}`,
 			});
+		} finally {
+			if (bootingId !== null) this.bootingSwitches.delete(bootingId);
 		}
-		this.flushSnapshot();
+		// Refused or failed after a preview: the client is looking at a
+		// conversation that never came to be — hand it the active one back,
+		// as a full snapshot (the preview invalidated the delta baseline).
+		this.flushSnapshot(true);
 	}
 
 	/**
@@ -3959,17 +4235,21 @@ export class ClientSession {
 	 * Push the project list. A directory is a project when this client opened
 	 * it explicitly (picker / set_cwd / launch cwd) OR it is a git repository
 	 * root that has sessions — a repo you only ever ran the pi CLI in is still
-	 * a project. Anything else with sessions (a shell's default cwd like
-	 * system32 or $HOME, the projectless chats dir, deleted workspaces) is not
-	 * promoted; those listings are pushed right after so the sidebar can show
-	 * them flat under "Recents".
+	 * a project. A linked git worktree is never a project of its own: it is
+	 * folded into its repository's MAIN checkout and listed in that project's
+	 * `worktrees`, so chats run in `~/.pi/worktrees/<repo>/<branch>` sit under
+	 * `<repo>` with a branch badge instead of forming a look-alike sibling.
+	 * Anything else with sessions (a shell's default cwd like system32 or
+	 * $HOME, the projectless chats dir, deleted workspaces) is not promoted;
+	 * those listings are pushed right after so the sidebar can show them flat
+	 * under "Recents".
 	 */
 	async pushProjects(): Promise<void> {
 		try {
 			const saved = this.stateStore.get(this.clientId);
 			const removedKeys = new Set(this.stateStore.getRemovedProjects(this.clientId).map(cwdKey));
-			const map = new Map<string, number>();
-			for (const p of saved.projects) map.set(p.path, p.lastUsed);
+			const savedLastUsed = new Map<string, number>();
+			for (const p of saved.projects) savedLastUsed.set(cwdKey(p.path), p.lastUsed);
 			// Newest session per cwd across the whole store (one scan). Spellings
 			// that differ only by case fold into one entry (the saved project's
 			// spelling wins, else the first seen): on Windows they are the same
@@ -3978,45 +4258,96 @@ export class ClientSession {
 			const canonical = new Map<string, string>();
 			for (const p of saved.projects) canonical.set(cwdKey(p.path), p.path);
 			canonical.set(cwdKey(this.cwd), this.cwd);
-			const latestByCwd = new Map<string, number>();
+			const spelling = (path: string): string => {
+				const key = cwdKey(path);
+				let known = canonical.get(key);
+				if (known === undefined) {
+					known = path;
+					canonical.set(key, known);
+				}
+				return known;
+			};
+			const latestByKey = new Map<string, number>();
 			for (const s of await SessionManager.listAll(piSessionsRoot())) {
 				if (!s.cwd) continue;
-				const key = cwdKey(s.cwd);
-				let cwd = canonical.get(key);
-				if (cwd === undefined) {
-					cwd = s.cwd;
-					canonical.set(key, cwd);
-				}
+				const key = cwdKey(spelling(s.cwd));
 				const t = s.modified.getTime();
-				const prev = latestByCwd.get(cwd);
-				if (prev === undefined || t > prev) latestByCwd.set(cwd, t);
+				const prev = latestByKey.get(key);
+				if (prev === undefined || t > prev) latestByKey.set(key, t);
 			}
 			this.canonicalCwd = canonical;
-			for (const [cwd, t] of latestByCwd) {
-				if (map.has(cwd)) {
-					if (t > (map.get(cwd) ?? 0)) map.set(cwd, t);
-				} else if (isRepoRoot(cwd)) {
-					map.set(cwd, t);
+
+			// Group candidates by repository. A repo root (main or linked
+			// checkout) resolves to its `git worktree list`; the first entry is
+			// the main checkout and becomes the project.
+			interface Group {
+				path: string;
+				lastUsed: number;
+				worktrees: GitWorktree[] | null;
+			}
+			const groups = new Map<string, Group>();
+			const bump = (g: Group, t: number) => {
+				if (t > g.lastUsed) g.lastUsed = t;
+			};
+			const candidates = new Set<string>([...savedLastUsed.keys(), ...latestByKey.keys()]);
+			for (const key of candidates) {
+				const path = canonical.get(key) ?? key;
+				if (path === this.projectlessCwd) continue;
+				const t = Math.max(savedLastUsed.get(key) ?? 0, latestByKey.get(key) ?? 0);
+				if (isRepoRoot(path)) {
+					const list = await this.repoWorktrees(path);
+					const main = list.length > 0 ? spelling(list[0].path) : path;
+					const mainKey = cwdKey(main);
+					let g = groups.get(mainKey);
+					if (!g) {
+						g = { path: main, lastUsed: 0, worktrees: list.length > 0 ? list : null };
+						groups.set(mainKey, g);
+					}
+					bump(g, t);
+				} else if (savedLastUsed.has(key)) {
+					let g = groups.get(key);
+					if (!g) {
+						g = { path, lastUsed: 0, worktrees: null };
+						groups.set(key, g);
+					}
+					bump(g, t);
 				}
 			}
+
 			// Only keep directories that still exist — a deleted/unmounted workspace
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
-			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => path !== this.projectlessCwd && !removedKeys.has(cwdKey(path)) && existsSync(path))
-				.map(([path, lastUsed]) => ({ path, lastUsed }))
+			const projects: ProjectSummary[] = [...groups.values()]
+				.filter((g) => !removedKeys.has(cwdKey(g.path)) && existsSync(g.path))
+				.map((g) => {
+					const worktrees = g.worktrees
+						?.filter((w) => existsSync(w.path))
+						.map((w, i) => ({
+							path: spelling(w.path),
+							branch: w.branch,
+							head: w.head.slice(0, 8),
+							isMain: i === 0,
+							locked: w.locked,
+							managed: isManagedWorktree(w.path),
+						}));
+					return worktrees ? { path: g.path, lastUsed: g.lastUsed, worktrees } : { path: g.path, lastUsed: g.lastUsed };
+				})
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
 			this.emit({ type: "projects", projects });
 
 			// Detached chats: every other cwd that has sessions, most recently
 			// touched first, capped so a long CLI history can't flood the panel.
-			const known = new Set(projects.map((p) => cwdKey(p.path)));
-			const detached = [...latestByCwd.entries()]
-				.filter(([cwd]) => !known.has(cwdKey(cwd)) && !removedKeys.has(cwdKey(cwd)))
+			const known = new Set<string>();
+			for (const p of projects) {
+				known.add(cwdKey(p.path));
+				for (const w of p.worktrees ?? []) known.add(cwdKey(w.path));
+			}
+			const detached = [...latestByKey.entries()]
+				.filter(([key]) => !known.has(key) && !removedKeys.has(key))
 				.sort((a, b) => b[1] - a[1])
 				.slice(0, ClientSession.RECENT_CWD_CAP)
-				.map(([cwd]) => cwd);
+				.map(([key]) => canonical.get(key) ?? key);
 			if (!detached.includes(this.projectlessCwd)) detached.push(this.projectlessCwd);
 			for (const cwd of detached) await this.refreshSessions(cwd);
 		} catch {
@@ -4122,31 +4453,98 @@ export class ClientSession {
 		return this.files.completePath(input);
 	}
 
+	/**
+	 * Resolve + validate a workspace target typed / clicked by the user. Returns
+	 * the absolute directory, or null after emitting the guidance notice for
+	 * the virtual machine root. Throws (caller reports) when the path is not a
+	 * directory. Shared by set_cwd and new_chat(cwd) so both apply the same
+	 * MACHINE_ROOT / bare-drive rules.
+	 */
+	private async resolveWorkspaceTarget(newCwd: string): Promise<string | null> {
+		const fs = await import("node:fs/promises");
+		const trimmed = newCwd.trim();
+		if (trimmed === MACHINE_ROOT) {
+			// 机器根是虚拟层（盘符列表），不能作工作目录——指引用户选具体目录。
+			this.emit({
+				type: "notice",
+				level: "warning",
+				text: "Pick a concrete directory as the workspace (This PC itself is not a directory)",
+			});
+			return null;
+		}
+		// Windows 裸盘符（"C:"）：resolve 会按该盘当前目录解析，必须显式指到盘根；
+		// 仅 win32 生效——posix 下 "C:" 仍是普通相对路径，避免误伤同名目录。
+		const abs =
+			process.platform === "win32" && /^[A-Za-z]:$/.test(trimmed) ? `${trimmed.toUpperCase()}${sep}` : resolve(trimmed);
+		const st = await fs.stat(abs);
+		if (!st.isDirectory()) {
+			throw new Error("路径不是目录");
+		}
+		return abs;
+	}
+
+	/**
+	 * Everything a project switch does once a conversation of `abs` is ACTIVE
+	 * (set_cwd, new_chat(cwd) into a project with no open chat, and the
+	 * cross-project branch of switch_conversation). Synchronous: the snapshot
+	 * the caller flushes right after this is the one the user is waiting for;
+	 * the awaited per-project restores follow it (restoreProjectDefaults).
+	 *
+	 * `asProject` false only records the restore target (see
+	 * ClientStateStore.remember): a chat whose cwd is a random shell directory
+	 * must not become a sidebar project.
+	 */
+	private followWorkspace(abs: string, asProject: boolean): void {
+		this.cwd = abs;
+		// 工作区跟随型插件（编辑器文件树等）同步切根。
+		try {
+			this.onCwdChanged?.(abs);
+		} catch {
+			/* 钩子异常不影响主流程 */
+		}
+		// Remember the new workspace (restore target + recent-project entry).
+		this.stateStore.remember(this.clientId, abs, asProject);
+		void this.pushProjects();
+		this.webUi.refresh();
+		// Project switch also switches the active conversation — replay its
+		// own statuses so the role footer follows (issue #116).
+		this.pushActiveStatuses();
+		this.emitConversations();
+		this.pushTerminals();
+		// Skills / prompt templates are project-bound — refresh the catalog.
+		void this.pushSlashCommands();
+		void this.refreshSessions();
+		void this.listFiles(undefined);
+		// Commands are per-project (.pi/commands.json in the current cwd).
+		void this.listCommands();
+	}
+
+	/**
+	 * Make a freshly booted runtime the active conversation of a project the
+	 * client has no open chat in yet (set_cwd resumes the project's most
+	 * recent session, new_chat(cwd) creates a blank one — same bookkeeping).
+	 * `displaced` is the outgoing active conversation when displaceActive()
+	 * said to drop it; removal happens only now that the replacement exists.
+	 */
+	private async activateFreshConversation(conv: Conversation, displaced: Conversation | null): Promise<void> {
+		this.convs.set(conv.id, conv);
+		this.activeId = conv.id;
+		if (displaced) this.removeConversation(displaced.id);
+		for (const d of conv.runtime.diagnostics) {
+			if (d.type !== "info") {
+				this.emit({ type: "notice", level: d.type, text: d.message });
+			}
+		}
+		await this.bindSession();
+		conv.promptedSinceActive = false;
+		conv.lastActiveAt = Date.now();
+	}
+
 	async setCwd(newCwd: string): Promise<void> {
 		try {
-			const { resolve, sep } = await import("node:path");
 			this.files.unwatchGit(); // stale repo's watcher must not fire across projects
-			const fs = await import("node:fs/promises");
-			const trimmed = newCwd.trim();
-			if (trimmed === MACHINE_ROOT) {
-				// 机器根是虚拟层（盘符列表），不能作工作目录——指引用户选具体目录。
-				this.emit({
-					type: "notice",
-					level: "warning",
-					text: "Pick a concrete directory as the workspace (This PC itself is not a directory)",
-				});
-				return;
-			}
-			// Windows 裸盘符（"C:"）：resolve 会按该盘当前目录解析，必须显式指到盘根；
-			// 仅 win32 生效——posix 下 "C:" 仍是普通相对路径，避免误伤同名目录。
-			const abs =
-				process.platform === "win32" && /^[A-Za-z]:$/.test(trimmed)
-					? `${trimmed.toUpperCase()}${sep}`
-					: resolve(trimmed);
-			const st = await fs.stat(abs);
-			if (!st.isDirectory()) {
-				throw new Error("路径不是目录");
-			}
+			const abs = await this.resolveWorkspaceTarget(newCwd);
+			if (abs === null) return;
 			if (abs === this.cwd) {
 				this.stateStore.remember(this.clientId, abs);
 				void this.pushProjects();
@@ -4172,6 +4570,8 @@ export class ClientSession {
 			if (target) {
 				this.activeId = target.id;
 				if (displaced) this.removeConversation(displaced.id);
+				target.promptedSinceActive = false;
+				target.lastActiveAt = Date.now();
 			} else {
 				// First visit to this project: resume its most recent session.
 				const conversationId = this.nextConversationId();
@@ -4181,44 +4581,14 @@ export class ClientSession {
 					agentDir: this.agentDir,
 					sessionManager: SessionManager.continueRecent(abs),
 				});
-				const conv = this.makeConversation(newRuntime, conversationId, terminals);
-				this.convs.set(conv.id, conv);
-				this.activeId = conv.id;
-				if (displaced) this.removeConversation(displaced.id);
-				for (const d of newRuntime.diagnostics) {
-					if (d.type !== "info") {
-						this.emit({ type: "notice", level: d.type, text: d.message });
-					}
-				}
-				await this.bindSession();
+				await this.activateFreshConversation(this.makeConversation(newRuntime, conversationId, terminals), displaced);
 			}
 
-			this.pushTerminals();
-			this.conv.promptedSinceActive = false;
-			this.conv.lastActiveAt = Date.now();
-			this.cwd = abs;
-			await this.restoreProjectProviderKeysForCwd(abs);
-			await this.restoreProjectModelForCwd(abs);
-			// 工作区跟随型插件（编辑器文件树等）同步切根。
-			try {
-				this.onCwdChanged?.(abs);
-			} catch {
-				/* 钩子异常不影响主流程 */
-			}
-			// Remember the new workspace (restore target + recent-project entry).
-			this.stateStore.remember(this.clientId, abs);
-			void this.pushProjects();
-			this.webUi.refresh();
-			// Project switch also switches the active conversation — replay its
-			// own statuses so the role footer follows (issue #116).
-			this.pushActiveStatuses();
-			this.emitConversations();
-			// Skills / prompt templates are project-bound — refresh the catalog.
-			void this.pushSlashCommands();
-			void this.refreshSessions();
-			void this.listFiles(undefined);
-			// Commands are per-project (.pi/commands.json in the current cwd).
-			void this.listCommands();
+			this.followWorkspace(abs, true);
+			// Snapshot first, then the awaited restores (model chip may trail).
+			this.flushSnapshot();
+			await this.restoreProjectDefaults(abs);
+			return;
 		} catch (err) {
 			this.emit({
 				type: "notice",

@@ -107,6 +107,15 @@ export interface UiState {
 	rev: number;
 	messages: UiMessage[];
 	/**
+	 * Transcript-first preview: this snapshot was built from the session file
+	 * alone (switch_session) while the conversation's runtime is still
+	 * starting, so `messages` are final but model/thinking/tools/commands are
+	 * placeholders and prompts are not accepted yet. The real snapshot for the
+	 * same conversationId (without this flag) replaces it; a failed boot is
+	 * followed by a snapshot of the previous conversation plus a notice.
+	 */
+	booting?: boolean;
+	/**
 	 * Live partial assistant message while a run is streaming. The SDK keeps the
 	 * in-progress message in agent.state.streamingMessage — it only enters
 	 * `messages` once the turn finishes (message_end). Null when idle.
@@ -554,6 +563,17 @@ export type ClientMessage =
 	/** Drop one workspace from this client's recent-project list (UI state
 	 *  only — nothing on disk is touched). */
 	| { type: "remove_project"; path: string }
+	/** Check `branch` out as a linked worktree of the repository containing
+	 *  `cwd` (any checkout of it; omitted = the active cwd) under
+	 *  `~/.pi/worktrees/<repo>/<slug>`, then open a blank chat there — the
+	 *  same fresh-session-in-the-worktree the CLI's `/worktree add` does. An
+	 *  existing checkout of the branch is reused. `branch` omitted = a
+	 *  generated name. Answered with worktree_result. */
+	| { type: "worktree_add"; cwd?: string; branch?: string }
+	/** Remove a linked worktree directory (its branch is kept). Refused while
+	 *  an open conversation runs in it. Without `force`, a worktree with
+	 *  uncommitted changes answers worktree_result{dirty:true} instead. */
+	| { type: "worktree_remove"; path: string; force?: boolean }
 	/** Permanently delete a persisted session transcript file (history list). */
 	| { type: "delete_session"; path: string }
 	/** Append a session_info name entry to a persisted session transcript (history rename). */
@@ -607,10 +627,34 @@ export interface SessionSearchResult extends SessionSummary {
  * <dataDir>/client-state.json, merged with cwds found in the session store).
  */
 export interface ProjectSummary {
-	/** Absolute path of the workspace directory. */
+	/** Absolute path of the workspace directory. For a git repository this is
+	 *  the MAIN checkout: linked worktrees of the same repository are listed in
+	 *  `worktrees`, never as projects of their own. */
 	path: string;
-	/** Last time this workspace was used (ms epoch) — drives the sort order. */
+	/** Last time this workspace was used (ms epoch) — drives the sort order.
+	 *  For a repository, the newest across all of its checkouts. */
 	lastUsed: number;
+	/** Every checkout of the repository, main first. Chats and sessions whose
+	 *  cwd is one of these paths belong to this project; non-main entries get
+	 *  a branch badge. Omitted for non-git directories. */
+	worktrees?: WorktreeSummary[];
+}
+
+/** One checkout of a project's repository (see ProjectSummary.worktrees). */
+export interface WorktreeSummary {
+	/** Absolute checkout path (the cwd chats in it run under). */
+	path: string;
+	/** Checked-out branch; null when detached. */
+	branch: string | null;
+	/** Short HEAD hash — the label for a detached checkout. */
+	head: string;
+	/** The repository's main checkout (== ProjectSummary.path). */
+	isMain: boolean;
+	/** Locked by `git worktree lock` (or by a running agent). */
+	locked: boolean;
+	/** Lives under the managed `~/.pi/worktrees/<repo>/<slug>` layout the
+	 *  CLI's /worktree command and this UI create. */
+	managed: boolean;
 }
 
 /** 一个可选项：模型的 ask_user_question 问卷选项。preview 为选项被选中后
@@ -1075,6 +1119,18 @@ export type ServerMessage =
 			results: SessionSearchResult[];
 	  }
 	| { type: "projects"; projects: ProjectSummary[] }
+	/** Outcome of worktree_add / worktree_remove. */
+	| {
+			type: "worktree_result";
+			op: "add" | "remove";
+			ok: boolean;
+			/** Checkout path (the created/reused one for add; the target for remove). */
+			path: string;
+			branch?: string;
+			/** remove only: refused because of uncommitted changes — retry with force. */
+			dirty?: boolean;
+			error?: string;
+	  }
 	| {
 			type: "files";
 			path: string;

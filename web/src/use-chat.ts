@@ -29,12 +29,22 @@ import type {
 	UiWorkerTranscript,
 } from "./types";
 
+/** The payload of a `worktree_result` server message. */
+export type WorktreeResult = Extract<ServerMessage, { type: "worktree_result" }>;
+
 import { applyMessageDelta, type MessageDeltaMsg } from "./message-delta";
 import { resolvePendingQuestion, type QuestionSource } from "./pending-question";
 import { cwdKey } from "./components/left-panel-nav";
 import { setAppGlobals, setAppSend } from "./app-globals";
 import { setWorkers } from "./workers-store";
 import { PROTOCOL_VERSION } from "./protocol-version";
+import {
+	OPTIMISTIC_TIMEOUT_MS,
+	cacheSnapshot,
+	pruneSnapshots,
+	sendBlocked,
+	syntheticNewChat,
+} from "./conversation-view";
 
 export type ConnStatus = "connecting" | "open" | "closed";
 
@@ -87,6 +97,10 @@ export interface ChatState {
 	activeConversationId: string;
 	/** Recent workspaces this client opened (left panel project picker). */
 	projects: ProjectSummary[];
+	/** Latest worktree_add / worktree_remove outcome (monotonic `seq` so a
+	 *  repeat of the same outcome is still observed). Consumed by the left
+	 *  panel (dirty-removal confirm) and the composer (creating state). */
+	worktreeResult: (WorktreeResult & { seq: number }) | null;
 	/** Workspace file listing for the right panel. */
 	files: FileListing | null;
 	/** Latest file content fetched for the preview panel (path-matched in the modal). */
@@ -190,9 +204,21 @@ export interface ChatState {
 	 *  (open_worker → worker_transcript pushes), keyed by worker id. Scoped to
 	 *  the ACTIVE conversation: cleared whenever the snapshot switches chats. */
 	workerTranscripts: Map<number, UiWorkerTranscript>;
+	/** Client-only: a new chat was requested and the server has not answered
+	 *  yet. `view` is the synthetic empty UiState App renders meanwhile (see
+	 *  conversation-view.ts for the whole state machine); `seq` lets the
+	 *  safety timeout tell one request from the next. */
+	optimisticNewChat: { cwd: string | null; view: UiState; seq: number } | null;
+	/** Client-only: conversation the user switched to; its cached snapshot
+	 *  (if any) is already displayed while the server's snapshot is on its
+	 *  way. Sends are blocked until then. */
+	switchPending: string | null;
+	/** Latest snapshot per open conversation (LRU, newest last) — the instant
+	 *  view on switch and the state fed to the kept-mounted message lists. */
+	snapshotsById: Map<string, UiState>;
 }
 
-type Action =
+export type ChatAction =
 	| { type: "status"; status: ConnStatus }
 	| { type: "snapshot"; state: UiState }
 	| { type: "snapshot_delta"; msg: Extract<ServerMessage, { type: "snapshot_delta" }> }
@@ -218,6 +244,7 @@ type Action =
 			activeId: string;
 	  }
 	| { type: "projects"; projects: ProjectSummary[] }
+	| { type: "worktree_result"; result: WorktreeResult }
 	| { type: "files"; files: FileListing }
 	| { type: "file_changed"; path: string }
 	| { type: "file_content"; content: FileContent }
@@ -286,7 +313,11 @@ type Action =
 	| { type: "terminal_list"; conversationId?: string; terminals: TerminalInfo[] }
 	| { type: "terminal_active"; id: string }
 	| { type: "settings"; settings: UiSettingsState }
-	| { type: "bg_servers"; servers: BgServer[] };
+	| { type: "bg_servers"; servers: BgServer[] }
+	| { type: "optimistic_new_chat"; cwd: string | null }
+	| { type: "optimistic_timeout"; seq: number }
+	| { type: "switch_conversation"; id: string }
+	| { type: "switch_timeout"; id: string };
 
 const MAX_LIVE_OUTPUT = 200_000;
 const MAX_TERM_BUFFER = 200_000;
@@ -404,7 +435,8 @@ function pruneToolStatuses(statuses: Map<string, ToolStatus>, state: UiState): M
 	return changed ? new Map(statuses) : statuses;
 }
 
-function reducer(state: ChatState, action: Action): ChatState {
+/** Exported for the unit tests (pure; StrictMode double-invokes it). */
+export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 	switch (action.type) {
 		case "status":
 			return {
@@ -440,6 +472,12 @@ function reducer(state: ChatState, action: Action): ChatState {
 				// re-opens the selected one after the switch.
 				workerTranscripts:
 					state.state?.conversationId === action.state.conversationId ? state.workerTranscripts : new Map(),
+				// Any snapshot settles a pending click: the server switched (new
+				// chat / target conversation) or re-snapshotted the old one after
+				// a failure — either way what it sent is what we show.
+				optimisticNewChat: null,
+				switchPending: null,
+				snapshotsById: cacheSnapshot(state.snapshotsById, action.state),
 			};
 		case "snapshot_delta": {
 			// Incremental checkpoint from the server. Apply ONLY when it chains
@@ -450,7 +488,19 @@ function reducer(state: ChatState, action: Action): ChatState {
 			// light fields replace wholesale.
 			const ui = state.state;
 			const d = action.msg;
-			if (!ui || ui.conversationId !== d.conversationId || ui.rev !== d.baseRev) return state;
+			if (!ui || ui.conversationId !== d.conversationId || ui.rev !== d.baseRev) {
+				// Not the displayed conversation (a switch is in flight and the
+				// server still streams the old one): keep its cache entry fresh
+				// when the delta chains onto it, so switching back is exact.
+				const cached = state.snapshotsById.get(d.conversationId);
+				if (!cached || cached.rev !== d.baseRev) return state;
+				const mergedCached: UiState = {
+					...cached,
+					...d.state,
+					messages: d.appended.length > 0 ? [...cached.messages, ...d.appended] : cached.messages,
+				};
+				return { ...state, snapshotsById: cacheSnapshot(state.snapshotsById, mergedCached) };
+			}
 			const merged: UiState = {
 				...ui,
 				...d.state,
@@ -463,8 +513,55 @@ function reducer(state: ChatState, action: Action): ChatState {
 				activeConversationId: merged.conversationId,
 				liveOutputs: pruneLiveOutputs(state.liveOutputs, merged),
 				toolStatuses: pruneToolStatuses(state.toolStatuses, merged),
+				snapshotsById: cacheSnapshot(state.snapshotsById, merged),
 			};
 		}
+		case "optimistic_new_chat": {
+			// Empty chat NOW; the server's snapshot (success: the new chat,
+			// failure: the old one + a notice) clears it. Nothing to derive from
+			// before the first snapshot — the boot-wait placeholder stays.
+			const view = syntheticNewChat(state.state, action.cwd);
+			if (!view) return state;
+			return {
+				...state,
+				optimisticNewChat: { cwd: action.cwd, view, seq: (state.optimisticNewChat?.seq ?? 0) + 1 },
+				switchPending: null,
+				// Sidebar: nothing active until the server names the new chat.
+				activeConversationId: "",
+			};
+		}
+		case "optimistic_timeout":
+			if (!state.optimisticNewChat || state.optimisticNewChat.seq !== action.seq) return state;
+			return {
+				...state,
+				optimisticNewChat: null,
+				activeConversationId: state.state?.conversationId ?? state.activeConversationId,
+			};
+		case "switch_conversation": {
+			if (state.state?.conversationId === action.id && !state.optimisticNewChat) return state;
+			const cached = state.snapshotsById.get(action.id);
+			// A cached snapshot paints at once (the server's confirms it later);
+			// without one only the row highlight moves and sends are held.
+			return {
+				...state,
+				optimisticNewChat: null,
+				switchPending: action.id,
+				activeConversationId: action.id,
+				...(cached
+					? {
+							state: cached,
+							workerTranscripts: state.state?.conversationId === action.id ? state.workerTranscripts : new Map(),
+						}
+					: {}),
+			};
+		}
+		case "switch_timeout":
+			if (state.switchPending !== action.id) return state;
+			return {
+				...state,
+				switchPending: null,
+				activeConversationId: state.state?.conversationId ?? state.activeConversationId,
+			};
 		case "tool_delta": {
 			const prev = state.liveOutputs.get(action.toolCallId);
 			// Keep the TAIL when over the cap (not the head): for a long-running
@@ -518,10 +615,28 @@ function reducer(state: ChatState, action: Action): ChatState {
 			return {
 				...state,
 				conversations: action.conversations,
-				activeConversationId: action.activeId,
+				// A pending click owns the highlight until a snapshot settles it
+				// (this list may still name the conversation we just left).
+				activeConversationId: state.optimisticNewChat
+					? ""
+					: state.switchPending !== null
+						? state.switchPending
+						: action.activeId,
+				snapshotsById: pruneSnapshots(state.snapshotsById, action.conversations),
 			};
 		case "projects":
 			return { ...state, projects: action.projects };
+		case "worktree_result":
+			return {
+				...state,
+				worktreeResult: { ...action.result, seq: (state.worktreeResult?.seq ?? 0) + 1 },
+				// A refused checkout never opens a chat — no snapshot will follow.
+				optimisticNewChat: action.result.op === "add" && !action.result.ok ? null : state.optimisticNewChat,
+				activeConversationId:
+					action.result.op === "add" && !action.result.ok && state.optimisticNewChat
+						? (state.state?.conversationId ?? state.activeConversationId)
+						: state.activeConversationId,
+			};
 		case "files":
 			return { ...state, files: action.files };
 		case "file_changed":
@@ -692,8 +807,9 @@ function wsUrl(): string {
 	return withToken(`${proto}//${location.host}${appUrl("/ws")}`);
 }
 
-export function useChat() {
-	const [chat, dispatch] = useReducer(reducer, {
+/** Fresh reducer state (before the socket opens). */
+export function initialChatState(): ChatState {
+	return {
 		status: "connecting",
 		ready: false,
 		state: null,
@@ -704,6 +820,7 @@ export function useChat() {
 		conversations: [],
 		activeConversationId: "",
 		projects: [],
+		worktreeResult: null,
 		files: null,
 
 		fileChanged: null,
@@ -735,7 +852,14 @@ export function useChat() {
 		scmDirty: 0,
 		protocolMismatch: false,
 		workerTranscripts: new Map(),
-	});
+		optimisticNewChat: null,
+		switchPending: null,
+		snapshotsById: new Map(),
+	};
+}
+
+export function useChat() {
+	const [chat, dispatch] = useReducer(chatReducer, undefined, initialChatState);
 	const wsRef = useRef<WebSocket | null>(null);
 	/** Terminal output bridge (writers keyed by terminalId). */
 	const bridgeRef = useRef(makeTerminalBridge());
@@ -801,7 +925,8 @@ export function useChat() {
 		// 自动消失计时由通知组件（NoticeToast）管理：悬浮暂停、移开继续。
 	}, []);
 
-	const send = useCallback((msg: ClientMessage) => {
+	/** Raw socket send (no client-side side effects) — `send` below wraps it. */
+	const sendRaw = useCallback((msg: ClientMessage) => {
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
 			ws.send(JSON.stringify(msg));
@@ -822,6 +947,50 @@ export function useChat() {
 			return true;
 		}
 		return false;
+	}, []);
+
+	/** Start a new chat (top button, project head, /new, worktree flows):
+	 *  the empty view paints now, the server boots the runtime meanwhile. */
+	const newChat = useCallback((cwd: string | null | undefined) => {
+		if (!sendRaw({ type: "new_chat", cwd: cwd ?? null })) return false;
+		dispatch({ type: "optimistic_new_chat", cwd: cwd ?? null });
+		return true;
+	}, []);
+
+	/** Switch to an open conversation: its cached snapshot (if any) paints
+	 *  now, the server's snapshot confirms it. Sends are held meanwhile. */
+	const switchConversation = useCallback((id: string) => {
+		if (!sendRaw({ type: "switch_conversation", id })) return false;
+		dispatch({ type: "switch_conversation", id });
+		return true;
+	}, []);
+
+	/** Every outgoing message funnels through here (appSend included), so
+	 *  the optimistic paths cover callers that only hold a send function:
+	 *  the sidebar's new-chat buttons, the worktree pill, a typed "/new". */
+	const send = useCallback((msg: ClientMessage): boolean => {
+		switch (msg.type) {
+			case "new_chat":
+				return newChat(msg.cwd);
+			case "switch_conversation":
+				return switchConversation(msg.id);
+			case "worktree_add": {
+				// The chat opens in the checkout once git is done; until then
+				// the empty view sits on the project cwd (the pill shows it as
+				// creating). A refused add clears it via worktree_result.
+				if (!sendRaw(msg)) return false;
+				dispatch({ type: "optimistic_new_chat", cwd: msg.cwd ?? null });
+				return true;
+			}
+			case "prompt": {
+				if (!/^\/new(\s|$)/.test(msg.text.trim())) return sendRaw(msg);
+				if (!sendRaw(msg)) return false;
+				dispatch({ type: "optimistic_new_chat", cwd: null });
+				return true;
+			}
+			default:
+				return sendRaw(msg);
+		}
 	}, []);
 
 	/** 快照里的待答问卷 → 恢复/收起对话框（页面刷新、WS 重连、新标签页）。
@@ -920,10 +1089,18 @@ export function useChat() {
 					// Gap detection BEFORE dispatch: if this incremental checkpoint
 					// doesn't chain onto our current rev (a message was dropped under
 					// backpressure, or we're stale), schedule one debounced full resync.
-					const cur = chatApi.current.chat.state;
-					if (!cur || cur.conversationId !== msg.conversationId || cur.rev !== msg.baseRev) scheduleResync();
+					// While a click is in flight the displayed state is deliberately
+					// not the server's active conversation — its confirming snapshot
+					// reconciles everything, no resync needed.
+					const c = chatApi.current.chat;
+					const cur = c.state;
+					const pending = c.switchPending !== null || c.optimisticNewChat !== null;
+					if (!pending && (!cur || cur.conversationId !== msg.conversationId || cur.rev !== msg.baseRev))
+						scheduleResync();
 					dispatch({ type: "snapshot_delta", msg });
-					syncPendingQuestion(msg.state.pendingQuestion);
+					// A delta for the conversation we just left must not pop its
+					// questionnaire over the one we switched to.
+					if (!pending || cur?.conversationId === msg.conversationId) syncPendingQuestion(msg.state.pendingQuestion);
 					break;
 				}
 				case "tool_delta":
@@ -967,6 +1144,9 @@ export function useChat() {
 					break;
 				case "projects":
 					dispatch({ type: "projects", projects: msg.projects });
+					break;
+				case "worktree_result":
+					dispatch({ type: "worktree_result", result: msg });
 					break;
 				case "files":
 					dispatch({ type: "files", files: msg });
@@ -1215,9 +1395,36 @@ export function useChat() {
 	// 省掉逐层传参（见 web/src/app-globals.ts）。用 effect 单一写入：值就是 reducer
 	// 里的真值，不会出现第二个 source of truth；最多晚一帧（对应默认值只会是
 	//「未就绪 / 未连接 / 空目录」，用户看不出）。
+	// The cwd mirrored is the DISPLAYED one: an optimistic new chat aimed at
+	// another project must highlight that project (sidebar) and show its
+	// checkout (worktree pill) right away.
+	const viewState = chat.optimisticNewChat?.view ?? chat.state;
 	useEffect(() => {
-		setAppGlobals({ ready: chat.ready, status: chat.status, cwd: chat.state?.cwd ?? "" });
-	}, [chat.ready, chat.status, chat.state?.cwd]);
+		setAppGlobals({ ready: chat.ready, status: chat.status, cwd: viewState?.cwd ?? "" });
+	}, [chat.ready, chat.status, viewState?.cwd]);
+	/** Whether the composer may send: false while the displayed conversation
+	 *  is a client-side guess (optimistic new chat / cached switch) or the
+	 *  server's booting preview. */
+	const blocked = sendBlocked({
+		booting: viewState?.booting,
+		optimistic: chat.optimisticNewChat !== null,
+		switchPending: chat.switchPending,
+	});
+
+	// Safety timeouts (same 15 s as LeftPanel's pendingTarget): a click whose
+	// snapshot never comes must not leave the composer locked forever.
+	const optimisticSeq = chat.optimisticNewChat?.seq ?? 0;
+	useEffect(() => {
+		if (optimisticSeq === 0) return;
+		const t = setTimeout(() => dispatch({ type: "optimistic_timeout", seq: optimisticSeq }), OPTIMISTIC_TIMEOUT_MS);
+		return () => clearTimeout(t);
+	}, [optimisticSeq]);
+	const switchPending = chat.switchPending;
+	useEffect(() => {
+		if (switchPending === null) return;
+		const t = setTimeout(() => dispatch({ type: "switch_timeout", id: switchPending }), OPTIMISTIC_TIMEOUT_MS);
+		return () => clearTimeout(t);
+	}, [switchPending]);
 	// Delegated workers mirror for the delegate tool cards (workers-store.ts):
 	// the store dedups by content, so the cards only re-render on real change.
 	useEffect(() => {
@@ -1241,7 +1448,14 @@ export function useChat() {
 
 	const chatApi = useRef({
 		chat,
+		/** The UiState to render: the optimistic empty chat while one is
+		 *  requested, else the server's snapshot. */
+		viewState,
+		/** Composer lock (see conversation-view.ts sendBlocked). */
+		blocked,
 		send,
+		newChat,
+		switchConversation,
 		pushNotice,
 		dismissNotice,
 		terminal: {
@@ -1254,7 +1468,11 @@ export function useChat() {
 	});
 	chatApi.current = {
 		chat,
+		viewState,
+		blocked,
 		send,
+		newChat,
+		switchConversation,
 		pushNotice,
 		dismissNotice,
 		terminal: {

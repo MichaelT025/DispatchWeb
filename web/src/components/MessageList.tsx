@@ -170,6 +170,10 @@ interface MessageListProps {
 	 *  消息载入后定位到对应消息并滚动高亮，完成后回调 onJumpDone。 */
 	jumpTarget?: { path: string; role: string; timestamp: number } | null;
 	onJumpDone?: () => void;
+	/** False while this list is parked behind a hidden slot (App keeps the
+	 *  last few conversations mounted so switching back is instant). A parked
+	 *  list keeps its scroll position and owns no window-level shortcuts. */
+	active?: boolean;
 }
 
 export function MessageList({
@@ -185,6 +189,7 @@ export function MessageList({
 	toolsWrap,
 	jumpTarget,
 	onJumpDone,
+	active = true,
 }: MessageListProps) {
 	const t = useT();
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -282,6 +287,9 @@ export function MessageList({
 	const sweep = useCallback(() => {
 		const root = scrollRef.current;
 		if (!root) return;
+		// Parked (display:none): every rect is 0 — measuring would record zero
+		// heights and un-window everything. Re-swept when shown again.
+		if (root.clientHeight === 0) return;
 		if (!virtualOnRef.current) {
 			setHidden((prev) => (prev.size ? new Set<string>() : prev));
 			return;
@@ -440,8 +448,9 @@ export function MessageList({
 		setExpanded((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
 	}, []);
 
-	// Ctrl+F / Cmd+F 打开搜索（可编辑元素内不抢占）
+	// Ctrl+F / Cmd+F 打开搜索（可编辑元素内不抢占）; only the list on screen listens
 	useEffect(() => {
+		if (!active) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "f") return;
 			const target = e.target as HTMLElement | null;
@@ -451,7 +460,7 @@ export function MessageList({
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, []);
+	}, [active]);
 	const collapse = useCallback((id: string) => {
 		setExpanded((prev) => {
 			if (!prev.has(id)) return prev;
@@ -547,9 +556,34 @@ export function MessageList({
 		// 会话还在切换中（快照未到）→ 保持等待，消息数组更新后再试
 	}, [jumpMsgId, jumpTo, onJumpDone, jumpTarget, state.sessionFile, state.messages.length]);
 
+	// Parking / unparking. A display:none scroll box forgets its offset, so
+	// the last user position (prevStRef) is put back on show — or the bottom
+	// when the reader was stuck there. The in-page search closes on park:
+	// its capture-phase Escape listener must not shadow the visible list's.
+	const wasActiveRef = useRef(active);
+	useLayoutEffect(() => {
+		const was = wasActiveRef.current;
+		wasActiveRef.current = active;
+		if (!active) {
+			setSearchOpen(false);
+			return;
+		}
+		if (was) return;
+		const el = scrollRef.current;
+		if (!el) return;
+		progUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_GRACE_MS;
+		el.scrollTop = stickRef.current && !escapedRef.current ? el.scrollHeight : prevStRef.current;
+		prevStRef.current = el.scrollTop;
+		prevScrollHeightRef.current = el.scrollHeight;
+		scheduleSweep();
+	}, [active, scheduleSweep]);
+
 	const onScroll = useCallback(() => {
 		const el = scrollRef.current;
 		if (!el) return;
+		// A parked list gets no user scrolls; a stray event (box collapsing to
+		// zero) must not overwrite the position kept for the return.
+		if (el.clientHeight === 0) return;
 		const dSt = el.scrollTop - prevStRef.current;
 		const dSh = el.scrollHeight - prevScrollHeightRef.current;
 		prevStRef.current = el.scrollTop;
@@ -747,7 +781,8 @@ export function MessageList({
 		update();
 		window.addEventListener("resize", update);
 		return () => window.removeEventListener("resize", update);
-	}, [scheduleSweep]);
+		// `active`: a parked list measures 0 — re-measure when it is shown.
+	}, [scheduleSweep, active]);
 	const n = questions.length;
 	const railGap = useMemo(() => {
 		if (n === 0) return 27;

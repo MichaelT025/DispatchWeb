@@ -731,6 +731,12 @@ wss.on("connection", (ws) => {
 			case "remove_project":
 				void cs.removeProject(msg.path);
 				break;
+			case "worktree_add":
+				void cs.addWorktree(msg.cwd, msg.branch);
+				break;
+			case "worktree_remove":
+				void cs.removeWorktree(msg.path, msg.force);
+				break;
 			case "delete_session":
 				void cs.deleteSession(msg.path);
 				break;

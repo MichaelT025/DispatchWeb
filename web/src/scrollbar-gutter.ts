@@ -64,7 +64,11 @@ function realGutter(el: HTMLElement): number {
 /** `.messages` 首次挂载后实测一次，另外每次窗口尺寸变化再校一次。 */
 function watchRealMessages(): void {
 	const refresh = (): boolean => {
-		const el = document.querySelector<HTMLElement>(".messages");
+		// Several message lists stay mounted (recent chats keep their scroll
+		// position behind a hidden slot) — measure the one on screen.
+		const el =
+			document.querySelector<HTMLElement>(".chat-slot:not([hidden]) .messages") ??
+			document.querySelector<HTMLElement>(".messages");
 		if (!el) return false;
 		setGutter(realGutter(el));
 		return true;

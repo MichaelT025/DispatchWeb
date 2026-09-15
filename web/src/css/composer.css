@@ -159,6 +159,111 @@
 	box-shadow: var(--ring);
 }
 
+/* ---- worktree pill: branch badge + (empty chat only) Worktree checkbox ---- */
+.wt-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+/* the left group may wrap once the naming field appears in a narrow composer */
+.composer-tools-left:has(.wt-naming) {
+	flex-wrap: wrap;
+	row-gap: 6px;
+	min-width: 0;
+}
+/* naming: the branch label is redundant with the field, drop it */
+.wt-pill[data-worktree-mode="naming"] .wt-pill-branch {
+	display: none;
+}
+.wt-pill .wt-pill-branch {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 220px;
+	cursor: default;
+	font-family: var(--mono);
+	font-size: 12.5px;
+}
+.wt-pill.in-worktree .wt-pill-branch {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+/* the branch glyph matches the sidebar's mint worktree marker */
+.wt-pill.in-worktree .wt-pill-branch > svg {
+	color: var(--green);
+}
+.wt-pill .wt-pill-branch:hover {
+	background: transparent;
+	color: var(--text-dim);
+}
+.wt-pill.in-worktree .wt-pill-branch:hover {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.wt-pill .wt-pill-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wt-pill .wt-spin {
+	animation: wt-spin 1s linear infinite;
+}
+@keyframes wt-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+.wt-pill .wt-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+	user-select: none;
+}
+.wt-pill .wt-toggle input {
+	margin: 0;
+	accent-color: var(--accent);
+}
+.wt-pill .wt-toggle.on {
+	color: var(--text);
+}
+.wt-pill .wt-naming {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.wt-pill .wt-name {
+	height: 28px;
+	width: 180px;
+	padding: 0 10px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--mono);
+	font-size: 12.5px;
+}
+.wt-pill .wt-name:focus {
+	outline: 0;
+	border-color: var(--accent);
+}
+.wt-pill .wt-create {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--accent);
+}
+@media (max-width: 720px) {
+	.wt-pill .wt-pill-branch {
+		max-width: 110px;
+	}
+	.wt-pill .wt-name {
+		width: 120px;
+	}
+}
+
 /* ---- agent pill + menu ---- */
 .app .agent-picker {
 	position: relative;

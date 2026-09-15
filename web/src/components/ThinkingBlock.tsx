@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { shimmerPhase } from "../shimmer";
 import { FiCheckCircle, FiChevronDown, FiChevronRight, FiCopy, FiCpu } from "react-icons/fi";
 import { useT } from "../i18n";
 
@@ -13,9 +14,11 @@ interface ThinkingBlockProps {
 	/** 会话内搜索打开时强制展开（折叠内容不在 DOM，搜索索引搜到的词会
 	 *  “展开后看不到”）。不改变用户的 open 状态，关闭搜索自动恢复。 */
 	forceOpen?: boolean;
+	/** Stable key that offsets this label's shimmer from its neighbours'. */
+	phaseKey?: string;
 }
 
-export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = false }: ThinkingBlockProps) {
+export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = false, phaseKey }: ThinkingBlockProps) {
 	const t = useT();
 	// null = 未手动点过 → 跟随开关：wrap=true（开）→ 完整展开；wrap=false（关）→ 折叠。
 	// 流式与结束后行为一致——不再出现「流式折叠、结束后又自动展开」的跳动。
@@ -65,7 +68,10 @@ export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = fa
 				<span className="chead-icon thinking-icon">
 					<FiCpu />
 				</span>
-				<span className={`chead-title thinking-label${streaming ? " shimmer" : ""}`}>
+				<span
+					className={`chead-title thinking-label${streaming ? " shimmer" : ""}`}
+					style={streaming ? shimmerPhase(phaseKey ?? "thinking") : undefined}
+				>
 					{streaming && shown ? t("thinkingNow") : shown ? t("thinking") : t("thinkingPreview", { preview })}
 				</span>
 				<button

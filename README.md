@@ -32,6 +32,52 @@ mirrors the worker list into `UiState.workers`, serves transcripts on
 `open_worker`, and relays `cancel_worker`. Nothing polls, and no worker text
 is scraped from tool output. Without the extension the tab is simply empty.
 
+## Worktrees
+
+A git repository is one project in the sidebar whatever checkout a chat runs
+in. Linked worktrees — the CLI's `/worktree add` layout under
+`~/.pi/worktrees/<repo>/<branch-slug>`, Claude Code's `.claude/worktrees/…`,
+or anything `git worktree add` made — are folded into the repository's main
+checkout (`git worktree list`), so their chats and history show under one
+project with a branch marker in front of the title (the branch name is the
+tooltip). A repository's history is listed across all of its checkouts.
+
+A chat is bound to one checkout for its whole life: its tools, terminals,
+file tree, git panel and PiAstra workers all run there. Choosing happens on
+an empty chat only — the composer shows the current branch with a
+**Worktree** checkbox. Ticking it asks for a branch name (blank = a generated
+`bright-fox` style name) and, on **Create**, checks that branch out as a
+managed worktree (existing local branch reused, remote branch tracked, new
+branch cut from `origin/<default>` without an upstream) and moves the blank
+chat there; unticking it in a worktree chat goes back to a blank chat in the
+main checkout. The repository row's hover actions add _New chat in a fresh
+worktree_ with a generated name.
+
+Hovering a worktree-backed chat or history row offers _Remove worktree_
+(two-step, branch kept). Idle chats open in that worktree are closed first
+and the active one moves out; a streaming chat or open terminal refuses. A
+checkout with uncommitted changes asks once more before a forced removal.
+Removal is refused for the main checkout and locked worktrees.
+
+Wire: `worktree_add { cwd?, branch? }` / `worktree_remove { path, force? }`
+answered by `worktree_result`; `ProjectSummary.worktrees` carries every
+checkout. `server/worktrees.ts` mirrors the CLI extension's porcelain parser,
+branch slug and managed-path rules.
+
+## Responsiveness
+
+Every sidebar click paints before the server answers: a new chat shows the
+empty composer at once (the runtime boots behind it — sending is held for
+that moment), a switch to a recently viewed chat re-shows its still-mounted
+message list, and a history row renders its transcript from the session
+file first (`UiState.booting`) while the runtime starts. On the server a
+cross-project new chat boots one runtime (it used to resume the project's
+last session and then replace it), snapshots go out before the per-project
+key/model restores, and `server/patch-extension-cache.ts` rewrites the SDK's
+extension loader so compiled extension modules are cached per file instead
+of being thrown away on every cwd change — a project switch went from ~3 s
+to ~0.2 s with the PiAstra extension set.
+
 ## What's here
 
 | Area                                           | Files                                                                                |
@@ -42,6 +88,7 @@ is scraped from tool output. Without the extension the tab is simply empty.
 | CLI / service install                          | `bin/pi-web-ui.mjs`, `deploy/`                                                       |
 | Tests                                          | `tests/unit/*.test.ts` (vitest), `tests/*-test.mjs` (protocol smoke, browser E2E)    |
 | Delegated workers                              | `server/workers.ts` hub, `web/src/components/WorkersPanel.tsx`, `web/src/workers.ts` |
+| Git worktrees                                  | `server/worktrees.ts`, `web/src/components/WorktreePill.tsx`, `left-panel-nav.ts`    |
 
 Removed relative to upstream: UI plugins and the plugin marketplace, the DSH
 engine, goal / review loop and wizard, inline markers / todo, built-in

@@ -218,15 +218,13 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	/** Branch badge for a chat that runs in a linked worktree of its project
-	 *  (Claude-desktop style: rows stay flat, the badge tells them apart).
-	 *  Only the last path segment fits next to a title — `feat/sidebar-cleanup`
-	 *  reads as `sidebar-cleanup`; the tooltip carries the full name. */
+	/** Worktree marker for a chat that runs in a linked checkout of its
+	 *  project (Claude-desktop style: rows stay flat, the glyph tells them
+	 *  apart). Sits before the title; the branch name lives in the tooltip. */
 	const branchBadge = (branch: string | undefined) =>
 		branch ? (
-			<span className="lp-branch" title={t("worktreeBranch", { branch })}>
+			<span className="lp-branch" title={t("worktreeBranch", { branch })} aria-label={branch}>
 				<FiGitBranch aria-hidden="true" />
-				<span className="lp-branch-name">{branch.slice(branch.lastIndexOf("/") + 1)}</span>
 			</span>
 		) : null;
 
@@ -252,6 +250,7 @@ export const LeftPanel = memo(function LeftPanel({
 					}}
 				>
 					<span className="session-info">
+						{renaming === key ? null : branchBadge(branch)}
 						{renaming === key ? (
 							<input
 								autoFocus
@@ -275,7 +274,6 @@ export const LeftPanel = memo(function LeftPanel({
 						) : (
 							<span className="session-title">{c.title}</span>
 						)}
-						{renaming === key ? null : branchBadge(branch)}
 						{renaming === key ? null : (
 							<span className="session-sub">{active ? t("current") : t("messageCount", { n: c.messageCount })}</span>
 						)}
@@ -337,6 +335,7 @@ export const LeftPanel = memo(function LeftPanel({
 					}}
 				>
 					<span className="session-info">
+						{renaming === s.path ? null : branchBadge(branch)}
 						{renaming === s.path ? (
 							<input
 								autoFocus
@@ -360,7 +359,6 @@ export const LeftPanel = memo(function LeftPanel({
 						) : (
 							<span className="session-title">{displayName(s)}</span>
 						)}
-						{renaming === s.path ? null : branchBadge(branch)}
 						{renaming === s.path ? null : (
 							<span className="session-sub">
 								{active ? t("current") : t("messageCount", { n: s.messageCount })}

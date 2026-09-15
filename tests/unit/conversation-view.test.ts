@@ -136,6 +136,15 @@ describe("snapshot cache helpers", () => {
 		expect(recentConversationIds("z", cache, 2)).toEqual(["z", "d"]);
 		expect(recentConversationIds(null, cache, 2)).toEqual(["d", "c"]);
 	});
+
+	it("never parks an empty conversation (its welcome screen would linger hidden)", () => {
+		let cache = new Map<string, UiState>();
+		cache = cacheSnapshot(cache, snapshot("full"));
+		cache = cacheSnapshot(cache, snapshot("blank", { messages: [] }));
+		expect(recentConversationIds("cur", cache, 3)).toEqual(["cur", "full"]);
+		// the displayed one is always listed, even when empty
+		expect(recentConversationIds("blank", cache, 3)).toEqual(["blank", "full"]);
+	});
 });
 
 describe("chatReducer: optimistic new chat", () => {

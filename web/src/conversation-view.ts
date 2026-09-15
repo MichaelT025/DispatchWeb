@@ -124,10 +124,16 @@ export function recentConversationIds(
 ): string[] {
 	const out: string[] = [];
 	if (current) out.push(current);
-	// Map iteration is oldest → newest; walk from the newest end.
+	// Map iteration is oldest → newest; walk from the newest end. A parked
+	// list only earns its keep when there is something to re-show: an empty
+	// chat rebuilds instantly, and its welcome screen must not linger hidden
+	// in the DOM next to the visible one.
 	const ids = [...cache.keys()];
 	for (let i = ids.length - 1; i >= 0 && out.length < n; i--) {
-		if (!out.includes(ids[i])) out.push(ids[i]);
+		const id = ids[i];
+		if (out.includes(id)) continue;
+		if ((cache.get(id)?.messages.length ?? 0) === 0) continue;
+		out.push(id);
 	}
 	return out;
 }

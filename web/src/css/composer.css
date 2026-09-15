@@ -187,16 +187,20 @@
 	font-size: 12.5px;
 }
 .wt-pill.in-worktree .wt-pill-branch {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+/* the branch glyph matches the sidebar's mint worktree marker */
+.wt-pill.in-worktree .wt-pill-branch > svg {
 	color: var(--green);
-	background: var(--green-soft);
 }
 .wt-pill .wt-pill-branch:hover {
 	background: transparent;
 	color: var(--text-dim);
 }
 .wt-pill.in-worktree .wt-pill-branch:hover {
-	background: var(--green-soft);
-	color: var(--green);
+	background: var(--accent-soft);
+	color: var(--accent);
 }
 .wt-pill .wt-pill-label {
 	overflow: hidden;
@@ -220,7 +224,7 @@
 }
 .wt-pill .wt-toggle input {
 	margin: 0;
-	accent-color: var(--green);
+	accent-color: var(--accent);
 }
 .wt-pill .wt-toggle.on {
 	color: var(--text);
@@ -243,13 +247,13 @@
 }
 .wt-pill .wt-name:focus {
 	outline: 0;
-	border-color: var(--green);
+	border-color: var(--accent);
 }
 .wt-pill .wt-create {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	color: var(--green);
+	color: var(--accent);
 }
 @media (max-width: 720px) {
 	.wt-pill .wt-pill-branch {

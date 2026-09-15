@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
 import { FiCompass, FiEye, FiTarget, FiTool, FiZap } from "react-icons/fi";
 
-/** One glyph per PiAstra role, hinting at what the role does: the
+/** One glyph per Dispatch role, hinting at what the role does: the
  *  orchestrator steers (compass), general builds (tool), fast is quick
  *  research/edits (bolt), review inspects (eye). Unknown roles get the
  *  neutral target the picker always used. The hue comes from CSS

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <!--
   pi-web-ui Task Scheduler task — Windows auto-start at logon.
+  (Dispatch Web keeps the unchanged `pi-web-ui` executable name.)
 
   pi-web-ui server install 默认使用「登录 Run 键 + wscript 隐藏启动」（HKCU，无需管理员、
   无黑窗），并自动迁移旧版计划任务安装。本 XML 仅保留给需要手动注册计划任务的场景

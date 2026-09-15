@@ -455,7 +455,7 @@ export const LeftPanel = memo(function LeftPanel({
 			<div className="lp-brand">
 				<span className="lp-brand-title">
 					<Logo size={20} />
-					<span className="lp-brand-name">PiAstra</span>
+					<span className="lp-brand-name">Dispatch</span>
 				</span>
 				<span className="lp-brand-actions">
 					<button

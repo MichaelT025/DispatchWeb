@@ -79,10 +79,10 @@ interface ChatInputProps {
 	/** Stored API keys per built-in provider (masked) — drives the picker's
 	 *  multi-key grouping (click a model under a key to switch to it). */
 	providerKeys: Record<string, ProviderKeyInfo[]>;
-	/** PiAstra agent picker: CONFIRMED role from the server status bridge
+	/** Dispatch agent picker: CONFIRMED role from the server status bridge
 	 *  (null = unknown; we never show an optimistic local guess). */
 	activeAgent: AgentRole | null;
-	/** Whether the PiAstra extension is loaded (slash /agent + /piastra present). */
+	/** Whether the Dispatch extension is loaded (slash /agent + /dispatch, legacy /piastra alias). */
 	agentAvailable: boolean;
 }
 

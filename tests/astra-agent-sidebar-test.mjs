@@ -11,9 +11,10 @@
  *      A's saved chat appears on boot; B's saved chat is loaded lazily when its
  *      project group is expanded (list_sessions { cwd: B }) and renders nested
  *      under B — never under A.
- *   2. A TEST-ONLY extension (temp agent dir) registers `/agent` + `/piastra`
- *      with source === extension and, on `/agent <role>`, writes the real
- *      `piastra-agent` status via ctx.ui.setStatus. This exercises the full
+ *   2. A TEST-ONLY extension (temp agent dir) registers `/agent` + `/dispatch`
+ *      (plus the legacy `/piastra` alias) with source === extension and, on
+ *      `/agent <role>`, writes the real `piastra-agent` status via
+ *      ctx.ui.setStatus. This exercises the full
  *      frontend picker → WS prompt → extension status → UI bridge round-trip
  *      with NO provider/model/credential calls.
  *
@@ -81,20 +82,26 @@ seedSession("b.jsonl", projB, "beta nested chat", "sess-b");
 writeFileSync(
 	join(extDir, "piastra-status-mock.js"),
 	`// Test-only status bridge mock. Registers the same command names/source the
-// real PiAstra extension does, but setStatus is the ONLY side effect — no
+// real Dispatch extension does, but setStatus is the ONLY side effect — no
 // setModel / setThinkingLevel / setActiveTools and no provider call.
 export default function (pi) {
 	const order = ["orchestrator", "general", "fast", "review"];
 	pi.registerCommand("agent", {
-		description: "Select PiAstra agent: orchestrator, general, fast, review",
+		description: "Select Dispatch agent: orchestrator, general, fast, review",
 		handler: async (args, ctx) => {
 			const role = (args || "orchestrator").trim().toLowerCase();
 			if (!order.includes(role)) return;
 			ctx.ui.setStatus("piastra-agent", "Agent: " + role);
 		},
 	});
+	pi.registerCommand("dispatch", {
+		description: "Show Dispatch roles and delegation availability",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify("Active: orchestrator\\n/agent selects; Ctrl+Shift+A cycles.", "info");
+		},
+	});
 	pi.registerCommand("piastra", {
-		description: "Show PiAstra roles and delegation availability",
+		description: "Legacy alias of /dispatch (Dispatch roles summary)",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify("Active: orchestrator\\n/agent selects; Ctrl+Shift+A cycles.", "info");
 		},
@@ -210,7 +217,7 @@ try {
 	await shot(`${String(++shotN).padStart(2, "0")}-sidebar-projects`);
 
 	// ---------- 2) four agent composer states (mocked status bridge) ----------
-	// Extension catalog → the picker is available (both /agent + /piastra, source
+	// Extension catalog → the picker is available (both /agent + /dispatch, source
 	// extension). One neutral state before any confirmed status.
 	await checkVisible(page, "agent picker available", ".agent-picker");
 	check("picker exposes exactly the four role buttons", (await page.locator(".agent-picker-btn").count()) === 4);

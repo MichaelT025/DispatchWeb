@@ -2,6 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   pi-web-ui launchd agent — macOS auto-start at login.
+  (Dispatch Web keeps the unchanged `pi-web-ui` service and executable name.)
 
   Install:
     npm i -g pi-web-ui

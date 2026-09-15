@@ -51,7 +51,7 @@ try {
 	// version is best-effort — the server itself doesn't need it
 }
 
-const HELP = `pi-web-ui v${pkg.version} — PiAstra web UI for the pi coding agent
+const HELP = `pi-web-ui v${pkg.version} — Dispatch Web UI for the pi coding agent
 
 Usage:
   pi-web-ui                               Start server (foreground, Ctrl+C to stop, auto-opens browser)

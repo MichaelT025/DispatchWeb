@@ -1,5 +1,5 @@
 import { memo } from "react";
-import mark from "../assets/piastra-mark.svg?raw";
+import mark from "../assets/dispatch-mark.svg?raw";
 
 interface LogoProps {
 	/** Rendered box size in px (the mark is square). */
@@ -8,8 +8,9 @@ interface LogoProps {
 }
 
 /**
- * PiAstra mark, inlined so the glyph follows `currentColor` (light on the
- * dark shell, dark on light themes) while the red core keeps its own hue.
+ * Dispatch mark (same glyph as the original app mark), inlined so it follows
+ * `currentColor` (light on the dark shell, dark on light themes) while the
+ * red core keeps its own hue.
  */
 export const Logo = memo(function Logo({ size = 20, className }: LogoProps) {
 	return (

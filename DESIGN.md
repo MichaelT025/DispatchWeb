@@ -1,11 +1,11 @@
-# PiAstra shell design system
+# Dispatch Web shell design system
 
 ## 1. Atmosphere & identity
 
 The supplied `../PiAstra/docs/reference/codex.png` and `codex_empty_sidebar.png`
 define the direction: a full-height charcoal project sidebar beside a near-black
 working surface, a slim main-only title bar, plain assistant prose and compact
-right-aligned user bubbles. Preserve PiAstra's own content and real actions.
+right-aligned user bubbles. Preserve Dispatch's own content and real actions.
 
 ## 2. Color
 
@@ -51,7 +51,7 @@ inversion for contrast.
 `--sans` is the platform UI face (Segoe UI Variable on Windows 11, SF on
 macOS, Roboto on Android — no webfont); `--mono` is JetBrains Mono (Google
 Fonts, Cascadia → system mono fallback). The xterm canvas uses the same mono
-stack at 13.5px. Form controls inherit `font-family` explicitly. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
+stack at 13.5px. Form controls inherit `font-family` explicitly. The brand mark is `web/src/assets/dispatch-mark.svg`, inlined through
 `components/Logo.tsx` so it follows `currentColor`.
 
 Scale: body 15px; chat prose and user bubble 14px / 1.6 (Codex density); composer 14.5px;

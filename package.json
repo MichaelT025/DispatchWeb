@@ -1,7 +1,7 @@
 {
-	"name": "piastra-web-ui",
+	"name": "@michaelt025/dispatch-web",
 	"version": "0.82.0",
-	"description": "PiAstra web UI — a Codex-style browser shell for the pi coding agent",
+	"description": "Dispatch Web — a Codex-style browser shell for the pi coding agent",
 	"license": "MIT",
 	"type": "module",
 	"bin": {

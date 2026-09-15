@@ -31,7 +31,7 @@ import { GlobalSearchModal } from "./components/GlobalSearchModal";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
 import { recentConversationIds } from "./conversation-view";
-import { parseAgentRole, hasPiastraExtension } from "./agents";
+import { parseAgentRole, hasDispatchExtension } from "./agents";
 import type { ClientMessage, PromptAttachment, ToolStatus, UiMessage, UiWorker } from "./types";
 import { useT } from "./i18n";
 import {
@@ -289,7 +289,7 @@ export function App() {
 	const projectTitle = useProjectTitle();
 	useEffect(() => {
 		const name = projectTitle ? projectNameFromCwd(cwd) : "";
-		document.title = name ? `${name} — PiAstra` : t("docTitle");
+		document.title = name ? `${name} — Dispatch Web` : t("docTitle");
 	}, [cwd, projectTitle, t]);
 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 	// 宿主注入的待发附件（浏览器元素拾取扩展的截图 → window.__piWebUiHost.compose）：
@@ -631,10 +631,10 @@ export function App() {
 		chat.conversations.find((conversation) => conversation.id === chat.activeConversationId)?.title ||
 		currentSession?.firstMessage.trim();
 
-	// PiAstra agent role: parsed from the extension's CONFIRMED status bridge
+	// Dispatch agent role: parsed from the extension's CONFIRMED status bridge
 	// (never the active model), and whether the extension is loaded at all.
 	const activeAgent = parseAgentRole(chat.statuses);
-	const agentAvailable = hasPiastraExtension(chat.slashCommands);
+	const agentAvailable = hasDispatchExtension(chat.slashCommands);
 
 	const model = viewState?.model;
 	const thinkingLevel = viewState?.thinkingLevel;

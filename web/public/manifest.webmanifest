@@ -1,7 +1,7 @@
 {
-	"name": "PiAstra",
-	"short_name": "PiAstra",
-	"description": "PiAstra — a Codex-style workspace for the pi coding agent: conversations, files and terminal in one shell.",
+	"name": "Dispatch Web",
+	"short_name": "Dispatch Web",
+	"description": "Dispatch Web — a Codex-style workspace for the pi coding agent: conversations, files and terminal in one shell.",
 	"start_url": "./",
 	"scope": "./",
 	"display": "standalone",

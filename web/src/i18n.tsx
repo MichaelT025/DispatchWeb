@@ -146,6 +146,7 @@ export const en = {
 	queueRemoveTip: "Remove this queued message",
 	queueRecallTip: "Recall into the input box for editing",
 	sendTip: "Send (Enter)",
+	startingChat: "Starting the chat…",
 	quickPhrases: "Quick phrases",
 	quickPhrasesDesc:
 		"A row of frequently-used phrase buttons above the input box — click to send (current file attachments are included, the input draft is kept)",

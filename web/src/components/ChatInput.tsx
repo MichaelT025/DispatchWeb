@@ -28,6 +28,10 @@ const IS_TOUCH = detectTouchFirstDevice();
  *  memo() below skips this input bar on every text delta. */
 interface ChatInputProps {
 	streaming: boolean;
+	/** The displayed conversation has no confirmed runtime yet (optimistic
+	 *  new chat, cached switch awaiting the server, booting preview): the
+	 *  draft stays editable but nothing is sent until the snapshot lands. */
+	booting?: boolean;
 	/** Persisted messages (stable reference while unchanged) — used by /copy. */
 	messages: UiMessage[];
 	slashCommands: SlashCommandInfo[];
@@ -84,6 +88,7 @@ interface ChatInputProps {
 
 export const ChatInput = memo(function ChatInput({
 	streaming,
+	booting = false,
 	messages,
 	slashCommands,
 	modelState,
@@ -303,6 +308,13 @@ export const ChatInput = memo(function ChatInput({
 		return () => window.removeEventListener("pi-web:fill", onFill);
 	}, []);
 
+	// Focus request (App: a new chat was just requested — type while it boots).
+	useEffect(() => {
+		const onFocus = () => taRef.current?.focus();
+		window.addEventListener("pi-web:focus-composer", onFocus);
+		return () => window.removeEventListener("pi-web:focus-composer", onFocus);
+	}, []);
+
 	// Esc closes the /help modal.
 	useEffect(() => {
 		if (!showHelp) return;
@@ -329,7 +341,11 @@ export const ChatInput = memo(function ChatInput({
 		if (!ta || !box) return;
 		// Save BEFORE the auto reset below: collapsing the textarea transiently
 		// grows the list box, which clamps its scrollTop down. Restore after.
-		const list = ta.closest("main")?.querySelector<HTMLElement>(".messages");
+		// Recent chats stay mounted behind hidden slots — anchor the visible one.
+		const main = ta.closest("main");
+		const list =
+			main?.querySelector<HTMLElement>(".chat-slot:not([hidden]) .messages") ??
+			main?.querySelector<HTMLElement>(".messages");
 		const hBefore = box.getBoundingClientRect().height;
 		const stBefore = list?.scrollTop ?? 0;
 		ta.style.height = "auto"; // natural height first, then clamp
@@ -379,7 +395,8 @@ export const ChatInput = memo(function ChatInput({
 	const submit = (queue = false) => {
 		const trimmed = text.trim();
 		const hasRawAttach = attachments.some((a) => a.imageData || a.fileData);
-		if (!connected || (!trimmed && !hasRawAttach)) return;
+		// Booting: Enter / the send button do nothing and the draft is kept.
+		if (!connected || booting || (!trimmed && !hasRawAttach)) return;
 		// Client-side slash commands (never sent to the server).
 		if (trimmed === "/help") {
 			// Match the modal width to the input box (the backdrop spans the full
@@ -550,7 +567,8 @@ export const ChatInput = memo(function ChatInput({
 
 	// 有东西可发才允许提交（空文本 + 无附件时 submit() 直接 return）：
 	// 空闲态的发送按钮和运行中的对半胶囊共用这一个条件。
-	const canSubmit = connected && (text.trim() !== "" || attachments.some((a) => a.imageData || a.fileData));
+	const canSubmit = connected && !booting && (text.trim() !== "" || attachments.some((a) => a.imageData || a.fileData));
+	const sendTitle = booting ? t("startingChat") : t("sendTip");
 
 	// Send / stop / steer+queue — rendered once inside the composer toolbar
 	// (ChatInput .composer-tools-right). 运行中发送位与停止位二选一互斥：
@@ -584,12 +602,25 @@ export const ChatInput = memo(function ChatInput({
 						</button>
 					</div>
 				) : (
-					<button type="button" className="btn stop" title={t("stopAgent")} onClick={() => appSend({ type: "abort" })}>
+					<button
+						type="button"
+						className="btn stop"
+						title={t("stopAgent")}
+						disabled={booting}
+						onClick={() => appSend({ type: "abort" })}
+					>
 						<FiSquare />
 					</button>
 				)
 			) : (
-				<button type="button" className="btn send" title={t("sendTip")} disabled={!canSubmit} onClick={() => submit()}>
+				<button
+					type="button"
+					className="btn send"
+					title={sendTitle}
+					aria-label={sendTitle}
+					disabled={!canSubmit}
+					onClick={() => submit()}
+				>
 					<FiArrowUp />
 				</button>
 			)}
@@ -730,7 +761,13 @@ export const ChatInput = memo(function ChatInput({
 					value={text}
 					rows={1}
 					placeholder={
-						connected ? (streaming ? t("placeholderStreaming") : t("placeholderIdle")) : t("placeholderConnecting")
+						!connected
+							? t("placeholderConnecting")
+							: booting
+								? t("startingChat")
+								: streaming
+									? t("placeholderStreaming")
+									: t("placeholderIdle")
 					}
 					disabled={!connected}
 					onChange={(e) => {
@@ -758,7 +795,7 @@ export const ChatInput = memo(function ChatInput({
 						<AgentPicker
 							activeRole={activeAgent}
 							available={agentAvailable}
-							busy={streaming}
+							busy={streaming || booting}
 							onSelect={(role) => {
 								// Real switch via the EXISTING /agent slash command — the
 								// extension performs model + thinking + tools + setStatus.

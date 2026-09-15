@@ -30,8 +30,9 @@ import { SettingsModal } from "./components/SettingsModal";
 import { GlobalSearchModal } from "./components/GlobalSearchModal";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
 import { useChat } from "./use-chat";
+import { recentConversationIds } from "./conversation-view";
 import { parseAgentRole, hasPiastraExtension } from "./agents";
-import type { ClientMessage, PromptAttachment, UiMessage, UiWorker } from "./types";
+import type { ClientMessage, PromptAttachment, ToolStatus, UiMessage, UiWorker } from "./types";
 import { useT } from "./i18n";
 import {
 	FiAlertCircle,
@@ -101,6 +102,13 @@ function NoticeToast({ notice, onDismiss }: { notice: Notice; onDismiss: (id: nu
 /** Stable empty messages array — keeps the memoized ChatInput prop comparison
  *  cheap before the first snapshot arrives. */
 const EMPTY_MESSAGES: UiMessage[] = [];
+/** Stable empties for the parked message lists (no live tool output there). */
+const EMPTY_LIVE = new Map<string, { toolName: string; text: string }>();
+const EMPTY_STATUSES = new Map<string, ToolStatus>();
+/** Conversations whose MessageList stays mounted (the visible one included):
+ *  switching back to a recent chat paints its list as it was, scroll
+ *  position and expanded rows intact, instead of rebuilding it. */
+const KEEP_MOUNTED = 3;
 
 // ---- 可拖拽面板宽度（桌面端；≤768px 抽屉模式固定宽度不受影响）----
 const PANEL_MIN = 180;
@@ -272,9 +280,12 @@ function AstraHeader({
 
 export function App() {
 	const t = useT();
-	const { chat, send, dismissNotice, pushNotice, terminal } = useChat();
+	const { chat, viewState, blocked, send, dismissNotice, pushNotice, terminal } = useChat();
 	// 浏览器标题：开关开启时显示当前项目（工作目录文件夹名），否则固定应用名。
-	const cwd = chat.state?.cwd ?? "";
+	// `viewState` is what the chat column shows (an optimistic empty chat
+	// while a new one boots, else the snapshot) — everything conversation-
+	// facing below reads it, not chat.state.
+	const cwd = viewState?.cwd ?? "";
 	const projectTitle = useProjectTitle();
 	useEffect(() => {
 		const name = projectTitle ? projectNameFromCwd(cwd) : "";
@@ -492,7 +503,7 @@ export function App() {
 		// be attached but silently ignored by the provider. Throttled so adding
 		// several images at once produces one notice, not a stack.
 		const now = Date.now();
-		if (chat.state?.model && !chat.state.model.vision) {
+		if (viewState?.model && !viewState.model.vision) {
 			if (now - lastVisionWarn.current > 10000) {
 				lastVisionWarn.current = now;
 				pushNotice("warning", t("imageNotSupported"));
@@ -614,7 +625,6 @@ export function App() {
 
 	// Narrow snapshot of the model/thinking fields for the memoized ChatInput →
 	// ModelThinking chain; identity is stable while tokens stream in.
-	const viewState = chat.state;
 	const currentSession = chat.sessionsByCwd.get(cwd)?.find((session) => session.path === viewState?.sessionFile);
 	const conversationTitle =
 		currentSession?.name ||
@@ -626,9 +636,9 @@ export function App() {
 	const activeAgent = parseAgentRole(chat.statuses);
 	const agentAvailable = hasPiastraExtension(chat.slashCommands);
 
-	const model = chat.state?.model;
-	const thinkingLevel = chat.state?.thinkingLevel;
-	const availableThinkingLevels = chat.state?.availableThinkingLevels;
+	const model = viewState?.model;
+	const thinkingLevel = viewState?.thinkingLevel;
+	const availableThinkingLevels = viewState?.availableThinkingLevels;
 	const modelState = useMemo(
 		() =>
 			model
@@ -685,7 +695,7 @@ export function App() {
 	}, [bottomTerminalOpen, openBottomTerminal]);
 
 	/** Running delegated workers — the Workers tab shows the count. */
-	const activeWorkers = (chat.state?.workers ?? EMPTY_WORKERS).filter(
+	const activeWorkers = (viewState?.workers ?? EMPTY_WORKERS).filter(
 		(w) => w.status === "starting" || w.status === "running",
 	).length;
 
@@ -694,6 +704,23 @@ export function App() {
 		setWorkspaceOpen(true);
 		setWorkspaceTab(tab);
 	}, []);
+
+	// Message lists kept mounted: the displayed conversation plus the most
+	// recently viewed cached ones. Keyed by conversation id, so a switch only
+	// toggles `hidden` on the wrappers; ids that leave the cache (dismissed
+	// conversations, LRU eviction) unmount.
+	const currentId = viewState?.conversationId ?? null;
+	const slotIds = useMemo(
+		() => recentConversationIds(currentId, chat.snapshotsById, KEEP_MOUNTED),
+		[currentId, chat.snapshotsById],
+	);
+	const onJumpDone = useCallback(() => setSearchJump(null), []);
+	// A requested new chat puts the caret in the composer at once (the same
+	// window event the welcome cards use — ChatInput owns the textarea).
+	const newChatSeq = chat.optimisticNewChat?.seq ?? 0;
+	useEffect(() => {
+		if (newChatSeq > 0) window.dispatchEvent(new CustomEvent("pi-web:focus-composer"));
+	}, [newChatSeq]);
 
 	// If the user clicked Terminal while the initial connection was still
 	// loading, complete that request as soon as the session becomes ready.
@@ -802,7 +829,7 @@ export function App() {
 						onToggleCollapse={toggleLeft}
 						panelSend={panelSend}
 						active={!isMobile || drawer === "left"}
-						sessionFile={chat.state?.sessionFile ?? null}
+						sessionFile={viewState?.sessionFile ?? null}
 						conversations={chat.conversations}
 						sessionsByCwd={chat.sessionsByCwd}
 						projects={chat.projects}
@@ -813,7 +840,7 @@ export function App() {
 				{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
 				<div className="astra-column">
 					<AstraHeader
-						chat={chat}
+						chat={{ ready: chat.ready, status: chat.status, state: viewState }}
 						title={conversationTitle}
 						onOpenPanel={() => setDrawer("left")}
 						onOpenSettings={() => setSettingsOpen(true)}
@@ -826,26 +853,37 @@ export function App() {
 					<div className="astra-row" style={{ "--right-w": `${rightWidthClamped}px` } as CSSProperties}>
 						<main className={wide ? "main wide-chat" : "main"}>
 							{viewState ? (
-								<MessageList
-									key={viewState.conversationId ?? "boot"}
-									state={viewState}
-									liveOutputs={chat.liveOutputs}
-									toolStatuses={chat.toolStatuses}
-									onEdit={onEditMessage}
-									onKillBash={() => send({ type: "abort_bash" })}
-									onRetry={() => {
-										if (send({ type: "retry_last" })) {
-											const m = chat.state?.model;
-											if (m) recordModelUsage(`${m.provider}/${m.id}`);
-										}
-									}}
-									onRemoveQueued={onRemoveQueued}
-									onRecallQueued={onRecallQueued}
-									thinkingWrap={chat.settings?.thinkingWrap ?? true}
-									toolsWrap={chat.settings?.toolsWrap ?? false} // Astra 默认折叠摘要；错误卡自动展开，对话框不受影响
-									jumpTarget={searchJump}
-									onJumpDone={() => setSearchJump(null)}
-								/>
+								slotIds.map((id) => {
+									const isCurrent = id === currentId;
+									const slotState = isCurrent ? viewState : chat.snapshotsById.get(id);
+									if (!slotState) return null;
+									// Only the visible list gets live props; parked ones hold
+									// their cached snapshot (reference-stable → memo rows idle).
+									return (
+										<div key={id} className="chat-slot" hidden={!isCurrent}>
+											<MessageList
+												state={slotState}
+												active={isCurrent}
+												liveOutputs={isCurrent ? chat.liveOutputs : EMPTY_LIVE}
+												toolStatuses={isCurrent ? chat.toolStatuses : EMPTY_STATUSES}
+												onEdit={onEditMessage}
+												onKillBash={() => send({ type: "abort_bash" })}
+												onRetry={() => {
+													if (send({ type: "retry_last" })) {
+														const m = viewState.model;
+														if (m) recordModelUsage(`${m.provider}/${m.id}`);
+													}
+												}}
+												onRemoveQueued={onRemoveQueued}
+												onRecallQueued={onRecallQueued}
+												thinkingWrap={chat.settings?.thinkingWrap ?? true}
+												toolsWrap={chat.settings?.toolsWrap ?? false} // Astra 默认折叠摘要；错误卡自动展开，对话框不受影响
+												jumpTarget={isCurrent ? searchJump : null}
+												onJumpDone={onJumpDone}
+											/>
+										</div>
+									);
+								})
 							) : (
 								<div className="boot-wait">{chat.ready ? t("loadingSession") : t("connectingServer")}</div>
 							)}
@@ -854,6 +892,7 @@ export function App() {
 							{chat.question && <QuestionDialog question={chat.question} />}
 							<ChatInput
 								streaming={viewState?.isStreaming ?? false}
+								booting={blocked}
 								messages={viewState?.messages ?? EMPTY_MESSAGES}
 								slashCommands={chat.slashCommands}
 								modelState={modelState}
@@ -1009,9 +1048,9 @@ export function App() {
 										{workspaceTab === "workers" && (
 											<div className="astra-workspace-pane">
 												<WorkersPanel
-													workers={chat.state?.workers ?? EMPTY_WORKERS}
+													workers={viewState?.workers ?? EMPTY_WORKERS}
 													transcripts={chat.workerTranscripts}
-													conversationId={chat.state?.conversationId}
+													conversationId={viewState?.conversationId}
 													selected={selectedWorker}
 													onSelect={setSelectedWorker}
 													send={send}

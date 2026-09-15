@@ -204,6 +204,7 @@ export const en = {
 	current: "Current",
 	messageCount: "{n} messages",
 	tuiTip: "Chat in the pi terminal (TUI)",
+	worktreeBranch: "Runs in the worktree on branch {branch}",
 	deleteProject: "Remove from recent projects",
 	deleteProjectConfirm: "Confirm remove",
 	deleteSession: "Delete this chat transcript permanently",

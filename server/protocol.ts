@@ -607,10 +607,34 @@ export interface SessionSearchResult extends SessionSummary {
  * <dataDir>/client-state.json, merged with cwds found in the session store).
  */
 export interface ProjectSummary {
-	/** Absolute path of the workspace directory. */
+	/** Absolute path of the workspace directory. For a git repository this is
+	 *  the MAIN checkout: linked worktrees of the same repository are listed in
+	 *  `worktrees`, never as projects of their own. */
 	path: string;
-	/** Last time this workspace was used (ms epoch) — drives the sort order. */
+	/** Last time this workspace was used (ms epoch) — drives the sort order.
+	 *  For a repository, the newest across all of its checkouts. */
 	lastUsed: number;
+	/** Every checkout of the repository, main first. Chats and sessions whose
+	 *  cwd is one of these paths belong to this project; non-main entries get
+	 *  a branch badge. Omitted for non-git directories. */
+	worktrees?: WorktreeSummary[];
+}
+
+/** One checkout of a project's repository (see ProjectSummary.worktrees). */
+export interface WorktreeSummary {
+	/** Absolute checkout path (the cwd chats in it run under). */
+	path: string;
+	/** Checked-out branch; null when detached. */
+	branch: string | null;
+	/** Short HEAD hash — the label for a detached checkout. */
+	head: string;
+	/** The repository's main checkout (== ProjectSummary.path). */
+	isMain: boolean;
+	/** Locked by `git worktree lock` (or by a running agent). */
+	locked: boolean;
+	/** Lives under the managed `~/.pi/worktrees/<repo>/<slug>` layout the
+	 *  CLI's /worktree command and this UI create. */
+	managed: boolean;
 }
 
 /** 一个可选项：模型的 ask_user_question 问卷选项。preview 为选项被选中后

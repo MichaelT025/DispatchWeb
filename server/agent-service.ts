@@ -38,6 +38,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { BgServerTracker } from "./bg-servers.js";
+import { isManagedWorktree, listWorktrees, type GitWorktree } from "./worktrees.js";
 import { removeFirstOccurrence } from "./queue-utils.js";
 import { SettingsService } from "./settings-service.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
@@ -3389,6 +3390,23 @@ export class ClientSession {
 	 * never pollutes or races the active cwd's fridge.
 	 */
 	private sessionInfosCache = new Map<string, { infos: SessionInfo[]; at: number }>();
+	/** `git worktree list` per repository, keyed by the folded path of EVERY
+	 *  checkout of that repository so sibling worktrees share one git call.
+	 *  Short TTL: pushProjects runs on each list_projects and after every
+	 *  project switch. */
+	private worktreeCache = new Map<string, { list: GitWorktree[]; at: number }>();
+	private static readonly WORKTREE_CACHE_TTL = 5000;
+
+	private async repoWorktrees(dir: string): Promise<GitWorktree[]> {
+		const now = Date.now();
+		const c = this.worktreeCache.get(cwdKey(dir));
+		if (c && now - c.at < ClientSession.WORKTREE_CACHE_TTL) return c.list;
+		const list = (await listWorktrees(dir)).filter((w) => !w.prunable && !w.bare);
+		const entry = { list, at: now };
+		this.worktreeCache.set(cwdKey(dir), entry);
+		for (const w of list) this.worktreeCache.set(cwdKey(w.path), entry);
+		return list;
+	}
 
 	/** Folded cwd key → the spelling the sidebar groups under. Transcripts can
 	 *  store a cwd in another case (`c:\...` from a CLI run); listings and
@@ -3959,17 +3977,21 @@ export class ClientSession {
 	 * Push the project list. A directory is a project when this client opened
 	 * it explicitly (picker / set_cwd / launch cwd) OR it is a git repository
 	 * root that has sessions — a repo you only ever ran the pi CLI in is still
-	 * a project. Anything else with sessions (a shell's default cwd like
-	 * system32 or $HOME, the projectless chats dir, deleted workspaces) is not
-	 * promoted; those listings are pushed right after so the sidebar can show
-	 * them flat under "Recents".
+	 * a project. A linked git worktree is never a project of its own: it is
+	 * folded into its repository's MAIN checkout and listed in that project's
+	 * `worktrees`, so chats run in `~/.pi/worktrees/<repo>/<branch>` sit under
+	 * `<repo>` with a branch badge instead of forming a look-alike sibling.
+	 * Anything else with sessions (a shell's default cwd like system32 or
+	 * $HOME, the projectless chats dir, deleted workspaces) is not promoted;
+	 * those listings are pushed right after so the sidebar can show them flat
+	 * under "Recents".
 	 */
 	async pushProjects(): Promise<void> {
 		try {
 			const saved = this.stateStore.get(this.clientId);
 			const removedKeys = new Set(this.stateStore.getRemovedProjects(this.clientId).map(cwdKey));
-			const map = new Map<string, number>();
-			for (const p of saved.projects) map.set(p.path, p.lastUsed);
+			const savedLastUsed = new Map<string, number>();
+			for (const p of saved.projects) savedLastUsed.set(cwdKey(p.path), p.lastUsed);
 			// Newest session per cwd across the whole store (one scan). Spellings
 			// that differ only by case fold into one entry (the saved project's
 			// spelling wins, else the first seen): on Windows they are the same
@@ -3978,45 +4000,96 @@ export class ClientSession {
 			const canonical = new Map<string, string>();
 			for (const p of saved.projects) canonical.set(cwdKey(p.path), p.path);
 			canonical.set(cwdKey(this.cwd), this.cwd);
-			const latestByCwd = new Map<string, number>();
+			const spelling = (path: string): string => {
+				const key = cwdKey(path);
+				let known = canonical.get(key);
+				if (known === undefined) {
+					known = path;
+					canonical.set(key, known);
+				}
+				return known;
+			};
+			const latestByKey = new Map<string, number>();
 			for (const s of await SessionManager.listAll(piSessionsRoot())) {
 				if (!s.cwd) continue;
-				const key = cwdKey(s.cwd);
-				let cwd = canonical.get(key);
-				if (cwd === undefined) {
-					cwd = s.cwd;
-					canonical.set(key, cwd);
-				}
+				const key = cwdKey(spelling(s.cwd));
 				const t = s.modified.getTime();
-				const prev = latestByCwd.get(cwd);
-				if (prev === undefined || t > prev) latestByCwd.set(cwd, t);
+				const prev = latestByKey.get(key);
+				if (prev === undefined || t > prev) latestByKey.set(key, t);
 			}
 			this.canonicalCwd = canonical;
-			for (const [cwd, t] of latestByCwd) {
-				if (map.has(cwd)) {
-					if (t > (map.get(cwd) ?? 0)) map.set(cwd, t);
-				} else if (isRepoRoot(cwd)) {
-					map.set(cwd, t);
+
+			// Group candidates by repository. A repo root (main or linked
+			// checkout) resolves to its `git worktree list`; the first entry is
+			// the main checkout and becomes the project.
+			interface Group {
+				path: string;
+				lastUsed: number;
+				worktrees: GitWorktree[] | null;
+			}
+			const groups = new Map<string, Group>();
+			const bump = (g: Group, t: number) => {
+				if (t > g.lastUsed) g.lastUsed = t;
+			};
+			const candidates = new Set<string>([...savedLastUsed.keys(), ...latestByKey.keys()]);
+			for (const key of candidates) {
+				const path = canonical.get(key) ?? key;
+				if (path === this.projectlessCwd) continue;
+				const t = Math.max(savedLastUsed.get(key) ?? 0, latestByKey.get(key) ?? 0);
+				if (isRepoRoot(path)) {
+					const list = await this.repoWorktrees(path);
+					const main = list.length > 0 ? spelling(list[0].path) : path;
+					const mainKey = cwdKey(main);
+					let g = groups.get(mainKey);
+					if (!g) {
+						g = { path: main, lastUsed: 0, worktrees: list.length > 0 ? list : null };
+						groups.set(mainKey, g);
+					}
+					bump(g, t);
+				} else if (savedLastUsed.has(key)) {
+					let g = groups.get(key);
+					if (!g) {
+						g = { path, lastUsed: 0, worktrees: null };
+						groups.set(key, g);
+					}
+					bump(g, t);
 				}
 			}
+
 			// Only keep directories that still exist — a deleted/unmounted workspace
 			// is useless in the picker. Tombstoned entries (explicitly removed by
 			// the user) stay hidden even though session files still mention them.
-			const projects: ProjectSummary[] = [...map.entries()]
-				.filter(([path]) => path !== this.projectlessCwd && !removedKeys.has(cwdKey(path)) && existsSync(path))
-				.map(([path, lastUsed]) => ({ path, lastUsed }))
+			const projects: ProjectSummary[] = [...groups.values()]
+				.filter((g) => !removedKeys.has(cwdKey(g.path)) && existsSync(g.path))
+				.map((g) => {
+					const worktrees = g.worktrees
+						?.filter((w) => existsSync(w.path))
+						.map((w, i) => ({
+							path: spelling(w.path),
+							branch: w.branch,
+							head: w.head.slice(0, 8),
+							isMain: i === 0,
+							locked: w.locked,
+							managed: isManagedWorktree(w.path),
+						}));
+					return worktrees ? { path: g.path, lastUsed: g.lastUsed, worktrees } : { path: g.path, lastUsed: g.lastUsed };
+				})
 				.sort((a, b) => b.lastUsed - a.lastUsed)
 				.slice(0, 20);
 			this.emit({ type: "projects", projects });
 
 			// Detached chats: every other cwd that has sessions, most recently
 			// touched first, capped so a long CLI history can't flood the panel.
-			const known = new Set(projects.map((p) => cwdKey(p.path)));
-			const detached = [...latestByCwd.entries()]
-				.filter(([cwd]) => !known.has(cwdKey(cwd)) && !removedKeys.has(cwdKey(cwd)))
+			const known = new Set<string>();
+			for (const p of projects) {
+				known.add(cwdKey(p.path));
+				for (const w of p.worktrees ?? []) known.add(cwdKey(w.path));
+			}
+			const detached = [...latestByKey.entries()]
+				.filter(([key]) => !known.has(key) && !removedKeys.has(key))
 				.sort((a, b) => b[1] - a[1])
 				.slice(0, ClientSession.RECENT_CWD_CAP)
-				.map(([cwd]) => cwd);
+				.map(([key]) => canonical.get(key) ?? key);
 			if (!detached.includes(this.projectlessCwd)) detached.push(this.projectlessCwd);
 			for (const cwd of detached) await this.refreshSessions(cwd);
 		} catch {

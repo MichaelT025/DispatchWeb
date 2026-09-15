@@ -6,6 +6,7 @@ import {
 	FiChevronsLeft,
 	FiEdit2,
 	FiFolder,
+	FiGitBranch,
 	FiPlus,
 	FiSearch,
 	FiTrash2,
@@ -15,7 +16,7 @@ import type { ConversationSummary, ProjectSummary, SessionSummary } from "../typ
 import { useT } from "../i18n";
 import { Logo } from "./Logo";
 import { useAppField } from "../app-globals";
-import { buildLeftNav, pendingSessionCwds, stableProjectOrder, type NavGroup } from "./left-panel-nav";
+import { buildLeftNav, cwdKey, pendingSessionCwds, stableProjectOrder, type NavGroup } from "./left-panel-nav";
 
 /** Props are deliberately NARROW (no whole-ChatState object): every field is
  *  stable while tokens stream in, so the shallow-compared memo() below skips
@@ -217,7 +218,19 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	const renderConversationRow = (c: ConversationSummary, depth: number) => {
+	/** Branch badge for a chat that runs in a linked worktree of its project
+	 *  (Claude-desktop style: rows stay flat, the badge tells them apart).
+	 *  Only the last path segment fits next to a title — `feat/sidebar-cleanup`
+	 *  reads as `sidebar-cleanup`; the tooltip carries the full name. */
+	const branchBadge = (branch: string | undefined) =>
+		branch ? (
+			<span className="lp-branch" title={t("worktreeBranch", { branch })}>
+				<FiGitBranch aria-hidden="true" />
+				<span className="lp-branch-name">{branch.slice(branch.lastIndexOf("/") + 1)}</span>
+			</span>
+		) : null;
+
+	const renderConversationRow = (c: ConversationSummary, depth: number, branch?: string) => {
 		const active = activeConversationId === c.id;
 		const pending = pendingTarget === c.id && !active;
 		const key = `conv:${c.id}`;
@@ -262,6 +275,7 @@ export const LeftPanel = memo(function LeftPanel({
 						) : (
 							<span className="session-title">{c.title}</span>
 						)}
+						{renaming === key ? null : branchBadge(branch)}
 						{renaming === key ? null : (
 							<span className="session-sub">{active ? t("current") : t("messageCount", { n: c.messageCount })}</span>
 						)}
@@ -306,7 +320,7 @@ export const LeftPanel = memo(function LeftPanel({
 		);
 	};
 
-	const renderSessionRow = (s: SessionSummary) => {
+	const renderSessionRow = (s: SessionSummary, branch?: string) => {
 		const active = currentFile === s.path;
 		const pending = pendingTarget === s.path && !active;
 		const key = `sess:${s.path}`;
@@ -346,6 +360,7 @@ export const LeftPanel = memo(function LeftPanel({
 						) : (
 							<span className="session-title">{displayName(s)}</span>
 						)}
+						{renaming === s.path ? null : branchBadge(branch)}
 						{renaming === s.path ? null : (
 							<span className="session-sub">
 								{active ? t("current") : t("messageCount", { n: s.messageCount })}
@@ -500,10 +515,10 @@ export const LeftPanel = memo(function LeftPanel({
 									<div className="lp-group-body">
 										{g.conversations.length > 0 && (
 											<div className="lp-group-convs">
-												{g.conversations.map(({ c, depth }) => renderConversationRow(c, depth))}
+												{g.conversations.map(({ c, depth, branch }) => renderConversationRow(c, depth, branch))}
 											</div>
 										)}
-										{g.sessions.map((s) => renderSessionRow(s))}
+										{g.sessions.map((s) => renderSessionRow(s, g.sessionBranches.get(cwdKey(s.path))))}
 									</div>
 								)}
 								{!collapsed && g.isCurrent && g.conversations.length === 0 && g.sessions.length === 0 && (
@@ -519,7 +534,7 @@ export const LeftPanel = memo(function LeftPanel({
 					{recents
 						.flatMap((g) => g.sessions)
 						.sort((a, b) => b.modified - a.modified)
-						.map(renderSessionRow)}
+						.map((s) => renderSessionRow(s))}
 				</div>
 			</nav>
 			<footer className="lp-footer">

@@ -32,6 +32,7 @@ import {
 } from "../workers";
 import { useWorkers } from "../workers-store";
 import { RoleChip } from "./RoleChip";
+import { shimmerPhase } from "../shimmer";
 
 /** Window event the delegate card fires to open one worker in the Workers
  *  pane (App.tsx listens; the card sits deep in the memoized message tree).
@@ -191,6 +192,7 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 				</span>
 				<span
 					className={`toolcall-summary${running ? " shimmer" : ""}`}
+					style={running ? shimmerPhase(block.id) : undefined}
 					title={summaryTitle ? `${block.name} · ${summaryTitle}` : block.name}
 					aria-label={`${statusLabel}: ${summary.verb} ${summary.target ?? ""}`.trim()}
 				>
@@ -374,7 +376,12 @@ function DelegateWorkerRow({ worker, now }: { worker: UiWorker; now: number }) {
 			<div className="delegate-worker-head">
 				<RoleChip role={worker.role} />
 				<span className="worker-id">#{worker.id}</span>
-				<span className={`worker-status${running ? " shimmer" : ""}`}>{workerStatusLabel(worker.status)}</span>
+				<span
+					className={`worker-status${running ? " shimmer" : ""}`}
+					style={running ? shimmerPhase(worker.id) : undefined}
+				>
+					{workerStatusLabel(worker.status)}
+				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
 				<span className="worker-spacer" />
 				<FiArrowRight className="delegate-worker-go" aria-hidden="true" />

@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { shimmerPhase } from "../shimmer";
 import {
 	FiArchive,
 	FiBookOpen,
@@ -465,6 +466,7 @@ export const Message = memo(function Message({
 									block.type === "text" ? null : (
 										<Block
 											key={`${message.id}-${i}`}
+											blockKey={`${message.id}-${i}`}
 											block={block}
 											toolResults={toolResults}
 											liveOutputs={liveOutputs}
@@ -484,6 +486,7 @@ export const Message = memo(function Message({
 							message.content.map((block, i) => (
 								<Block
 									key={`${message.id}-${i}`}
+									blockKey={`${message.id}-${i}`}
 									block={block}
 									toolResults={toolResults}
 									liveOutputs={liveOutputs}
@@ -500,7 +503,9 @@ export const Message = memo(function Message({
 						)}
 						{isEmptyStreaming && (
 							<div className="thinking-wait">
-								<span className="thinking-wait-label shimmer">{t("thinkingWait")}</span>
+								<span className="thinking-wait-label shimmer" style={shimmerPhase(message.id)}>
+									{t("thinkingWait")}
+								</span>
 							</div>
 						)}
 					</>
@@ -796,6 +801,7 @@ function SkillCard({ block, forceOpen = false }: { block: SkillBlock; forceOpen?
 
 function Block({
 	block,
+	blockKey,
 	toolResults,
 	liveOutputs,
 	toolStatuses,
@@ -808,6 +814,8 @@ function Block({
 	role,
 }: {
 	block: UiContentBlock;
+	/** Stable per-block key (message id + index) for shimmer phasing. */
+	blockKey: string;
 	toolResults: ReadonlyMap<string, UiMessage>;
 	liveOutputs: ReadonlyMap<string, { toolName: string; text: string }>;
 	toolStatuses: ReadonlyMap<string, ToolStatus>;
@@ -879,6 +887,7 @@ function Block({
 				streaming={streaming && isLast}
 				wrap={thinkingWrap}
 				forceOpen={searchActive}
+				phaseKey={blockKey}
 			/>
 		);
 	}

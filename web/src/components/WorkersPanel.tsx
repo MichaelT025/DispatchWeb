@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { shimmerPhase } from "../shimmer";
 import { FiArrowLeft, FiSquare, FiUsers } from "react-icons/fi";
 import type { ClientMessage, ToolStatus, UiMessage, UiWorker, UiWorkerTranscript } from "../types";
 import { useT } from "../i18n";
@@ -151,7 +152,12 @@ function WorkerRow({ worker, now, onClick }: { worker: UiWorker; now: number; on
 			<div className="worker-row-head">
 				<RoleChip role={worker.role} />
 				<span className="worker-id">#{worker.id}</span>
-				<span className={`worker-status${running ? " shimmer" : ""}`}>{workerStatusLabel(worker.status)}</span>
+				<span
+					className={`worker-status${running ? " shimmer" : ""}`}
+					style={running ? shimmerPhase(worker.id) : undefined}
+				>
+					{workerStatusLabel(worker.status)}
+				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
 			</div>
 			<div className="worker-task" title={worker.task}>
@@ -218,7 +224,10 @@ function WorkerDetail({
 				</button>
 				<RoleChip role={worker.role} />
 				<span className="worker-id">#{worker.id}</span>
-				<span className={`worker-status tone-${workerStatusTone(worker.status)}${running ? " shimmer" : ""}`}>
+				<span
+					className={`worker-status tone-${workerStatusTone(worker.status)}${running ? " shimmer" : ""}`}
+					style={running ? shimmerPhase(worker.id) : undefined}
+				>
 					{workerStatusLabel(worker.status)}
 				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>

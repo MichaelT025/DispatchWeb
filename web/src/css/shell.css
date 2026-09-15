@@ -249,18 +249,25 @@
 	line-height: 1.4;
 }
 /* worktree marker: a chat/session row that runs in a linked checkout. Sits
-   before the title in the accent hue so it reads at a glance; the branch
-   name is in the tooltip. */
+   in the row's left gutter (the 32px title indent), so titles line up
+   whether or not a row has one; the branch name is in the tooltip. Mint,
+   not accent: the shell theme greys the accent out. */
+.lp-nav .session-item {
+	position: relative;
+}
 .lp-nav .lp-branch {
+	position: absolute;
+	left: 8px;
+	top: 50%;
+	transform: translateY(-50%);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	flex: none;
 	width: 18px;
 	height: 18px;
 	border-radius: 5px;
-	color: var(--accent);
-	background: var(--accent-soft);
+	color: var(--green);
+	background: var(--green-soft);
 }
 .lp-nav .lp-branch svg {
 	width: 13px;

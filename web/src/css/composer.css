@@ -187,16 +187,16 @@
 	font-size: 12.5px;
 }
 .wt-pill.in-worktree .wt-pill-branch {
-	color: var(--accent);
-	background: var(--accent-soft);
+	color: var(--green);
+	background: var(--green-soft);
 }
 .wt-pill .wt-pill-branch:hover {
 	background: transparent;
 	color: var(--text-dim);
 }
 .wt-pill.in-worktree .wt-pill-branch:hover {
-	background: var(--accent-soft);
-	color: var(--accent);
+	background: var(--green-soft);
+	color: var(--green);
 }
 .wt-pill .wt-pill-label {
 	overflow: hidden;
@@ -220,7 +220,7 @@
 }
 .wt-pill .wt-toggle input {
 	margin: 0;
-	accent-color: var(--accent);
+	accent-color: var(--green);
 }
 .wt-pill .wt-toggle.on {
 	color: var(--text);
@@ -243,13 +243,13 @@
 }
 .wt-pill .wt-name:focus {
 	outline: 0;
-	border-color: var(--accent);
+	border-color: var(--green);
 }
 .wt-pill .wt-create {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
-	color: var(--accent);
+	color: var(--green);
 }
 @media (max-width: 720px) {
 	.wt-pill .wt-pill-branch {

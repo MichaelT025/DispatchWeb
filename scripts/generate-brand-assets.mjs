@@ -7,6 +7,7 @@
  * Outputs (all overwritten deterministically):
  *   web/src/assets/dispatch-mark.svg             runtime mark (currentColor ink, red core, crop 180 180 735 735)
  *   web/public/favicon.svg                       theme-aware mark (.ink adaptive #17171a/#f5f5f6, red core)
+ *   web/public/desktop-icon.svg                  opaque Linux desktop mark (dark bg #131316, light ink #f5f5f6, red core)
  *   web/public/icons/icon-{192,512,1024}.png       normal PWA icons (dark opaque bg, 84% artwork)
  *   web/public/icons/maskable-{192,512,1024}.png   maskable PWA icons (dark opaque bg, 58% artwork)
  *   web/public/icon.ico                            ICO frames 16/24/32/48/64/128 (+ PNG 256)
@@ -28,6 +29,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ICON_DIR = join(ROOT, "web", "public", "icons");
 const MARK_SVG_PATH = join(ROOT, "web", "src", "assets", "dispatch-mark.svg");
 const FAVICON_SVG_PATH = join(ROOT, "web", "public", "favicon.svg");
+const DESKTOP_SVG_PATH = join(ROOT, "web", "public", "desktop-icon.svg");
+/** Desktop SVG canvas size (matches a standard PWA icon frame). */
+const DESKTOP_SIZE = 512;
 
 /** Opaque icon background (dark, contrasts the light mark). */
 const BG = "#131316";
@@ -78,6 +82,18 @@ function iconSvg(size, box) {
 	);
 }
 
+/** Opaque Linux desktop mark: fixed dark background + light ink + red core.
+ * Same visual scheme as the generated opaque PNG icons (no currentColor,
+ * no prefers-color-scheme) so desktop shells without theme queries render
+ * the intended badge. */
+function desktopSvgText() {
+	return (
+		`<?xml version="1.0" encoding="UTF-8"?>\n` +
+		`<!-- Dispatch desktop icon derived from assets/dispatch.svg: path geometry copied exactly; opaque background #131316, light foreground #f5f5f6, red core #fc0b12. Fixed opaque paint (no theme queries) for Linux .desktop shells. -->\n` +
+		`${iconSvg(DESKTOP_SIZE, NORMAL_BOX)}\n`
+	);
+}
+
 /** Runtime mark: currentColor ink + fixed red core, cropped to the square mark. */
 function markSvgText({ dark, detail, core }) {
 	const p = (d, fill) =>
@@ -121,6 +137,8 @@ function writeVectorMarks() {
 	console.log("wrote web/src/assets/dispatch-mark.svg");
 	writeFileSync(FAVICON_SVG_PATH, faviconSvgText(paths));
 	console.log("wrote web/public/favicon.svg");
+	writeFileSync(DESKTOP_SVG_PATH, desktopSvgText());
+	console.log("wrote web/public/desktop-icon.svg");
 }
 
 /** Minimal PNG decoder (8-bit non-interlaced RGBA/RGB) via node:zlib. */

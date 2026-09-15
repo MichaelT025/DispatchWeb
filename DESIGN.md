@@ -71,7 +71,11 @@ header picks between the PNGs with a `<picture>` element. Generated outputs
 `web/src/assets/dispatch-mark.svg` (foreground `currentColor`, red core
 `#fc0b12`) inlined through `components/Logo.tsx` so the 20/12/44px slots
 follow the theme, `web/public/favicon.svg` (adaptive to the browser's light /
-dark theme), the PWA/shortcut PNGs under `web/public/icons/`, and the multi-resolution
+dark theme; browser chrome only, never the Linux desktop icon),
+`web/public/desktop-icon.svg` (opaque fixed-paint desktop badge: dark `#131316`
+background, light `#f5f5f6` foreground, red core `#fc0b12` — same scheme as the
+opaque PNGs; packaged to the stable installed `pi-web-ui.svg` path for the Linux
+`.desktop` shortcut), the PWA/shortcut PNGs under `web/public/icons/`, and the multi-resolution
 `web/public/icon.ico`. Maskable icons keep the artwork inside the central safe circle.
 
 Regenerate from the repository root with `node scripts/generate-brand-assets.mjs`

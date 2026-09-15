@@ -256,4 +256,73 @@ describe("brand assets", () => {
 			}
 		}
 	});
+
+	describe("linux desktop icon", () => {
+		it("desktop-icon.svg is opaque with fixed paint (no currentColor / media queries)", () => {
+			const svg = read("web/public/desktop-icon.svg");
+			const lower = svg.toLowerCase();
+			// Opaque dark canvas + fixed light ink + red core (same scheme as the PNG icons).
+			expect(svg).toContain('<rect width="512" height="512" fill="#131316"/>');
+			expect(lower).toContain("#f5f5f6");
+			expect(lower).toContain(RED);
+			expect(svg).not.toContain("currentColor");
+			expect(svg).not.toContain("prefers-color-scheme");
+			expect(svg).not.toContain('class="ink"');
+			// No stale dark-source fills leak through the remap.
+			expect(svg).not.toContain("#070707");
+			expect(svg).not.toContain("#252524");
+			// Same preserved Dispatch geometry as the runtime mark.
+			for (const d of pathDs(read("assets/dispatch.svg"))) expect(svg).toContain(d);
+		});
+
+		it("desktop-icon.svg is byte-reproducible from assets/dispatch.svg", () => {
+			const source = read("assets/dispatch.svg");
+			const byFill = Object.fromEntries(
+				[...source.matchAll(/<path\s+d="([^"]+)"\s*fill="([^"]+)"/g)].map((m) => [m[2], m[1]]),
+			) as Record<string, string>;
+			const paint = (d: string, fill: string) =>
+				`<path d="${d}" fill="${fill}" fill-rule="evenodd" stroke="${fill}" stroke-width="0.25" stroke-linejoin="round"/>`;
+			const inner = `${paint(byFill["#070707"], "#f5f5f6")}\n${paint(byFill["#fc0b12"], RED)}\n${paint(byFill["#252524"], "#f5f5f6")}`;
+			const size = 512;
+			const side = 0.84 * size;
+			const off = (size - side) / 2;
+			const expected =
+				`<?xml version="1.0" encoding="UTF-8"?>\n` +
+				`<!-- Dispatch desktop icon derived from assets/dispatch.svg: path geometry copied exactly; opaque background #131316, light foreground #f5f5f6, red core #fc0b12. Fixed opaque paint (no theme queries) for Linux .desktop shells. -->\n` +
+				`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
+				`<rect width="${size}" height="${size}" fill="#131316"/>` +
+				`<svg x="${off}" y="${off}" width="${side}" height="${side}" viewBox="180 180 735 735">` +
+				`${inner}</svg></svg>\n`;
+			expect(read("web/public/desktop-icon.svg")).toBe(expected);
+			// The generator owns this output deterministically.
+			const generator = read("scripts/generate-brand-assets.mjs");
+			expect(generator).toContain("desktop-icon.svg");
+			expect(generator).toContain("desktopSvgText");
+		});
+
+		it("linux shortcut packages the dedicated icon at the stable installed path", () => {
+			const cli = read("bin/pi-web-ui.mjs");
+			// Package source is the dedicated opaque asset — never the adaptive favicon.
+			expect(cli).toContain('web", "public", "desktop-icon.svg"');
+			const shortcut = cli.slice(cli.indexOf("function installLinuxShortcut"));
+			expect(shortcut).not.toContain("favicon");
+			// Installed icon path stays stable for existing .desktop files.
+			expect(cli).toContain('"pi-web-ui.svg"');
+			expect(shortcut).toContain("copyFileSync(APP_SVG_PACKAGE, svgPath)");
+			expect(shortcut).toContain("Icon=${shQuote(desktopIcon)}");
+			// Legacy identifiers unchanged.
+			expect(cli).toContain('"pi-web-ui.desktop"');
+			expect(cli).toContain('"pi-web-ui.lnk"');
+			expect(cli).toContain('"pi-web-ui.command"');
+		});
+
+		it("adaptive favicon stays browser-only and is not referenced by the desktop entry", () => {
+			// Favicon remains theme-adaptive for browsers.
+			expect(read("web/public/favicon.svg")).toContain("prefers-color-scheme");
+			const cli = read("bin/pi-web-ui.mjs");
+			const shortcut = cli.slice(cli.indexOf("function installLinuxShortcut"));
+			expect(shortcut).not.toContain("favicon.svg");
+			expect(shortcut).toContain("Icon=${shQuote(desktopIcon)}");
+		});
+	});
 });

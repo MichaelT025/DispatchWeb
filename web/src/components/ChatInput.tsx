@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { FiList, FiSquare, FiPlus, FiArrowUp } from "react-icons/fi";
-import type { ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
+import type { ProjectSummary, ModelInfo, ProviderKeyInfo, SlashCommandInfo, UiMessage, UiState } from "../types";
 import type { AgentRole } from "../agents";
 import { useT } from "../i18n";
 import { appSend, useAppField } from "../app-globals";
@@ -14,6 +14,8 @@ import { detectTouchFirstDevice } from "../touch-device";
 
 import { ModelThinking } from "./ModelThinking";
 import { AgentPicker } from "./AgentPicker";
+import { WorktreePill } from "./WorktreePill";
+import type { WorktreeResult } from "../use-chat";
 
 /** True on touch-first devices (phones / tablets driven by a soft keyboard) —
  *  see `touch-device.ts` for the detection rules (Windows 触屏笔记本不算触屏，
@@ -37,6 +39,10 @@ interface ChatInputProps {
 	} | null;
 	models: ModelInfo[];
 	modelsLoading: boolean;
+	/** Recent projects with their checkouts — the branch pill finds the
+	 *  active cwd's worktree here. */
+	projects: ProjectSummary[];
+	worktreeResult: (WorktreeResult & { seq: number }) | null;
 	/** Files/folders attached via the right panel / preview, waiting to be sent. */
 	attachments: {
 		path: string;
@@ -83,6 +89,8 @@ export const ChatInput = memo(function ChatInput({
 	modelState,
 	models,
 	modelsLoading,
+	projects,
+	worktreeResult,
 	attachments,
 	onRemoveAttachment,
 	onAddImageFiles,
@@ -756,6 +764,11 @@ export const ChatInput = memo(function ChatInput({
 								// extension performs model + thinking + tools + setStatus.
 								appSend({ type: "prompt", text: `/agent ${role}` });
 							}}
+						/>
+						<WorktreePill
+							projects={projects}
+							emptyChat={messages.length === 0 && !streaming}
+							worktreeResult={worktreeResult}
 						/>
 					</div>
 					<div className="composer-tools-right">

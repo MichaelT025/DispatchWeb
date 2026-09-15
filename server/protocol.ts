@@ -554,6 +554,17 @@ export type ClientMessage =
 	/** Drop one workspace from this client's recent-project list (UI state
 	 *  only — nothing on disk is touched). */
 	| { type: "remove_project"; path: string }
+	/** Check `branch` out as a linked worktree of the repository containing
+	 *  `cwd` (any checkout of it; omitted = the active cwd) under
+	 *  `~/.pi/worktrees/<repo>/<slug>`, then open a blank chat there — the
+	 *  same fresh-session-in-the-worktree the CLI's `/worktree add` does. An
+	 *  existing checkout of the branch is reused. `branch` omitted = a
+	 *  generated name. Answered with worktree_result. */
+	| { type: "worktree_add"; cwd?: string; branch?: string }
+	/** Remove a linked worktree directory (its branch is kept). Refused while
+	 *  an open conversation runs in it. Without `force`, a worktree with
+	 *  uncommitted changes answers worktree_result{dirty:true} instead. */
+	| { type: "worktree_remove"; path: string; force?: boolean }
 	/** Permanently delete a persisted session transcript file (history list). */
 	| { type: "delete_session"; path: string }
 	/** Append a session_info name entry to a persisted session transcript (history rename). */
@@ -1099,6 +1110,18 @@ export type ServerMessage =
 			results: SessionSearchResult[];
 	  }
 	| { type: "projects"; projects: ProjectSummary[] }
+	/** Outcome of worktree_add / worktree_remove. */
+	| {
+			type: "worktree_result";
+			op: "add" | "remove";
+			ok: boolean;
+			/** Checkout path (the created/reused one for add; the target for remove). */
+			path: string;
+			branch?: string;
+			/** remove only: refused because of uncommitted changes — retry with force. */
+			dirty?: boolean;
+			error?: string;
+	  }
 	| {
 			type: "files";
 			path: string;

@@ -38,7 +38,17 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { BgServerTracker } from "./bg-servers.js";
-import { isManagedWorktree, listWorktrees, type GitWorktree } from "./worktrees.js";
+import {
+	createWorktree,
+	generateWorktreeName,
+	isManagedWorktree,
+	listWorktrees,
+	removeWorktree,
+	sameWorktreePath,
+	worktreeIsDirty,
+	WorktreeError,
+	type GitWorktree,
+} from "./worktrees.js";
 import { removeFirstOccurrence } from "./queue-utils.js";
 import { SettingsService } from "./settings-service.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
@@ -3476,6 +3486,107 @@ export class ClientSession {
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: sorted });
 		} catch {
 			this.emit({ type: "sessions", cwd: targetCwd, sessions: [] });
+		}
+	}
+
+	/**
+	 * Create (or reuse) the worktree for `branch` and open a blank chat in it.
+	 * The chat is an ordinary conversation whose cwd is the worktree, so every
+	 * tool, terminal and delegated worker of that chat runs there — the main
+	 * checkout is never touched. A worktree that was created but whose chat
+	 * failed to open is kept and its path reported, as in the CLI.
+	 */
+	async addWorktree(cwd?: string, branch?: string): Promise<void> {
+		if (this.quiesceBlocked()) return;
+		const dir = cwd ? resolve(cwd) : this.cwd;
+		const name = (branch ?? "").trim() || generateWorktreeName();
+		let created: { path: string; branch: string; existed: boolean };
+		try {
+			created = await createWorktree(dir, name);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.emit({ type: "worktree_result", op: "add", ok: false, path: dir, branch: name, error: message });
+			this.emit({ type: "notice", level: "error", text: `Could not create worktree ${name}: ${message}` });
+			return;
+		}
+		this.worktreeCache.clear();
+		const opened = await this.newChat(created.path);
+		this.emit({ type: "worktree_result", op: "add", ok: opened, path: created.path, branch: created.branch });
+		if (!opened) {
+			this.emit({
+				type: "notice",
+				level: "warning",
+				text: `Worktree ${created.branch} is ready at ${created.path}, but no chat was opened there. Open it from the sidebar.`,
+			});
+		}
+		void this.pushProjects();
+	}
+
+	/**
+	 * Remove a linked worktree (branch kept). Idle chats open in it are closed
+	 * first — their runtimes hold the directory open, which on Windows makes
+	 * the delete fail — and the active chat moves to another conversation or
+	 * to a blank chat in the main checkout. A streaming chat or one with live
+	 * terminals refuses, like dismiss_conversation does.
+	 */
+	async removeWorktree(path: string, force = false): Promise<void> {
+		if (this.quiesceBlocked()) return;
+		const target = resolve(path);
+		const refuse = (error: string) => {
+			this.emit({ type: "worktree_result", op: "remove", ok: false, path: target, error });
+			this.emit({ type: "notice", level: "warning", text: error });
+		};
+		const inTarget = [...this.convs.values()].filter((c) => sameWorktreePath(c.cwd, target));
+		for (const c of inTarget) {
+			let streaming = true;
+			try {
+				streaming = c.session.isStreaming;
+			} catch {
+				/* runtime being replaced — treat as busy */
+			}
+			if (streaming) return refuse(`Chat "${c.title}" is still running in this worktree — stop it before removing`);
+			if (c.terminals.countLive() > 0) {
+				return refuse(`Chat "${c.title}" still has open terminals in this worktree — close them before removing`);
+			}
+		}
+		if (inTarget.some((c) => c.id === this.activeId)) {
+			const other = [...this.convs.values()].find((c) => c.listed && !sameWorktreePath(c.cwd, target));
+			if (other) {
+				await this.switchConversation(other.id);
+			} else {
+				const main = (await listWorktrees(target))[0]?.path;
+				if (!main || !(await this.newChat(main))) {
+					return refuse("Could not move the active chat out of the worktree; it was not removed");
+				}
+			}
+			if (inTarget.some((c) => c.id === this.activeId)) {
+				return refuse("Could not move the active chat out of the worktree; it was not removed");
+			}
+		}
+		const branch = (await listWorktrees(target)).find((w) => sameWorktreePath(w.path, target))?.branch ?? undefined;
+		try {
+			// Dirty check before closing chats, so a refused removal leaves the
+			// user's open chats exactly where they were.
+			if (!force && (await worktreeIsDirty(target))) throw new WorktreeError("uncommitted changes", true);
+			for (const c of inTarget) this.removeConversation(c.id);
+			if (inTarget.length > 0) this.emitConversations();
+			const removed = await removeWorktree(target, force);
+			this.worktreeCache.clear();
+			this.emit({ type: "worktree_result", op: "remove", ok: true, path: target, branch: removed.branch ?? undefined });
+			this.emit({
+				type: "notice",
+				level: "info",
+				text: `Removed worktree ${removed.branch ?? target} (branch kept)`,
+			});
+			// Its history rows still show under the project; the transcripts
+			// stay on disk and can be reopened (the chat then runs in a cwd
+			// that no longer exists — pi's own resume rules apply).
+			void this.pushProjects();
+		} catch (err) {
+			const dirty = err instanceof WorktreeError && err.dirty;
+			const message = err instanceof Error ? err.message : String(err);
+			this.emit({ type: "worktree_result", op: "remove", ok: false, path: target, branch, dirty, error: message });
+			if (!dirty) this.emit({ type: "notice", level: "error", text: `Could not remove worktree: ${message}` });
 		}
 	}
 

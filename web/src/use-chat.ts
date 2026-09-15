@@ -29,6 +29,9 @@ import type {
 	UiWorkerTranscript,
 } from "./types";
 
+/** The payload of a `worktree_result` server message. */
+export type WorktreeResult = Extract<ServerMessage, { type: "worktree_result" }>;
+
 import { applyMessageDelta, type MessageDeltaMsg } from "./message-delta";
 import { resolvePendingQuestion, type QuestionSource } from "./pending-question";
 import { cwdKey } from "./components/left-panel-nav";
@@ -87,6 +90,10 @@ export interface ChatState {
 	activeConversationId: string;
 	/** Recent workspaces this client opened (left panel project picker). */
 	projects: ProjectSummary[];
+	/** Latest worktree_add / worktree_remove outcome (monotonic `seq` so a
+	 *  repeat of the same outcome is still observed). Consumed by the left
+	 *  panel (dirty-removal confirm) and the composer (creating state). */
+	worktreeResult: (WorktreeResult & { seq: number }) | null;
 	/** Workspace file listing for the right panel. */
 	files: FileListing | null;
 	/** Latest file content fetched for the preview panel (path-matched in the modal). */
@@ -218,6 +225,7 @@ type Action =
 			activeId: string;
 	  }
 	| { type: "projects"; projects: ProjectSummary[] }
+	| { type: "worktree_result"; result: WorktreeResult }
 	| { type: "files"; files: FileListing }
 	| { type: "file_changed"; path: string }
 	| { type: "file_content"; content: FileContent }
@@ -522,6 +530,8 @@ function reducer(state: ChatState, action: Action): ChatState {
 			};
 		case "projects":
 			return { ...state, projects: action.projects };
+		case "worktree_result":
+			return { ...state, worktreeResult: { ...action.result, seq: (state.worktreeResult?.seq ?? 0) + 1 } };
 		case "files":
 			return { ...state, files: action.files };
 		case "file_changed":
@@ -704,6 +714,7 @@ export function useChat() {
 		conversations: [],
 		activeConversationId: "",
 		projects: [],
+		worktreeResult: null,
 		files: null,
 
 		fileChanged: null,
@@ -967,6 +978,9 @@ export function useChat() {
 					break;
 				case "projects":
 					dispatch({ type: "projects", projects: msg.projects });
+					break;
+				case "worktree_result":
+					dispatch({ type: "worktree_result", result: msg });
 					break;
 				case "files":
 					dispatch({ type: "files", files: msg });

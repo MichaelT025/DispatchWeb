@@ -11,9 +11,9 @@ import type { ConversationSummary, ProjectSummary, SessionSummary, WorktreeSumma
 export interface NavConversation {
 	c: ConversationSummary;
 	depth: number;
-	/** Branch badge when the chat runs in a linked worktree of its project
-	 *  (undefined in the main checkout or outside git). */
-	branch?: string;
+	/** The linked worktree the chat runs in (undefined in the main checkout
+	 *  or outside git) — drives the branch badge and the remove action. */
+	worktree?: WorktreeSummary;
 }
 
 /** One top-level navigation group (a workspace directory). */
@@ -33,9 +33,9 @@ export interface NavGroup {
 	/** History sessions under this group, matched by the group's cwd — for a
 	 *  repository, by ANY of its checkouts (merged, newest first). */
 	sessions: SessionSummary[];
-	/** Branch badge per history session path (folded), for sessions that
-	 *  live in a linked worktree. Absent for main-checkout sessions. */
-	sessionBranches: ReadonlyMap<string, string>;
+	/** Linked worktree per history session path (folded), for sessions that
+	 *  live in one. Absent for main-checkout sessions. */
+	sessionWorktrees: ReadonlyMap<string, WorktreeSummary>;
 	/** Every checkout of the project's repository, main first; [] outside git. */
 	worktrees: WorktreeSummary[];
 	/** Directories whose history this group shows and that are NOT the active
@@ -85,24 +85,24 @@ function makeGroup(
 	// Chats in a linked worktree are matched by that checkout's cwd; the
 	// badge names its branch so two chats of one repo read as different work.
 	const cwds = worktrees.length > 0 ? worktrees.map((w) => w.path) : [path];
-	const branchByKey = new Map<string, string>();
-	for (const w of worktrees) if (!w.isMain) branchByKey.set(cwdKey(w.path), worktreeLabel(w));
+	const linkedByKey = new Map<string, WorktreeSummary>();
+	for (const w of worktrees) if (!w.isMain) linkedByKey.set(cwdKey(w.path), w);
 	const conversations: NavConversation[] = [];
 	const sessions: SessionSummary[] = [];
-	const sessionBranches = new Map<string, string>();
+	const sessionWorktrees = new Map<string, WorktreeSummary>();
 	const seenSessions = new Set<string>();
 	let isCurrent = false;
 	for (const cwd of cwds) {
 		const k = cwdKey(cwd);
 		if (k === currentKey) isCurrent = true;
-		const branch = branchByKey.get(k);
-		for (const c of convsByKey.get(k) ?? []) conversations.push(branch ? { c, depth: 0, branch } : { c, depth: 0 });
+		const worktree = linkedByKey.get(k);
+		for (const c of convsByKey.get(k) ?? []) conversations.push(worktree ? { c, depth: 0, worktree } : { c, depth: 0 });
 		for (const s of sessionsByKey.get(k) ?? []) {
 			const pk = cwdKey(s.path);
 			if (seenSessions.has(pk)) continue;
 			seenSessions.add(pk);
 			sessions.push(s);
-			if (branch) sessionBranches.set(pk, branch);
+			if (worktree) sessionWorktrees.set(pk, worktree);
 		}
 	}
 	sessions.sort((a, b) => b.modified - a.modified);
@@ -114,7 +114,7 @@ function makeGroup(
 		lastUsed,
 		conversations,
 		sessions,
-		sessionBranches,
+		sessionWorktrees,
 		worktrees,
 		fetchCwds: cwds.filter((cwd) => cwdKey(cwd) !== currentKey),
 	};

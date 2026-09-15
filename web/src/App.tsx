@@ -807,6 +807,7 @@ export function App() {
 						sessionsByCwd={chat.sessionsByCwd}
 						projects={chat.projects}
 						activeConversationId={chat.activeConversationId}
+						worktreeResult={chat.worktreeResult}
 					/>
 				</div>
 				{!isMobile && <ResizeHandle side="left" width={leftWidth} onResize={resizeLeft} />}
@@ -858,6 +859,8 @@ export function App() {
 								modelState={modelState}
 								models={chat.models}
 								modelsLoading={chat.modelsLoading}
+								projects={chat.projects}
+								worktreeResult={chat.worktreeResult}
 								providerKeys={chat.providerKeys}
 								attachments={attachments}
 								onRemoveAttachment={removeAttachmentCb}

@@ -5,6 +5,7 @@ import {
 	flattenConversations,
 	pendingSessionCwds,
 	stableProjectOrder,
+	worktreeLabel,
 	type NavGroup,
 } from "../../web/src/components/left-panel-nav.js";
 import type { ConversationSummary, ProjectSummary, SessionSummary, WorktreeSummary } from "../../web/src/types.js";
@@ -252,15 +253,15 @@ describe("worktrees", () => {
 		const g = groups[0];
 		expect(g.isProject).toBe(true);
 		expect(g.isCurrent).toBe(true);
-		expect(g.conversations.map((r) => [r.c.id, r.branch])).toEqual([
+		expect(g.conversations.map((r) => [r.c.id, r.worktree?.branch])).toEqual([
 			["c-main", undefined],
 			["c-feat", "feat/x"],
 		]);
 		// merged across checkouts, newest first
 		expect(g.sessions.map((s) => s.path)).toEqual(["/s/feat.jsonl", "/s/det.jsonl", "/s/main.jsonl"]);
-		expect(g.sessionBranches.get("/s/feat.jsonl")).toBe("feat/x");
-		expect(g.sessionBranches.get("/s/det.jsonl")).toBe("abcdef12"); // detached → short HEAD
-		expect(g.sessionBranches.has("/s/main.jsonl")).toBe(false);
+		expect(g.sessionWorktrees.get("/s/feat.jsonl")?.path).toBe("/home/.pi/worktrees/repo/feat-x");
+		expect(worktreeLabel(g.sessionWorktrees.get("/s/det.jsonl")!)).toBe("abcdef12"); // detached → short HEAD
+		expect(g.sessionWorktrees.has("/s/main.jsonl")).toBe(false);
 	});
 
 	it("the project is current when the active cwd is one of its worktrees", () => {
@@ -284,6 +285,6 @@ describe("worktrees", () => {
 			worktrees: [wt("C:/Repo", "main", true), wt("C:/Users/me/.pi/worktrees/Repo/feat", "feat")],
 		};
 		const g = buildLeftNav([p], [conv("k", "c:/users/me/.pi/worktrees/repo/feat")], new Map(), "C:/Repo")[0];
-		expect(g.conversations.map((r) => [r.c.id, r.branch])).toEqual([["k", "feat"]]);
+		expect(g.conversations.map((r) => [r.c.id, r.worktree?.branch])).toEqual([["k", "feat"]]);
 	});
 });

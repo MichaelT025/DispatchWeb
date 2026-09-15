@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { join, resolve } from "node:path";
 import {
 	branchSlug,
+	generateWorktreeName,
+	validBranchName,
 	isManagedWorktree,
 	parseWorktrees,
 	resolveWorktreePath,
@@ -77,5 +79,43 @@ describe("sameWorktreePath", () => {
 	it("ignores separator style", () => {
 		expect(sameWorktreePath("/a/b", "/a/b/")).toBe(true);
 		expect(sameWorktreePath("/a/b", "/a/c")).toBe(false);
+	});
+});
+
+describe("validBranchName", () => {
+	it("accepts ordinary names and rejects git-illegal ones", () => {
+		expect(validBranchName("feat/login")).toBe(true);
+		expect(validBranchName("bright-fox")).toBe(true);
+		for (const bad of [
+			"",
+			"-x",
+			"/x",
+			"x/",
+			"x.",
+			"a..b",
+			"a//b",
+			"a b",
+			"a~b",
+			"a^b",
+			"a:b",
+			"a?b",
+			"a*b",
+			"a[b",
+			"a\b",
+			"x.lock",
+			"a@{b",
+		]) {
+			expect(validBranchName(bad), bad).toBe(false);
+		}
+	});
+});
+
+describe("generateWorktreeName", () => {
+	it("is adjective-noun, valid as a branch, and driven by the random source", () => {
+		const a = generateWorktreeName(() => 0);
+		const b = generateWorktreeName(() => 0.999);
+		expect(a).toMatch(/^[a-z]+-[a-z]+$/);
+		expect(validBranchName(a)).toBe(true);
+		expect(a).not.toBe(b);
 	});
 });

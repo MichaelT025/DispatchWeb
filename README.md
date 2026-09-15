@@ -1,5 +1,10 @@
 # Dispatch Web
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/dispatch-light.png" />
+  <img alt="Dispatch mark" src="assets/dispatch-dark.png" width="120" />
+</picture>
+
 A Codex-style browser shell for the [pi coding agent](https://pi.dev), built
 for [Dispatch](../PiAstra). Dispatch Web was formerly named PiAstra web UI. Forked from
 [xing-shuyin/pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) and stripped

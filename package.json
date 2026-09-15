@@ -9,6 +9,7 @@
 	},
 	"main": "bin/pi-web-ui.mjs",
 	"files": [
+		"assets/",
 		"bin/",
 		"dist/",
 		"web/dist/",

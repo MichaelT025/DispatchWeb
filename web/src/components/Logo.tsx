@@ -8,9 +8,9 @@ interface LogoProps {
 }
 
 /**
- * Dispatch mark (same glyph as the original app mark), inlined so it follows
- * `currentColor` (light on the dark shell, dark on light themes) while the
- * red core keeps its own hue.
+ * Supplied Dispatch artwork, inlined so it follows `currentColor`
+ * (light on the dark shell, dark on light themes) while the red
+ * core keeps its fixed hue (#fc0b12).
  */
 export const Logo = memo(function Logo({ size = 20, className }: LogoProps) {
 	return (

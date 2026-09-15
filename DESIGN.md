@@ -61,6 +61,25 @@ navigation, card headers and menu rows 14px; mono in cards and fenced code
 original (11→12 … 16→17); anything new should land on that scale.
 Long project and title labels ellipsize; chat prose wraps naturally.
 
+### Logo assets
+
+Source artwork lives in `assets/`: `dispatch.svg` plus the theme PNGs
+`dispatch-dark.png` (dark foreground, for light backgrounds) and
+`dispatch-light.png` (light foreground, for dark backgrounds) — the README
+header picks between the PNGs with a `<picture>` element. Generated outputs
+(owned by the asset pipeline, not edited by hand):
+`web/src/assets/dispatch-mark.svg` (foreground `currentColor`, red core
+`#fc0b12`) inlined through `components/Logo.tsx` so the 20/12/44px slots
+follow the theme, `web/public/favicon.svg` (adaptive to the browser's light /
+dark theme), the PWA/shortcut PNGs under `web/public/icons/`, and the multi-resolution
+`web/public/icon.ico`. Maskable icons keep the artwork inside the central safe circle.
+
+Regenerate from the repository root with `node scripts/generate-brand-assets.mjs`
+(after `npm ci`; requires Chrome/Chromium, or `PI_WEB_CHROME`). No provider calls or
+new runtime dependencies are needed. The original source files are never rewritten.
+The browser favicon/touch-icon/manifest icon URLs are versioned, and the disposable
+service-worker static cache is refreshed so existing installations receive the new art.
+
 ## 4. Spacing & layout
 
 Full-height flex sidebar shell with a hairline between rail and canvas.

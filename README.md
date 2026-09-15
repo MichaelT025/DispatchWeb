@@ -64,6 +64,20 @@ answered by `worktree_result`; `ProjectSummary.worktrees` carries every
 checkout. `server/worktrees.ts` mirrors the CLI extension's porcelain parser,
 branch slug and managed-path rules.
 
+## Responsiveness
+
+Every sidebar click paints before the server answers: a new chat shows the
+empty composer at once (the runtime boots behind it — sending is held for
+that moment), a switch to a recently viewed chat re-shows its still-mounted
+message list, and a history row renders its transcript from the session
+file first (`UiState.booting`) while the runtime starts. On the server a
+cross-project new chat boots one runtime (it used to resume the project's
+last session and then replace it), snapshots go out before the per-project
+key/model restores, and `server/patch-extension-cache.ts` rewrites the SDK's
+extension loader so compiled extension modules are cached per file instead
+of being thrown away on every cwd change — a project switch went from ~3 s
+to ~0.2 s with the PiAstra extension set.
+
 ## What's here
 
 | Area                                           | Files                                                                                |

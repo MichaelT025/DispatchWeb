@@ -107,6 +107,15 @@ export interface UiState {
 	rev: number;
 	messages: UiMessage[];
 	/**
+	 * Transcript-first preview: this snapshot was built from the session file
+	 * alone (switch_session) while the conversation's runtime is still
+	 * starting, so `messages` are final but model/thinking/tools/commands are
+	 * placeholders and prompts are not accepted yet. The real snapshot for the
+	 * same conversationId (without this flag) replaces it; a failed boot is
+	 * followed by a snapshot of the previous conversation plus a notice.
+	 */
+	booting?: boolean;
+	/**
 	 * Live partial assistant message while a run is streaming. The SDK keeps the
 	 * in-progress message in agent.state.streamingMessage — it only enters
 	 * `messages` once the turn finishes (message_end). Null when idle.

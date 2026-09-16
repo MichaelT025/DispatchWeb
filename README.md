@@ -1,18 +1,25 @@
-# PiAstra web UI
+# Dispatch Web
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/dispatch-light.png" />
+  <img alt="Dispatch mark" src="assets/dispatch-dark.png" width="120" />
+</picture>
 
 A Codex-style browser shell for the [pi coding agent](https://pi.dev), built
-for [PiAstra](../PiAstra). Forked from
+for [Dispatch](../PiAstra). Dispatch Web was formerly named PiAstra web UI. Forked from
 [xing-shuyin/pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) and stripped
 down to the harness: project sidebar, conversation, files / git review pane,
 bottom terminal, and a model + agent-role pill in the composer.
 
+> Compatibility note: only the product name changed. The `pi-web-ui` executable and service files, `PI_WEB_*` environment variables, browser storage keys, the sibling `../PiAstra` path, and the GitHub repository `PiAstra-web-ui` are unchanged intentionally. Role, worker and worktree behavior comes from the Dispatch (`extensions/piastra`) extension in the parent checkout. The npm scope `@michaelt025` is confirmed, but the provisional package `@michaelt025/dispatch-web` remains unpublished and is not the supported Dispatch artifact — the generated `@michaelt025/dispatch` package bundles this UI — so there are no install instructions for it.
+
 Everything role-related (orchestrator / general / fast / review, the
-`delegate` tool, `/agent`) lives in PiAstra's own pi extension. This UI only
+`delegate` tool, `/agent`) lives in Dispatch's own pi extension. This UI only
 renders what that extension reports.
 
 ## Workers
 
-Delegated workers (PiAstra's `delegate` tool) show up in two places:
+Delegated workers (Dispatch's `delegate` tool) show up in two places:
 
 - **Delegate card** in the chat: one row per worker of that call — role, status,
   elapsed time and the extension's current activity line. A row opens that
@@ -26,7 +33,7 @@ Delegated workers (PiAstra's `delegate` tool) show up in two places:
   restart. Workers are scoped to the conversation, not the project.
 
 The data comes from the extension's `piastra:workers` event channel
-(PiAstra `extensions/piastra/worker-bridge.mjs`, version 1): the server's
+(Dispatch `extensions/piastra/worker-bridge.mjs`, version 1): the server's
 inline `pi-webui-workers` extension subscribes on each conversation's runtime,
 mirrors the worker list into `UiState.workers`, serves transcripts on
 `open_worker`, and relays `cancel_worker`. Nothing polls, and no worker text
@@ -43,7 +50,7 @@ project with a branch marker in front of the title (the branch name is the
 tooltip). A repository's history is listed across all of its checkouts.
 
 A chat is bound to one checkout for its whole life: its tools, terminals,
-file tree, git panel and PiAstra workers all run there. Choosing happens on
+file tree, git panel and Dispatch workers all run there. Choosing happens on
 an empty chat only — the composer shows the current branch with a
 **Worktree** checkbox. Ticking it asks for a branch name (blank = a generated
 `bright-fox` style name) and, on **Create**, checks that branch out as a
@@ -76,7 +83,7 @@ last session and then replace it), snapshots go out before the per-project
 key/model restores, and `server/patch-extension-cache.ts` rewrites the SDK's
 extension loader so compiled extension modules are cached per file instead
 of being thrown away on every cwd change — a project switch went from ~3 s
-to ~0.2 s with the PiAstra extension set.
+to ~0.2 s with the Dispatch extension set.
 
 ## What's here
 
@@ -101,8 +108,8 @@ the browser extension, and the self-update checker.
 
 Requirements: Node ≥ 22.19 and a configured pi install.
 
-From PiAstra, `npm run start:fork` runs this checkout's built artifacts with an
-isolated agent dir and UI state (see PiAstra's `docs/FORK_PLAN.md`). Build
+From Dispatch, `npm run start:fork` runs this checkout's built artifacts with an
+isolated agent dir and UI state (see Dispatch's `docs/FORK_PLAN.md`). Build
 first:
 
 ```bash
@@ -133,7 +140,7 @@ npm run ci               # the full local sequence, including build
 CI runs on every branch push, PRs into `main`, and manual dispatch. Static
 checks run on Linux; unit and protocol tests run on Linux and Windows; browser
 tests run on Linux with Chromium. Older runs of the same branch are cancelled.
-No provider credentials or sibling PiAstra checkout are required. The role and
+No provider credentials or sibling Dispatch checkout are required. The role and
 workers browser tests use test extensions to verify the status and worker
 bridges, not live delegation.
 
@@ -157,7 +164,7 @@ Other scripts in `tests/` remain manual diagnostics outside the CI suites.
 | -------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
 | `PI_WEB_PORT` / `PI_WEB_HOST`                            | `8787` / `127.0.0.1`     | Listen address                                                        |
 | `PI_WEB_CWD`                                             | process cwd              | Initial workspace                                                     |
-| `PI_WEB_DATA_DIR`                                        | `<cwd>/.pi-web`          | UI state, uploads, client-state.json                                  |
+| `PI_WEB_DATA_DIR`                                        | `~/.pi-web`              | UI state, uploads, client-state.json                                  |
 | `PI_CODING_AGENT_DIR`                                    | `~/.pi/agent`            | pi config dir (auth, models, sessions)                                |
 | `PI_WEB_TOKEN`                                           | unset                    | Shared bearer token for HTTP + WS                                     |
 | `PI_WEB_ALLOW_ORIGINS` / `PI_WEB_ALLOW_HOSTS`            | loopback                 | Extra origins / hosts when exposed                                    |

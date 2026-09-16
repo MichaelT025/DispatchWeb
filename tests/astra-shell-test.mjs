@@ -43,13 +43,18 @@ try {
 	await dismissSetup(page);
 	await page.locator(".astra-empty").waitFor();
 	check("empty state and composer render", await page.locator(".inputbar textarea").isVisible());
+	check("sidebar uses Dispatch branding", (await page.locator(".lp-brand-name").innerText()) === "Dispatch");
+	check("browser title uses Dispatch Web", (await page.title()).includes("Dispatch Web"));
+	check("empty state uses Dispatch Web", (await page.locator(".astra-empty").innerText()).includes("Dispatch Web"));
+	const manifest = await (await context.request.get(`${fixture.url}/manifest.webmanifest`)).json();
+	check("installable app uses Dispatch Web", manifest.name === "Dispatch Web");
 	check("four retained header controls", (await page.locator(".astra-header-right > button.chip").count()) === 4);
 	check(
 		"removed UI is absent",
 		(await page.locator(".bg-task-chip, .astra-header-right .dropdown, .empty-templates, .quick-row").count()) === 0,
 	);
 	check(
-		"role badge is neutral without PiAstra extension",
+		"role badge is neutral without Dispatch extension",
 		(await page.locator(".agent-picker-unavailable").count()) === 1,
 	);
 

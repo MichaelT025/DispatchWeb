@@ -51,7 +51,7 @@ try {
 	// version is best-effort — the server itself doesn't need it
 }
 
-const HELP = `pi-web-ui v${pkg.version} — PiAstra web UI for the pi coding agent
+const HELP = `pi-web-ui v${pkg.version} — Dispatch Web UI for the pi coding agent
 
 Usage:
   pi-web-ui                               Start server (foreground, Ctrl+C to stop, auto-opens browser)
@@ -68,7 +68,7 @@ Usage:
 Server options:
   --port <n>        Port (default 8787, or $PI_WEB_PORT)
   --cwd <dir>       Working directory (default $PI_WEB_CWD or home dir; foreground uses current dir)
-  --data-dir <dir>  Session data directory (default <cwd>/.pi-web)
+  --data-dir <dir>  Session data directory (default ~/.pi-web)
   --host <addr>     Listen address (default $PI_WEB_HOST or 127.0.0.1; 0.0.0.0 for LAN/containers)
   --agent-dir <dir> pi config directory (default $PI_CODING_AGENT_DIR or ~/.pi/agent)
   --name <name>     Service name (default pi-web-ui; macOS launchd label is
@@ -357,9 +357,9 @@ const SHORTCUT_LINUX_NAME = "pi-web-ui.desktop"; // Linux 桌面图标
 
 /** 快捷方式图标（品牌 .ico，随包发布；.lnk / .desktop 指向它）。 */
 const APP_ICO_NAME = "pi-web-ui-logo.ico"; // 复制到用户目录后的稳定文件名（避开 pi-web-ui.ico —— Windows 对该路径有损坏的图标缓存残留，见 issue #xxx）
-const APP_ICO_SOURCE = join(BIN_DIR, "..", "web", "public", "icon.ico"); // 包内品牌图标源文件（10 帧多分辨率，DPI 密度帧保证桌面/任务栏各尺寸颜色不失真）
-/** Branded SVG logo (source of truth: web/public/favicon.svg) — used on Linux. */
-const APP_SVG_PACKAGE = join(BIN_DIR, "..", "web", "public", "favicon.svg");
+const APP_ICO_SOURCE = join(BIN_DIR, "..", "web", "public", "icon.ico"); // Dispatch artwork, 7 frames (16–256px) for desktop/taskbar density.
+/** Branded opaque desktop SVG (source of truth: web/public/desktop-icon.svg) — used on Linux. */
+const APP_SVG_PACKAGE = join(BIN_DIR, "..", "web", "public", "desktop-icon.svg");
 
 /** Windows: per-user copy of the branded .ico (stable path for the .lnk icon). */
 function winIcoPath() {

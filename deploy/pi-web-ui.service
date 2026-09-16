@@ -1,4 +1,5 @@
 # pi-web-ui systemd unit — Linux auto-start on boot.
+# Dispatch Web keeps the unchanged `pi-web-ui` service and executable name.
 #
 # Install (adjust User/WorkingDirectory/Environment to taste):
 #   sudo npm i -g pi-web-ui

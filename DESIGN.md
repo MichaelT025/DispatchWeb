@@ -1,11 +1,13 @@
-# PiAstra shell design system
+# Dispatch Web shell design system
 
 ## 1. Atmosphere & identity
 
-The supplied `../PiAstra/docs/reference/codex.png` and `codex_empty_sidebar.png`
-define the direction: a full-height charcoal project sidebar beside a near-black
-working surface, a slim main-only title bar, plain assistant prose and compact
-right-aligned user bubbles. Preserve PiAstra's own content and real actions.
+The original Codex UI captures (`codex.png`, `codex_empty_sidebar.png`) are
+historical/external references and are not stored in this checkout or the
+parent checkout, so no local path is linked here. They defined the direction:
+a full-height charcoal project sidebar beside a near-black working surface, a
+slim main-only title bar, plain assistant prose and compact right-aligned user
+bubbles. Preserve Dispatch's own content and real actions.
 
 ## 2. Color
 
@@ -51,7 +53,7 @@ inversion for contrast.
 `--sans` is the platform UI face (Segoe UI Variable on Windows 11, SF on
 macOS, Roboto on Android — no webfont); `--mono` is JetBrains Mono (Google
 Fonts, Cascadia → system mono fallback). The xterm canvas uses the same mono
-stack at 13.5px. Form controls inherit `font-family` explicitly. The brand mark is `web/src/assets/piastra-mark.svg`, inlined through
+stack at 13.5px. Form controls inherit `font-family` explicitly. The brand mark is `web/src/assets/dispatch-mark.svg`, inlined through
 `components/Logo.tsx` so it follows `currentColor`.
 
 Scale: body 15px; chat prose and user bubble 14px / 1.6 (Codex density); composer 14.5px;
@@ -60,6 +62,29 @@ navigation, card headers and menu rows 14px; mono in cards and fenced code
 15px/600; header title 14px/500; empty wordmark 24px/600. Headings sit at 0 tracking. The whole `styles.css` scale sits one point above the
 original (11→12 … 16→17); anything new should land on that scale.
 Long project and title labels ellipsize; chat prose wraps naturally.
+
+### Logo assets
+
+Source artwork lives in `assets/`: `dispatch.svg` plus the theme PNGs
+`dispatch-dark.png` (dark foreground, for light backgrounds) and
+`dispatch-light.png` (light foreground, for dark backgrounds) — the README
+header picks between the PNGs with a `<picture>` element. Generated outputs
+(owned by the asset pipeline, not edited by hand):
+`web/src/assets/dispatch-mark.svg` (foreground `currentColor`, red core
+`#fc0b12`) inlined through `components/Logo.tsx` so the 20/12/44px slots
+follow the theme, `web/public/favicon.svg` (adaptive to the browser's light /
+dark theme; browser chrome only, never the Linux desktop icon),
+`web/public/desktop-icon.svg` (opaque fixed-paint desktop badge: dark `#131316`
+background, light `#f5f5f6` foreground, red core `#fc0b12` — same scheme as the
+opaque PNGs; packaged to the stable installed `pi-web-ui.svg` path for the Linux
+`.desktop` shortcut), the PWA/shortcut PNGs under `web/public/icons/`, and the multi-resolution
+`web/public/icon.ico`. Maskable icons keep the artwork inside the central safe circle.
+
+Regenerate from the repository root with `node scripts/generate-brand-assets.mjs`
+(after `npm ci`; requires Chrome/Chromium, or `PI_WEB_CHROME`). No provider calls or
+new runtime dependencies are needed. The original source files are never rewritten.
+The browser favicon/touch-icon/manifest icon URLs are versioned, and the disposable
+service-worker static cache is refreshed so existing installations receive the new art.
 
 ## 4. Spacing & layout
 

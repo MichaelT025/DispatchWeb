@@ -1046,7 +1046,7 @@ if (process.env[RESTART_CHILD_ENV] === "1") {
 
 httpServer.listen(PORT, HOST, () => {
 	console.log("");
-	console.log("  ⚡ pi-web-ui — web chat for the pi coding agent");
+	console.log("  ⚡ Dispatch Web — web chat for the pi coding agent");
 	console.log(`    http://localhost:${PORT}`);
 	console.log(`    workspace   : ${CWD}`);
 	console.log(`    session dir : ${SESSION_DIR_ROOT}`);

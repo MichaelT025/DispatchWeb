@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { AgentPicker } from "../../web/src/components/AgentPicker.js";
-import { AGENT_ROLES, hasPiastraExtension, type AgentRole } from "../../web/src/agents.js";
+import { AGENT_ROLES, hasDispatchExtension, type AgentRole } from "../../web/src/agents.js";
 import { LanguageProvider } from "../../web/src/i18n.js";
 
 /**
@@ -98,10 +98,10 @@ describe("AgentPicker", () => {
 
 	// The picker only appears (and only ever sends `/agent <role>`) when the
 	// catalog proves the extension owns BOTH commands. These cases wire the real
-	// `hasPiastraExtension` gate into the picker so a partial catalog or a
+	// `hasDispatchExtension` gate into the picker so a partial catalog or a
 	// same-named template/plugin can never expose role buttons.
 	it("hides role buttons when only a partial extension catalog is present", () => {
-		const available = hasPiastraExtension([{ name: "agent", source: "extension" }]);
+		const available = hasDispatchExtension([{ name: "agent", source: "extension" }]);
 		const { container, onSelect } = mount({ available });
 		expect(available).toBe(false);
 		expect(container.querySelector(".agent-picker-unavailable")).not.toBeNull();
@@ -110,9 +110,9 @@ describe("AgentPicker", () => {
 	});
 
 	it("hides role buttons when a prompt template collides with an extension name", () => {
-		const available = hasPiastraExtension([
+		const available = hasDispatchExtension([
 			{ name: "agent", source: "prompt" },
-			{ name: "piastra", source: "extension" },
+			{ name: "dispatch", source: "extension" },
 		]);
 		const { container } = mount({ available });
 		expect(available).toBe(false);
@@ -120,9 +120,9 @@ describe("AgentPicker", () => {
 	});
 
 	it("hides role buttons when a UI plugin collides with both extension names", () => {
-		const available = hasPiastraExtension([
+		const available = hasDispatchExtension([
 			{ name: "agent", source: "plugin" },
-			{ name: "piastra", source: "plugin" },
+			{ name: "dispatch", source: "plugin" },
 		]);
 		const { container } = mount({ available });
 		expect(available).toBe(false);
@@ -130,9 +130,9 @@ describe("AgentPicker", () => {
 	});
 
 	it("shows role buttons for the real extension (both commands, source=extension)", () => {
-		const available = hasPiastraExtension([
+		const available = hasDispatchExtension([
 			{ name: "agent", source: "extension" },
-			{ name: "piastra", source: "extension" },
+			{ name: "dispatch", source: "extension" },
 		]);
 		const { container } = mount({ available });
 		expect(available).toBe(true);

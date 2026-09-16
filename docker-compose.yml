@@ -1,4 +1,5 @@
-# One-command deploy: `docker compose up -d`
+# Dispatch Web — one-command deploy: `docker compose up -d`
+# (service, image and executable keep the unchanged `pi-web-ui` name.)
 # Auto-restarts on boot when the Docker daemon starts (restart: unless-stopped).
 services:
   pi-web-ui:

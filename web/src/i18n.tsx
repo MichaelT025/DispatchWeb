@@ -6,7 +6,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 export const en = {
 	/* common */
-	docTitle: "PiAstra",
+	docTitle: "Dispatch Web",
 	cancel: "Cancel",
 	ok: "OK",
 	save: "Save",
@@ -30,7 +30,7 @@ export const en = {
 	langEs: "Español",
 	langRu: "Русский",
 	langPt: "Português",
-	githubRepo: "GitHub repository (xing-shuyin/pi-web-ui)",
+	githubRepo: "GitHub repository (MichaelT025/PiAstra-web-ui)",
 	copy: "Copy",
 
 	/* topbar */
@@ -166,7 +166,7 @@ export const en = {
 	agentPickerLabel: "Select agent role",
 	agentPickerNeutral: "Agent",
 	agentPickerBusy: "The agent is working — stop it or wait for the turn to finish before switching",
-	agentPickerUnavailable: "Agent roles unavailable (PiAstra extension not loaded)",
+	agentPickerUnavailable: "Agent roles unavailable (Dispatch extension not loaded)",
 	agentActiveRole: "Active role: {role}",
 	agentUnknown: "Role unconfirmed",
 	agentRoleOrchestrator: "Orchestrator",

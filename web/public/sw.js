@@ -22,7 +22,9 @@
  * risk serving stale theme/plugin code or caching anything sensitive.
  */
 
-const STATIC_CACHE = "pi-web-ui-static-v1";
+// Refresh unversioned manifest/notification icons as well as the favicon.
+// Only replace the disposable asset cache; sessions and preferences are untouched.
+const STATIC_CACHE = "pi-web-ui-static-dispatch-logo-2";
 const SHELL_CACHE = "pi-web-ui-shell-v1";
 
 // App root within this origin — "/" for root deployments, "/pi/" behind an

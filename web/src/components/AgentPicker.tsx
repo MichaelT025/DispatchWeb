@@ -16,7 +16,7 @@ interface AgentPickerProps {
 	/** Confirmed active role from the server status bridge (null = unknown —
 	 *  we render no pressed button rather than an optimistic false label). */
 	activeRole: AgentRole | null;
-	/** Whether the PiAstra extension is loaded (/agent + /piastra present). */
+	/** Whether the Dispatch extension is loaded (/agent + /dispatch, legacy /piastra alias). */
 	available: boolean;
 	/** Busy (agent streaming) → buttons disabled with an explanation. */
 	busy: boolean;

@@ -29,7 +29,7 @@
 	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/MichaelT025/PiAstra-web-ui.git"
+		"url": "git+https://github.com/MichaelT025/DispatchWeb.git"
 	},
 	"engines": {
 		"node": ">=22.19.0"

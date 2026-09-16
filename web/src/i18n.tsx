@@ -30,7 +30,7 @@ export const en = {
 	langEs: "Español",
 	langRu: "Русский",
 	langPt: "Português",
-	githubRepo: "GitHub repository (MichaelT025/PiAstra-web-ui)",
+	githubRepo: "GitHub repository (MichaelT025/DispatchWeb)",
 	copy: "Copy",
 
 	/* topbar */

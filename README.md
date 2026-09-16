@@ -6,12 +6,12 @@
 </picture>
 
 A Codex-style browser shell for the [pi coding agent](https://pi.dev), built
-for [Dispatch](../PiAstra). Dispatch Web was formerly named PiAstra web UI. Forked from
+for [Dispatch](../Dispatch). Dispatch Web was formerly named PiAstra web UI. Forked from
 [xing-shuyin/pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) and stripped
 down to the harness: project sidebar, conversation, files / git review pane,
 bottom terminal, and a model + agent-role pill in the composer.
 
-> Compatibility note: only the product name changed. The `pi-web-ui` executable and service files, `PI_WEB_*` environment variables, browser storage keys, the sibling `../PiAstra` path, and the GitHub repository `PiAstra-web-ui` are unchanged intentionally. Role, worker and worktree behavior comes from the Dispatch (`extensions/piastra`) extension in the parent checkout. The npm scope `@michaelt025` is confirmed, but the provisional package `@michaelt025/dispatch-web` remains unpublished and is not the supported Dispatch artifact — the generated `@michaelt025/dispatch` package bundles this UI — so there are no install instructions for it.
+> Compatibility note: only the product name changed. The `pi-web-ui` executable and service files, `PI_WEB_*` environment variables, browser storage keys, are unchanged intentionally. Role, worker and worktree behavior comes from the Dispatch (`extensions/piastra`) extension in the parent checkout. The npm scope `@michaelt025` is confirmed, but the provisional package `@michaelt025/dispatch-web` remains unpublished and is not the supported Dispatch artifact — the generated `@michaelt025/dispatch` package bundles this UI — so there are no install instructions for it.
 
 Everything role-related (orchestrator / general / fast / review, the
 `delegate` tool, `/agent`) lives in Dispatch's own pi extension. This UI only

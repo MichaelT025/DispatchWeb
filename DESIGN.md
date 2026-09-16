@@ -2,10 +2,12 @@
 
 ## 1. Atmosphere & identity
 
-The supplied `../PiAstra/docs/reference/codex.png` and `codex_empty_sidebar.png`
-define the direction: a full-height charcoal project sidebar beside a near-black
-working surface, a slim main-only title bar, plain assistant prose and compact
-right-aligned user bubbles. Preserve Dispatch's own content and real actions.
+The original Codex UI captures (`codex.png`, `codex_empty_sidebar.png`) are
+historical/external references and are not stored in this checkout or the
+parent checkout, so no local path is linked here. They defined the direction:
+a full-height charcoal project sidebar beside a near-black working surface, a
+slim main-only title bar, plain assistant prose and compact right-aligned user
+bubbles. Preserve Dispatch's own content and real actions.
 
 ## 2. Color
 

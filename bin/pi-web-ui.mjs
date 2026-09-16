@@ -68,7 +68,7 @@ Usage:
 Server options:
   --port <n>        Port (default 8787, or $PI_WEB_PORT)
   --cwd <dir>       Working directory (default $PI_WEB_CWD or home dir; foreground uses current dir)
-  --data-dir <dir>  Session data directory (default <cwd>/.pi-web)
+  --data-dir <dir>  Session data directory (default ~/.pi-web)
   --host <addr>     Listen address (default $PI_WEB_HOST or 127.0.0.1; 0.0.0.0 for LAN/containers)
   --agent-dir <dir> pi config directory (default $PI_CODING_AGENT_DIR or ~/.pi/agent)
   --name <name>     Service name (default pi-web-ui; macOS launchd label is

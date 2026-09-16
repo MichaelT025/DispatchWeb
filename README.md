@@ -11,7 +11,7 @@ for [Dispatch](../PiAstra). Dispatch Web was formerly named PiAstra web UI. Fork
 down to the harness: project sidebar, conversation, files / git review pane,
 bottom terminal, and a model + agent-role pill in the composer.
 
-> Compatibility note: only the product name changed. The `pi-web-ui` executable and service files, `PI_WEB_*` environment variables, browser storage keys, the sibling `../PiAstra` path, and the GitHub repository `PiAstra-web-ui` are unchanged intentionally. Role, worker and worktree behavior comes from the Dispatch (`extensions/piastra`) extension in the parent checkout. The provisional package scope `@michaelt025/dispatch-web` is not published (registry path 404s, scope ownership unconfirmed), so there are no install instructions for it.
+> Compatibility note: only the product name changed. The `pi-web-ui` executable and service files, `PI_WEB_*` environment variables, browser storage keys, the sibling `../PiAstra` path, and the GitHub repository `PiAstra-web-ui` are unchanged intentionally. Role, worker and worktree behavior comes from the Dispatch (`extensions/piastra`) extension in the parent checkout. The npm scope `@michaelt025` is confirmed, but the provisional package `@michaelt025/dispatch-web` remains unpublished and is not the supported Dispatch artifact — the generated `@michaelt025/dispatch` package bundles this UI — so there are no install instructions for it.
 
 Everything role-related (orchestrator / general / fast / review, the
 `delegate` tool, `/agent`) lives in Dispatch's own pi extension. This UI only
@@ -164,7 +164,7 @@ Other scripts in `tests/` remain manual diagnostics outside the CI suites.
 | -------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
 | `PI_WEB_PORT` / `PI_WEB_HOST`                            | `8787` / `127.0.0.1`     | Listen address                                                        |
 | `PI_WEB_CWD`                                             | process cwd              | Initial workspace                                                     |
-| `PI_WEB_DATA_DIR`                                        | `<cwd>/.pi-web`          | UI state, uploads, client-state.json                                  |
+| `PI_WEB_DATA_DIR`                                        | `~/.pi-web`              | UI state, uploads, client-state.json                                  |
 | `PI_CODING_AGENT_DIR`                                    | `~/.pi/agent`            | pi config dir (auth, models, sessions)                                |
 | `PI_WEB_TOKEN`                                           | unset                    | Shared bearer token for HTTP + WS                                     |
 | `PI_WEB_ALLOW_ORIGINS` / `PI_WEB_ALLOW_HOSTS`            | loopback                 | Extra origins / hosts when exposed                                    |

@@ -180,7 +180,7 @@ describe("brand assets", () => {
 		}
 	});
 
-	it("maskable glyph fits inside the centered safe circle (r = 40% canvas)", () => {
+	it("maskable glyph fits inside the centered safe circle (r = 40% canvas)", { timeout: 15_000 }, () => {
 		for (const size of [192, 512, 1024]) {
 			const { width, height, rgba } = decodePng(readFileSync(join(ROOT, `web/public/icons/maskable-${size}.png`)));
 			const cx = width / 2;

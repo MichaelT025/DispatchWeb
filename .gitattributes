@@ -1,2 +1,4 @@
 # Preserve the supplied vector's original bytes on every platform.
 assets/dispatch.svg -text
+# Generated text assets must remain byte-stable across Windows and Unix checkouts.
+web/public/desktop-icon.svg text eol=lf

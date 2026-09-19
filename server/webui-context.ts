@@ -8,6 +8,7 @@
  */
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { ServerMessage } from "./protocol.js";
+import { TODO_WIDGET_KEY } from "./todo-state.js";
 
 const WIDGET_WIDTH = 80;
 
@@ -143,6 +144,9 @@ export class WebUIContext {
 	/** Matches ExtensionUIContext's overloaded setWidget exactly. */
 	setWidget: ExtensionUIContext["setWidget"] = (key, content, options) => {
 		void options;
+		// pi-todo's text overlay is superseded by the structured todo bridge
+		// (server/todo-state.ts) — never surface it as a raw-lines widget.
+		if (key === TODO_WIDGET_KEY) return;
 		if (content === undefined) {
 			this.widgets.delete(key);
 			this.lastLines.delete(key);

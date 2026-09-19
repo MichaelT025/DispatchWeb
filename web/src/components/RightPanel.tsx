@@ -14,8 +14,9 @@ import {
 	FiUpload,
 	FiX,
 } from "react-icons/fi";
-import type { ClientMessage, FileListing } from "../types";
+import type { ClientMessage, FileListing, TodosState } from "../types";
 import { useT } from "../i18n";
+import { TodoPanel } from "./TodoList";
 import { useAppField } from "../app-globals";
 import { downloadFile, DOWNLOAD_FILE_NOT_FOUND } from "../download";
 import { applySashDrag, parseWeights } from "../panel-sash";
@@ -40,6 +41,8 @@ interface RightPanelProps {
 	/** Last dir-changed push (path = listed directory) — triggers a refresh. */
 	fileChanged: { path: string } | null;
 	widgets: { key: string; lines: string[] }[];
+	/** Structured pi-todo list — rendered as the first card of the lower (widgets) region. */
+	todos: TodosState;
 	panelSend: (msg: ClientMessage) => boolean;
 	/** Called when the user clicks an attach button on a file or folder. */
 	onAttach: (path: string, name: string, mode: AttachMode, isDir?: boolean) => void;
@@ -57,6 +60,7 @@ export const RightPanel = memo(function RightPanel({
 	files,
 	fileChanged,
 	widgets,
+	todos,
 	panelSend,
 	onAttach,
 	onPreview,
@@ -87,7 +91,8 @@ export const RightPanel = memo(function RightPanel({
 			localStorage.setItem(LS_RP_SIZES, JSON.stringify(rpWeights));
 		} catch {}
 	}, [rpWeights]);
-	const hasWidgets = widgets.some((w) => w.lines.length > 0);
+	const hasTodos = todos.tasks.some((task) => task.status !== "deleted");
+	const hasWidgets = hasTodos || widgets.some((w) => w.lines.length > 0);
 	const onSashDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
 			e.preventDefault();
@@ -618,6 +623,7 @@ export const RightPanel = memo(function RightPanel({
 			)}
 			{hasWidgets && (
 				<div className="panel-widgets" style={{ flexGrow: rpWeights.widgets, minHeight: RP_MIN_WIDGETS_PX }}>
+					<TodoPanel todos={todos} />
 					{widgets
 						.filter((w) => w.lines.length > 0)
 						.map((w) => (

@@ -79,6 +79,7 @@ import {
 	isTerminalGuidanceOn,
 } from "./tool-manager.js";
 import { ConversationStatuses, WebUIContext, type StatusEntry } from "./webui-context.js";
+import { ConversationTodos, EMPTY_TODOS, TODO_TOOL_NAME } from "./todo-state.js";
 import { decodeText } from "./text-sniff.js";
 import { buildAttachmentMessages } from "./attachments.js";
 import {
@@ -980,6 +981,9 @@ export class ClientSession {
 	/** Per-conversation footer statuses (setStatus bridge). Active conversation
 	 *  resolved lazily so switches don't have to re-register anything. */
 	private readonly convStatuses = new ConversationStatuses(() => this.activeId);
+	/** Per-conversation structured todo list (pi-todo bridge). Populated lazily
+	 *  by replaying the branch, then kept live from `todo` tool results. */
+	private readonly convTodos = new Map<string, ConversationTodos>();
 
 	private widgetsTimer: ReturnType<typeof setInterval> | null = null;
 	/** Model-stall watchdog interval (see startStallTimer). */
@@ -1491,6 +1495,9 @@ export class ClientSession {
 		// A replacement runtime may not load the same extensions. Clear stale
 		// entries before session_start repopulates its confirmed statuses.
 		this.convStatuses.remove(conv.id);
+		// The session (and thus the branch) may have been replaced — re-read the
+		// todo list from it, keeping the in-flight run's ids.
+		this.replayTodos(conv, this.todosFor(conv));
 		this.pushActiveStatuses();
 		await conv.session.bindExtensions({
 			mode: "rpc",
@@ -1551,6 +1558,37 @@ export class ClientSession {
 	 *  the footer, which is exactly what a role-less chat needs on switch). */
 	private pushActiveStatuses(): void {
 		this.emit({ type: "statuses", statuses: this.convStatuses.activeSnapshot() });
+		// Same lifecycle: every status replay marks an active-conversation change.
+		this.pushActiveTodos();
+	}
+
+	/** Todo list of `conv`, replayed from its branch on first access. */
+	private todosFor(conv: Conversation): ConversationTodos {
+		let t = this.convTodos.get(conv.id);
+		if (!t) {
+			t = new ConversationTodos();
+			this.convTodos.set(conv.id, t);
+			this.replayTodos(conv, t);
+		}
+		return t;
+	}
+
+	private replayTodos(conv: Conversation, t: ConversationTodos): void {
+		try {
+			t.replay(conv.session.sessionManager.getBranch());
+		} catch {
+			// A runtime without a bound session yet — stays empty until rebind.
+		}
+	}
+
+	/** Push the ACTIVE conversation's todo list (switch / reconnect / update). */
+	private pushActiveTodos(): void {
+		const conv = this.convs.get(this.activeId);
+		this.emit({ type: "todos", ...(conv ? this.todosFor(conv).snapshot() : EMPTY_TODOS) });
+	}
+
+	private pushTodosIfActive(conv: Conversation): void {
+		if (conv.id === this.activeId) this.pushActiveTodos();
 	}
 
 	/** Status entries of the ACTIVE conversation (for replay on reconnect). */
@@ -1669,7 +1707,16 @@ export class ClientSession {
 				}
 				break;
 			}
+			case "agent_start": {
+				this.todosFor(conv).startRun();
+				this.pushTodosIfActive(conv);
+				break;
+			}
 			case "tool_execution_end": {
+				if (event.toolName === TODO_TOOL_NAME) {
+					const applied = this.todosFor(conv).apply((event.result as { details?: unknown })?.details);
+					if (applied) this.pushTodosIfActive(conv);
+				}
 				const startedAt = conv.toolStartTimes.get(event.toolCallId);
 				conv.toolStartTimes.delete(event.toolCallId);
 				this.clearToolWatchdog(conv, event.toolCallId);
@@ -1792,6 +1839,8 @@ export class ClientSession {
 			// A run finished or a new entry was persisted — keep the session list fresh
 			// (new chat + first message, completed turns, compaction, etc.).
 			case "agent_end": {
+				this.todosFor(conv).endRun();
+				this.pushTodosIfActive(conv);
 				// 可重试错误：SDK 随后发 auto_retry_start 并把末尾 error 消息从
 				// state 摘掉。这里先立占位，让本次立即 flush 的快照就不含瞬时红错
 				// ——否则快照先画红、摘掉后又消失，即「红色报错一闪而过」。
@@ -3373,6 +3422,7 @@ export class ClientSession {
 		if (!conv || id === this.activeId) return;
 		this.convs.delete(id);
 		this.convStatuses.remove(id);
+		this.convTodos.delete(id);
 		this.dropWorkerState(id);
 		this.clearAllToolWatchdogs(conv);
 		conv.terminals.killAll();

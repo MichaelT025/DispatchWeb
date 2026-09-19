@@ -1,0 +1,141 @@
+/* pi-todo task views (components/TodoList.tsx): the run strip above the
+   composer and the session list in the right panel. Loaded after styles.css;
+   tokens only, no literal colors, so themes keep working. Status is carried by
+   the glyph (check / spinner / hollow dot) and the activeForm label, never by
+   color alone. */
+
+.todo-list {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0;
+}
+.todo-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 10px;
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--text);
+	min-width: 0;
+}
+.todo-row[data-status="completed"] .todo-subject {
+	color: var(--text-faint);
+	text-decoration: line-through;
+}
+.todo-row[data-status="pending"] .todo-subject {
+	color: var(--text-dim);
+}
+.todo-subject {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.todo-id {
+	font-family: var(--mono);
+	font-size: 11.5px;
+	color: var(--text-faint);
+	margin-right: 6px;
+}
+.todo-glyph {
+	flex-shrink: 0;
+	width: 13px;
+	height: 13px;
+	color: var(--text-dim);
+}
+.todo-row[data-status="completed"] .todo-glyph {
+	color: var(--green);
+}
+.todo-glyph-spin {
+	animation: spin 1.1s linear infinite;
+}
+.todo-glyph-pending {
+	box-sizing: border-box;
+	width: 11px;
+	height: 11px;
+	margin: 0 1px;
+	border: 1.5px solid var(--text-faint);
+	border-radius: 50%;
+}
+.todo-owner,
+.todo-blocked {
+	flex-shrink: 0;
+	font-size: 11px;
+	padding: 0 6px;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-soft);
+	color: var(--text-faint);
+	background: var(--card-bg);
+}
+.todo-blocked {
+	color: var(--amber-text);
+}
+.todo-count {
+	font-family: var(--mono);
+	font-size: 11.5px;
+	color: var(--text-faint);
+	font-weight: 500;
+	letter-spacing: 0;
+	text-transform: none;
+}
+
+/* ---- run strip above the composer (same column as .dialog-inline) ---- */
+.todo-strip {
+	margin: 0 var(--chat-inset) 8px;
+	max-height: 40vh;
+	display: flex;
+	flex-direction: column;
+	background: var(--card-bg);
+	border: 1px solid var(--border-soft);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+}
+.todo-strip .todo-list {
+	overflow-y: auto;
+}
+.todo-strip-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 5px 10px;
+	font: inherit;
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: 0.5px;
+	text-transform: uppercase;
+	color: var(--text-faint);
+	background: none;
+	border: none;
+	text-align: left;
+	cursor: pointer;
+}
+.todo-strip:not(.collapsed) .todo-strip-head {
+	border-bottom: 1px solid var(--border-soft);
+}
+.todo-strip-head:hover {
+	color: var(--text);
+	background: var(--glow-05);
+}
+.todo-strip-head:focus-visible {
+	outline: none;
+	box-shadow: var(--ring);
+}
+.todo-strip-head svg {
+	flex-shrink: 0;
+	opacity: 0.7;
+}
+.todo-strip-title {
+	flex: 1 1 auto;
+}
+.todo-strip-live {
+	width: 12px;
+	height: 12px;
+}
+
+/* ---- session list in the right panel: reuses the .widget card ---- */
+.todo-panel .widget-title {
+	cursor: default;
+}

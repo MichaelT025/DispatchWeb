@@ -70,6 +70,28 @@ export interface UiMessage {
 	tokensBefore?: number;
 }
 
+/** One pi-todo task (extensions/pi-todo/tool/types.ts: Task). */
+export interface TodoTask {
+	id: number;
+	subject: string;
+	description?: string;
+	/** Present-continuous label shown while in_progress (e.g. "writing tests"). */
+	activeForm?: string;
+	status: "pending" | "in_progress" | "completed" | "deleted";
+	blockedBy?: number[];
+	owner?: string;
+	metadata?: Record<string, unknown>;
+}
+
+export interface TodosState {
+	tasks: TodoTask[];
+	nextId: number;
+	/** Ids created or changed since the current/last agent run started. */
+	runIds: number[];
+	/** Whether an agent run is in flight (strip shows live progress). */
+	running: boolean;
+}
+
 export interface UiModelInfo {
 	id: string;
 	name: string;
@@ -1245,6 +1267,9 @@ export type ServerMessage =
 	  }
 	| { type: "widgets"; widgets: { key: string; lines: string[] }[] }
 	| { type: "statuses"; statuses: { key: string; text: string | undefined }[] }
+	/** Structured todo list of the ACTIVE conversation (pi-todo bridge; see
+	 *  server/todo-state.ts). Replaces the extension's text widget. */
+	| { type: "todos"; tasks: TodoTask[]; nextId: number; runIds: number[]; running: boolean }
 	| {
 			type: "dialog";
 			id: number;

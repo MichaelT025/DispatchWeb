@@ -16,6 +16,7 @@ import { ChatInput } from "./components/ChatInput";
 import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar, FiUsers } from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
 import { QuestionDialog } from "./components/QuestionDialog";
+import { TodoStrip } from "./components/TodoList";
 // 终端视图懒加载：xterm.js 体积大且只在切到终端时才需要，拆出主包
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
@@ -890,6 +891,8 @@ export function App() {
 							{/* 扩展问卷：非模态内联面板，插在输入框上方 */}
 							{chat.dialog && <Dialog dialog={chat.dialog} />}
 							{chat.question && <QuestionDialog question={chat.question} />}
+							{/* pi-todo: tasks the current run touched, mirroring the CLI overlay above the editor */}
+							<TodoStrip todos={chat.todos} />
 							<ChatInput
 								streaming={viewState?.isStreaming ?? false}
 								booting={blocked}
@@ -1035,6 +1038,7 @@ export function App() {
 												files={chat.files}
 												fileChanged={chat.fileChanged}
 												widgets={chat.widgets}
+												todos={chat.todos}
 												onAttach={(path, name, mode, isDir) => attach(path, name, mode, isDir)}
 												onPreview={(path, name) => setWorkspaceFile({ path, name })}
 												onNotice={(level, text) => pushNotice(level, text)}

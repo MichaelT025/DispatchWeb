@@ -50,7 +50,7 @@ describe("ConversationTodos", () => {
 				nextId: 3,
 			}),
 		).toBe(true);
-		// Untouched #1 stays out of the run; new #2 is in.
+		// Completed-earlier #1 stays out of the run; new #2 is in.
 		expect(t.snapshot().runIds).toEqual([2]);
 		t.apply({
 			tasks: [
@@ -66,6 +66,28 @@ describe("ConversationTodos", () => {
 		expect(t.snapshot().runIds.sort()).toEqual([1, 2]);
 		t.startRun();
 		expect(t.snapshot().runIds).toEqual([]);
+	});
+
+	it("surfaces open tasks when a run only consults the list", () => {
+		const t = new ConversationTodos();
+		t.replay([
+			result(
+				[
+					{ id: 1, subject: "done", status: "completed" },
+					{ id: 2, subject: "open", status: "pending" },
+				],
+				3,
+			),
+		]);
+		t.startRun();
+		t.apply({
+			tasks: [
+				{ id: 1, subject: "done", status: "completed" },
+				{ id: 2, subject: "open", status: "pending" },
+			],
+			nextId: 3,
+		});
+		expect(t.snapshot().runIds).toEqual([2]);
 	});
 
 	it("ignores non-task details and keeps run ids across a branch re-replay", () => {

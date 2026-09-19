@@ -65,16 +65,18 @@ export class ConversationTodos {
 	}
 
 	/** Apply a `todo` tool result. Returns false when the details are not a
-	 *  task snapshot (nothing changed). */
+	 *  task snapshot (nothing changed). The run set gains every task this
+	 *  call created or changed, plus all still-open tasks: a run that merely
+	 *  consulted the list (`list` / `get`) should surface the open work, while
+	 *  tasks completed in earlier runs stay out of the strip. */
 	apply(details: unknown): boolean {
 		if (!isTaskDetails(details)) return false;
 		const prev = new Map(this.tasks.map((t) => [t.id, t]));
 		const next = details.tasks.map((t) => ({ ...t }));
 		for (const t of next) {
 			const p = prev.get(t.id);
-			if (!p || p.status !== t.status || p.subject !== t.subject || p.activeForm !== t.activeForm) {
-				this.runIds.add(t.id);
-			}
+			const changed = !p || p.status !== t.status || p.subject !== t.subject || p.activeForm !== t.activeForm;
+			if (changed || t.status === "pending" || t.status === "in_progress") this.runIds.add(t.id);
 		}
 		this.tasks = next;
 		this.nextId = details.nextId;

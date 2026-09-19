@@ -1450,6 +1450,9 @@ export class ClientSession {
 		// active chat's own role — not whatever a background chat last wrote.
 		const statuses = this.activeStatusSnapshot();
 		send({ type: "statuses", statuses });
+		// Same for the active conversation's structured todo list.
+		const active = this.convs.get(this.activeId);
+		send({ type: "todos", ...(active ? this.todosFor(active).snapshot() : EMPTY_TODOS) });
 		// Reconnect: push the current project's running-conversation list so the
 		// left panel shows every background chat (a fresh socket never got the
 		// newChat/switch pushes).

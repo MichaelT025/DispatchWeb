@@ -98,9 +98,8 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 	// 与 ThinkingBlock 一致——开关切换时自动折叠/展开所有未手动点过的工具。
 	const [open, setOpen] = useState<boolean | null>(null);
 	const isError = view.result?.isError ?? view.status?.isError ?? false;
-	// 折叠摘要模式下错误卡仍默认展开（错误输出不能被藏进折叠行）；用户手动
-	// 折过（open 非 null）则尊重用户选择。
-	const expanded = open ?? (wrap || isError);
+	// 错误卡也默认折叠——标题行的 ✕ 徽标已标出失败，点击即可看输出。
+	const expanded = open ?? wrap;
 	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
 	const shown = expanded || forceOpen;
 	const [copied, setCopied] = useState(false);

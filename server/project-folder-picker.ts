@@ -74,7 +74,8 @@ export function describePickerFailure(file: string, stderr: string | undefined, 
 	if (text.startsWith("#< CLIXML")) {
 		// The first error record holds the exception message; later ones are
 		// position and category noise.
-		const first = /<S S="Error">([\s\S]*?)<\/S>/.exec(text)?.[1]
+		const first = /<S S="Error">([\s\S]*?)<\/S>/
+			.exec(text)?.[1]
 			.replace(/_x000D_|_x000A_/g, "")
 			.replace(/&lt;/g, "<")
 			.replace(/&gt;/g, ">")

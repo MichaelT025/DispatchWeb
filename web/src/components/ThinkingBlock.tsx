@@ -26,8 +26,8 @@ export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = fa
 	const expanded = open ?? wrap;
 	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
 	const shown = expanded || forceOpen;
-	// 折叠预览：流式中取最新文本（实时尾巴），结束后取开头一行。
-	const preview = streaming ? thinking.trimEnd().slice(-80) : thinking.split("\n")[0].slice(0, 80);
+	// 折叠预览：结束后取开头一行（流式中标签只显示“Thinking”）。
+	const preview = thinking.split("\n")[0].slice(0, 80);
 	const [copied, setCopied] = useState(false);
 	const copyThinking = () => {
 		void navigator.clipboard.writeText(thinking);
@@ -72,7 +72,7 @@ export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = fa
 					className={`chead-title thinking-label${streaming ? " shimmer" : ""}`}
 					style={streaming ? shimmerPhase(phaseKey ?? "thinking") : undefined}
 				>
-					{streaming && shown ? t("thinkingNow") : shown ? t("thinking") : t("thinkingPreview", { preview })}
+					{streaming ? t("thinkingNow") : shown ? t("thinking") : t("thinkingPreview", { preview })}
 				</span>
 				<button
 					type="button"

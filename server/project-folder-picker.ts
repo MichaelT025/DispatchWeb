@@ -64,6 +64,30 @@ public static class ProjectFolderPicker {
 [Console]::Write([ProjectFolderPicker]::Pick())
 `;
 
+/**
+ * Turn a failed child process into a readable message. PowerShell writes its
+ * error stream as CLIXML when stderr is not a console, and execFile's default
+ * message would otherwise echo the whole base64-encoded script.
+ */
+export function describePickerFailure(file: string, stderr: string | undefined, fallback: string): string {
+	const text = (stderr ?? "").trim();
+	if (text.startsWith("#< CLIXML")) {
+		// The first error record holds the exception message; later ones are
+		// position and category noise.
+		const first = /<S S="Error">([\s\S]*?)<\/S>/
+			.exec(text)?.[1]
+			.replace(/_x000D_|_x000A_/g, "")
+			.replace(/&lt;/g, "<")
+			.replace(/&gt;/g, ">")
+			.replace(/&quot;/g, '"')
+			.replace(/&amp;/g, "&")
+			.trim();
+		return first ? `${file}: ${first}` : `${file} exited with an error`;
+	}
+	if (text) return `${file}: ${text}`;
+	return fallback.split("\n")[0];
+}
+
 /** Only one native dialog at a time; cancel/repeated clicks make no changes. */
 export async function pickProjectFolder(cwd: string): Promise<string | null> {
 	if (picking) return null;
@@ -93,11 +117,15 @@ export async function pickProjectFolder(cwd: string): Promise<string | null> {
 			args = ["--file-selection", "--directory", `--filename=${cwd}/`];
 		}
 		try {
-			const { stdout } = await exec(file, args, { windowsHide: true, encoding: "utf8", timeout: 300_000 });
+			// No timeout: the dialog stays open as long as the user needs it.
+			const { stdout } = await exec(file, args, { windowsHide: true, encoding: "utf8", maxBuffer: 1024 * 1024 });
 			return stdout.trim() || null;
 		} catch (err) {
-			if (process.platform === "linux" && (err as { code?: number }).code === 1) return null;
-			throw err;
+			const e = err as { code?: number | string; killed?: boolean; stderr?: string; message: string };
+			if (process.platform === "linux" && e.code === 1) return null;
+			// The child was killed (e.g. server shutdown) - treat like a cancel.
+			if (e.killed) return null;
+			throw new Error(describePickerFailure(file, e.stderr, e.message));
 		}
 	} finally {
 		picking = false;

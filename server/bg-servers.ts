@@ -159,7 +159,7 @@ export class BgServerTracker {
 			this.opts.emit({
 				type: "notice",
 				level: "info",
-				text: `Detected an AI-started background service: port ${port} (pid ${pid}) — stop it individually or all at once under Background tasks in the top bar`,
+				text: `Detected an AI-started background service: port ${port} (pid ${pid}) — stop it individually or all at once under Background in the right sidebar`,
 			});
 		}
 		if (added) this.push();

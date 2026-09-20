@@ -16,7 +16,7 @@ import { ChatInput } from "./components/ChatInput";
 import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar, FiUsers } from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
 import { QuestionDialog } from "./components/QuestionDialog";
-import { TodoStrip } from "./components/TodoList";
+import { TodoPanel, TodoStrip } from "./components/TodoList";
 // 终端视图懒加载：xterm.js 体积大且只在切到终端时才需要，拆出主包
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
@@ -305,6 +305,7 @@ export function App() {
 	/** Right workspace pane (Astra shell): open/closed + which panel tab. */
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab | null>(null);
+	const [todoFocusRequest, setTodoFocusRequest] = useState(0);
 	/** Worker shown in the Workers pane (null = the Active / Done lists). Owned
 	 *  here so a delegate card in the chat can open one directly. */
 	const [selectedWorker, setSelectedWorker] = useState<number | null>(null);
@@ -705,6 +706,12 @@ export function App() {
 		setWorkspaceOpen(true);
 		setWorkspaceTab(tab);
 	}, []);
+	const openTodos = useCallback(() => {
+		// Keep the current tab intact while placing the session section in view;
+		// its shared shell means this also works for the mobile workspace overlay.
+		setWorkspaceOpen(true);
+		setTodoFocusRequest((request) => request + 1);
+	}, []);
 
 	// Message lists kept mounted: the displayed conversation plus the most
 	// recently viewed cached ones. Keyed by conversation id, so a switch only
@@ -892,7 +899,7 @@ export function App() {
 							{chat.dialog && <Dialog dialog={chat.dialog} />}
 							{chat.question && <QuestionDialog question={chat.question} />}
 							{/* pi-todo: tasks the current run touched, mirroring the CLI overlay above the editor */}
-							<TodoStrip todos={chat.todos} />
+							<TodoStrip todos={chat.todos} onViewAll={openTodos} />
 							<ChatInput
 								streaming={viewState?.isStreaming ?? false}
 								booting={blocked}
@@ -929,6 +936,7 @@ export function App() {
 									/>
 								)}
 								<aside className={`astra-workspace${isMobile ? " overlay" : ""}`} aria-label={t("astraWorkspace")}>
+									<TodoPanel todos={chat.todos} focusRequest={todoFocusRequest} />
 									<div className="astra-workspace-tabs" role="tablist" aria-label={t("astraWorkspace")}>
 										{workspaceTab !== null && (
 											<button
@@ -1038,7 +1046,6 @@ export function App() {
 												files={chat.files}
 												fileChanged={chat.fileChanged}
 												widgets={chat.widgets}
-												todos={chat.todos}
 												onAttach={(path, name, mode, isDir) => attach(path, name, mode, isDir)}
 												onPreview={(path, name) => setWorkspaceFile({ path, name })}
 												onNotice={(level, text) => pushNotice(level, text)}

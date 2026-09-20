@@ -5,9 +5,21 @@
 import { describe, expect, it } from "vitest";
 import { ConversationTodos, isTaskDetails } from "../../server/todo-state.js";
 
-const result = (tasks: unknown[], nextId: number) => ({
+const result = (tasks: unknown[], nextId: number, action = "list", params: Record<string, unknown> = {}) => ({
 	type: "message",
-	message: { role: "toolResult", toolName: "todo", details: { action: "list", params: {}, tasks, nextId } },
+	message: { role: "toolResult", toolName: "todo", details: { action, params, tasks, nextId } },
+});
+
+const userMessage = { type: "message", message: { role: "user" } };
+
+const task = (
+	id: number,
+	subject: string,
+	status: "pending" | "in_progress" | "completed" | "deleted" = "pending",
+) => ({
+	id,
+	subject,
+	status,
 });
 
 describe("isTaskDetails", () => {
@@ -23,40 +35,34 @@ describe("ConversationTodos", () => {
 	it("replays the last todo toolResult on the branch (last-write-wins)", () => {
 		const t = new ConversationTodos();
 		t.replay([
-			result([{ id: 1, subject: "a", status: "pending" }], 2),
+			result([task(1, "a")], 2, "create"),
 			{ type: "message", message: { role: "toolResult", toolName: "bash", details: { exitCode: 0 } } },
-			result([{ id: 1, subject: "a", status: "completed" }], 2),
+			result([task(1, "a", "completed")], 2, "update", { id: 1 }),
 			{ type: "message", message: { role: "toolResult", toolName: "todo", details: "corrupt" } },
 		]);
 		expect(t.snapshot()).toEqual({
-			tasks: [{ id: 1, subject: "a", status: "completed" }],
+			tasks: [task(1, "a", "completed")],
 			nextId: 2,
-			runIds: [],
+			runIds: [1],
 			running: false,
 		});
 	});
 
 	it("tracks created and changed tasks per run, and resets on the next run", () => {
 		const t = new ConversationTodos();
-		t.replay([result([{ id: 1, subject: "old", status: "completed" }], 2)]);
+		t.replay([result([task(1, "old", "completed")], 2, "create")]);
 		t.startRun();
 		expect(t.snapshot().running).toBe(true);
 		expect(
 			t.apply({
-				tasks: [
-					{ id: 1, subject: "old", status: "completed" },
-					{ id: 2, subject: "new", status: "in_progress", activeForm: "doing" },
-				],
+				tasks: [task(1, "old", "completed"), { ...task(2, "new", "in_progress"), activeForm: "doing" }],
 				nextId: 3,
 			}),
 		).toBe(true);
 		// Completed-earlier #1 stays out of the run; new #2 is in.
 		expect(t.snapshot().runIds).toEqual([2]);
 		t.apply({
-			tasks: [
-				{ id: 1, subject: "old", status: "pending" },
-				{ id: 2, subject: "new", status: "completed" },
-			],
+			tasks: [task(1, "old", "pending"), task(2, "new", "completed")],
 			nextId: 3,
 		});
 		expect(t.snapshot().runIds.sort()).toEqual([1, 2]);
@@ -68,34 +74,123 @@ describe("ConversationTodos", () => {
 		expect(t.snapshot().runIds).toEqual([]);
 	});
 
-	it("surfaces open tasks when a run only consults the list", () => {
+	it("does not surface old pending work when a run only lists or gets", () => {
 		const t = new ConversationTodos();
-		t.replay([
-			result(
-				[
-					{ id: 1, subject: "done", status: "completed" },
-					{ id: 2, subject: "open", status: "pending" },
-				],
-				3,
-			),
-		]);
+		t.replay([result([task(1, "done", "completed"), task(2, "old")], 3, "create")]);
 		t.startRun();
 		t.apply({
-			tasks: [
-				{ id: 1, subject: "done", status: "completed" },
-				{ id: 2, subject: "open", status: "pending" },
-			],
+			action: "list",
+			params: {},
+			tasks: [task(1, "done", "completed"), task(2, "old")],
 			nextId: 3,
 		});
+		t.apply({
+			action: "get",
+			params: { id: 2 },
+			tasks: [task(1, "done", "completed"), task(2, "old")],
+			nextId: 3,
+		});
+		expect(t.snapshot().runIds).toEqual([]);
+	});
+
+	it("tracks an unchanged explicit update by params.id", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({ action: "create", params: {}, tasks: [task(1, "a")], nextId: 2 });
+		t.startRun();
+		t.apply({ action: "update", params: { id: 1 }, tasks: [task(1, "a")], nextId: 2 });
+		expect(t.snapshot().runIds).toEqual([1]);
+		t.startRun();
+		t.apply({
+			action: "update",
+			params: { id: 1 },
+			tasks: [task(1, "a")],
+			nextId: 2,
+			error: "update requires at least one mutable field",
+		});
+		expect(t.snapshot().runIds).toEqual([]);
+	});
+
+	it("counts metadata changes as task changes", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({
+			action: "create",
+			params: {},
+			tasks: [{ ...task(1, "a"), metadata: { source: "one" } }],
+			nextId: 2,
+		});
+		t.startRun();
+		t.apply({
+			tasks: [{ ...task(1, "a"), metadata: { source: "two" } }],
+			nextId: 2,
+		});
+		expect(t.snapshot().runIds).toEqual([1]);
+	});
+
+	it("restores only the mutations after the latest persisted user boundary", () => {
+		const t = new ConversationTodos();
+		t.replay([
+			result([task(1, "first")], 2, "create"),
+			userMessage,
+			result([task(1, "first"), task(2, "second")], 3, "create"),
+			result([task(1, "first"), task(2, "second")], 3, "list"),
+		]);
 		expect(t.snapshot().runIds).toEqual([2]);
+
+		const next = new ConversationTodos();
+		next.replay([
+			result([task(1, "first")], 2, "create"),
+			userMessage,
+			result([task(1, "first"), task(2, "old")], 3, "list"),
+		]);
+		expect(next.snapshot().runIds).toEqual([]);
+	});
+
+	it("keeps live membership when a branch is replayed during a rebind", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({ action: "create", params: {}, tasks: [task(1, "live")], nextId: 2 });
+		t.replay([result([task(1, "persisted")], 2, "list")]);
+		expect(t.snapshot().tasks).toEqual([task(1, "persisted")]);
+		expect(t.snapshot().runIds).toEqual([1]);
+		expect(t.snapshot().running).toBe(true);
+	});
+
+	it("restores the rebound branch membership after a live run ends", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({ action: "create", params: {}, tasks: [task(1, "live")], nextId: 2 });
+		t.endRun();
+		t.replay([
+			result([task(1, "previous branch")], 2, "create"),
+			userMessage,
+			result([task(1, "previous branch")], 2, "list"),
+		]);
+		expect(t.snapshot().runIds).toEqual([]);
+		expect(t.snapshot().running).toBe(false);
+	});
+
+	it("removes deleted ids and allows ids to be reused after delete or clear", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({ action: "create", params: {}, tasks: [task(1, "a")], nextId: 2 });
+		t.apply({ action: "delete", params: { id: 1 }, tasks: [task(1, "a", "deleted")], nextId: 2 });
+		expect(t.snapshot().runIds).toEqual([]);
+		t.apply({ action: "create", params: {}, tasks: [task(1, "reused")], nextId: 2 });
+		expect(t.snapshot().runIds).toEqual([1]);
+		t.apply({ action: "clear", params: {}, tasks: [], nextId: 1 });
+		expect(t.snapshot().runIds).toEqual([]);
+		t.apply({ action: "create", params: {}, tasks: [task(1, "after clear")], nextId: 2 });
+		expect(t.snapshot().runIds).toEqual([1]);
 	});
 
 	it("ignores non-task details and keeps run ids across a branch re-replay", () => {
 		const t = new ConversationTodos();
 		t.startRun();
 		expect(t.apply({ exitCode: 0 })).toBe(false);
-		t.apply({ tasks: [{ id: 1, subject: "a", status: "pending" }], nextId: 2 });
-		t.replay([result([{ id: 1, subject: "a", status: "in_progress" }], 2)]);
+		t.apply({ tasks: [task(1, "a")], nextId: 2 });
+		t.replay([result([task(1, "a", "in_progress")], 2, "list")]);
 		const s = t.snapshot();
 		expect(s.tasks[0]?.status).toBe("in_progress");
 		expect(s.runIds).toEqual([1]);
@@ -104,7 +199,7 @@ describe("ConversationTodos", () => {
 
 	it("returns defensive copies", () => {
 		const t = new ConversationTodos();
-		t.apply({ tasks: [{ id: 1, subject: "a", status: "pending" }], nextId: 2 });
+		t.apply({ tasks: [task(1, "a")], nextId: 2 });
 		const s = t.snapshot();
 		s.tasks[0]!.subject = "mutated";
 		expect(t.snapshot().tasks[0]?.subject).toBe("a");

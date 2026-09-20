@@ -603,11 +603,50 @@
 	color: var(--red);
 }
 
-/* ---- errors keep their emphasis but lose the saturated tint ---- */
+/* ---- run status/errors: inline semantic text, never a card or pill ---- */
 .msg-error {
-	background: color-mix(in srgb, var(--red) 8%, transparent);
-	border-color: color-mix(in srgb, var(--red) 30%, transparent);
-	border-radius: var(--radius-md, 10px);
+	display: block;
+	margin: 0 0 8px;
+	padding: 0;
+	color: var(--red);
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	font-size: 13.5px;
+	line-height: 1.5;
+}
+.msg-error-text {
+	display: inline;
+}
+.msg-retry-btn {
+	display: inline;
+	margin: 0 0 0 8px;
+	padding: 0;
+	color: var(--red);
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	font: inherit;
+	line-height: inherit;
+	text-decoration: underline;
+	text-decoration-color: color-mix(in srgb, var(--red) 60%, transparent);
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+.msg-retry-btn:hover {
+	background: transparent;
+	color: var(--red);
+	text-decoration-color: var(--red);
+}
+.msg-run-status {
+	display: flex;
+	align-items: center;
+	min-height: 28px;
+	font-size: 13.5px;
+	line-height: 1.5;
+}
+.msg-run-status-canceled {
+	color: var(--red);
 }
 
 /* ---- waiting for the first token: a shimmering line, no caret ---- */

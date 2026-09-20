@@ -447,6 +447,7 @@ export const en = {
 	plugin: "plugin",
 	unknown: "unknown",
 	thinkingWait: "Thinking",
+	canceledRun: "Canceled run",
 	exitCode: "Exit code {code}",
 	cancelled: "Cancelled",
 	truncated: "… content too long, truncated in this view",

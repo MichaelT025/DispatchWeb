@@ -39,6 +39,7 @@ export function PromptMinimap({ questions, activeIndex, onJump }: PromptMinimapP
 	const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 	const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 	const [focusRequest, setFocusRequest] = useState<number | null>(null);
+	const [interactionReleaseVersion, setInteractionReleaseVersion] = useState(0);
 
 	const count = questions.length;
 	const questionSignature = questions.map((question) => `${question.id}\u0000${question.text}`).join("\u0001");
@@ -136,12 +137,34 @@ export function PromptMinimap({ questions, activeIndex, onJump }: PromptMinimapP
 		if (viewportRef.current) viewportRef.current.scrollTop = 0;
 	}, [questionSignature]);
 
+	// Virtual scrolling can remove a focused or hovered button without dispatching
+	// blur/pointerleave. Reconcile ownership from the rendered window instead of
+	// trying to restore focus (which would fight wheel scrolling). A pending
+	// keyboard request is intentionally left alone until its destination mounts.
+	useEffect(() => {
+		if (focusRequest !== null) return;
+		const isRendered = (index: number) => index >= start && index < end;
+		const activeElement = viewportRef.current?.ownerDocument.activeElement;
+		const actualFocusedButton =
+			activeElement instanceof HTMLButtonElement && activeElement.closest(".qn-rail-viewport") === viewportRef.current
+				? activeElement
+				: null;
+		const focusedIsStale =
+			focusedIndex !== null &&
+			(!isRendered(focusedIndex) || Number(actualFocusedButton?.dataset.qnIndex) !== focusedIndex);
+		const hoveredIsStale = hoveredIndex !== null && !isRendered(hoveredIndex);
+		if (focusedIsStale) setFocusedIndex(null);
+		if (hoveredIsStale) setHoveredIndex(null);
+	}, [end, focusRequest, focusedIndex, hoveredIndex, start]);
+
 	// The active marker follows the transcript, but a reader's hover/focus owns
-	// the rail until they leave it. Re-run after reset and viewport resize.
+	// the rail until they leave it. Stale virtualized ownership is cleared above
+	// without incrementing this release version, so wheel scrolling is not
+	// immediately undone by autoreveal. Explicit leave/blur still restores it.
 	useEffect(() => {
 		if (hoveredIndex !== null || focusedIndex !== null) return;
 		if (activeIndex >= 0) reveal(activeIndex);
-	}, [activeIndex, focusedIndex, hoveredIndex, reveal, resizeVersion, sessionResetVersion]);
+	}, [activeIndex, interactionReleaseVersion, reveal, resizeVersion, sessionResetVersion]);
 
 	useEffect(() => {
 		if (focusRequest === null) return;
@@ -183,6 +206,7 @@ export function PromptMinimap({ questions, activeIndex, onJump }: PromptMinimapP
 				ref={viewportRef}
 				onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
 				onMouseLeave={() => {
+					if (hoveredIndex !== null) setInteractionReleaseVersion((version) => version + 1);
 					setHoveredIndex(null);
 				}}
 				style={{ height: railHeight }}
@@ -213,10 +237,12 @@ export function PromptMinimap({ questions, activeIndex, onJump }: PromptMinimapP
 								onClick={() => onJump(question.id)}
 								onPointerEnter={() => setHoveredIndex(index)}
 								onPointerLeave={() => {
+									if (hoveredIndex === index) setInteractionReleaseVersion((version) => version + 1);
 									setHoveredIndex((current) => (current === index ? null : current));
 								}}
 								onFocus={() => setFocusedIndex(index)}
 								onBlur={() => {
+									if (focusedIndex === index) setInteractionReleaseVersion((version) => version + 1);
 									setFocusedIndex((current) => (current === index ? null : current));
 								}}
 								onKeyDown={(event) => onKeyDown(event, index)}

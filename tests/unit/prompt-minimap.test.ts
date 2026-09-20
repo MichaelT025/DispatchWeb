@@ -154,6 +154,32 @@ describe("PromptMinimap", () => {
 		expect(document.activeElement).toBe(last);
 	});
 
+	it("clears interaction ownership when wheel scrolling evicts its tick", () => {
+		vi.useFakeTimers();
+		const qs = questions(500);
+		const container = mount(createElement(PromptMinimap, { questions: qs, activeIndex: 0, onJump: vi.fn() }));
+		const viewport = container.querySelector<HTMLElement>(".qn-rail-viewport")!;
+		Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 14 });
+		const focused = container.querySelector<HTMLButtonElement>('[data-qn-index="0"]')!;
+		act(() => focused.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+		act(() => focused.focus());
+		act(() => vi.advanceTimersByTime(200));
+		expect(container.querySelector('[role="tooltip"]')?.textContent).toContain("Prompt 0");
+
+		act(() => {
+			viewport.scrollTop = 700;
+			viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+		});
+		expect(container.querySelector('[data-qn-index="0"]')).toBeNull();
+		expect(container.querySelector('[role="tooltip"]')).toBeNull();
+		expect(viewport.scrollTop).toBe(700);
+
+		act(() => viewport.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true })));
+		update(createElement(PromptMinimap, { questions: qs, activeIndex: 200, onJump: vi.fn() }));
+		expect(viewport.scrollTop).toBeGreaterThan(700);
+		expect(container.querySelector('[data-qn-index="200"]')).not.toBeNull();
+	});
+
 	it("bounds DOM for 5000 prompts and resets session interaction state", () => {
 		vi.useFakeTimers();
 		const onJump = vi.fn();

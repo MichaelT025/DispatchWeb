@@ -13,6 +13,7 @@ import { loadPromptHistory, pushPromptHistory } from "../prompt-history";
 import { detectTouchFirstDevice } from "../touch-device";
 
 import { ModelThinking } from "./ModelThinking";
+import { ContextUsageIndicator } from "./ContextUsageIndicator";
 import { AgentPicker } from "./AgentPicker";
 import { WorktreePill } from "./WorktreePill";
 import type { WorktreeResult } from "../use-chat";
@@ -41,6 +42,8 @@ interface ChatInputProps {
 		thinkingLevel: UiState["thinkingLevel"];
 		availableThinkingLevels: UiState["availableThinkingLevels"];
 	} | null;
+	/** Live context budget, kept separate from modelState so the indicator can update. */
+	contextUsage: UiState["stats"]["contextUsage"] | null | undefined;
 	models: ModelInfo[];
 	modelsLoading: boolean;
 	/** Recent projects with their checkouts — the branch pill finds the
@@ -92,6 +95,7 @@ export const ChatInput = memo(function ChatInput({
 	messages,
 	slashCommands,
 	modelState,
+	contextUsage,
 	models,
 	modelsLoading,
 	projects,
@@ -809,6 +813,7 @@ export const ChatInput = memo(function ChatInput({
 						/>
 					</div>
 					<div className="composer-tools-right">
+						<ContextUsageIndicator usage={contextUsage} />
 						<ModelThinking
 							state={modelState}
 							models={models}

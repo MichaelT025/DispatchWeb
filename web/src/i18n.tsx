@@ -81,6 +81,9 @@ export const en = {
 	/* footerbar */
 	context: "Context",
 	contextUsage: "Context usage",
+	contextUsageDetail: "Context usage: {tokens} / {capacity} tokens ({percent}%)",
+	contextUsageEstimated: "Estimated context usage: {tokens} / {capacity} tokens ({percent}%)",
+	contextUsageUnavailable: "Context usage unavailable",
 	cumulativeCost: "Cumulative cost",
 	sessionMessages: "Session messages",
 	messages: "messages",

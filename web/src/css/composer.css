@@ -364,6 +364,79 @@
 	height: 16px;
 }
 
+/* ---- context budget indicator ---- */
+.context-usage-indicator {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 30px;
+	margin-right: 2px;
+	color: var(--text-faint);
+	cursor: default;
+	outline: none;
+}
+.context-usage-ring {
+	width: 18px;
+	height: 18px;
+	overflow: visible;
+}
+.context-usage-ring circle {
+	fill: none;
+	stroke-width: 2;
+}
+.context-usage-ring-track {
+	stroke: var(--text-dim);
+}
+.context-usage-ring-progress {
+	stroke: var(--green);
+	stroke-linecap: round;
+	transform: rotate(-90deg);
+	transform-origin: 50% 50%;
+	transition: stroke-dashoffset 0.2s ease;
+}
+.context-usage-indicator.unknown .context-usage-ring-progress {
+	stroke: var(--text-faint);
+	opacity: 0.75;
+}
+.context-usage-indicator:focus-visible {
+	border-radius: 50%;
+	box-shadow: var(--ring);
+}
+.context-usage-tooltip {
+	position: absolute;
+	z-index: 70;
+	right: 0;
+	bottom: calc(100% + 8px);
+	width: max-content;
+	max-width: min(320px, 80vw);
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm, 6px);
+	background: var(--tooltip-bg, var(--bg-elev2));
+	box-shadow: var(--shadow-menu);
+	color: var(--text);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 1.35;
+	white-space: nowrap;
+	pointer-events: none;
+	opacity: 0;
+	visibility: hidden;
+	transform: translateY(2px);
+	transition:
+		opacity 0.12s ease,
+		visibility 0.12s ease,
+		transform 0.12s ease;
+}
+.context-usage-indicator:hover .context-usage-tooltip,
+.context-usage-indicator:focus .context-usage-tooltip {
+	opacity: 1;
+	visibility: visible;
+	transform: translateY(0);
+}
+
 /* ---- model · thinking phrase (two triggers reading as one) ---- */
 .model-thinking {
 	display: inline-flex;

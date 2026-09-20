@@ -906,6 +906,7 @@ export function App() {
 								messages={viewState?.messages ?? EMPTY_MESSAGES}
 								slashCommands={chat.slashCommands}
 								modelState={modelState}
+								contextUsage={viewState?.stats.contextUsage}
 								models={chat.models}
 								modelsLoading={chat.modelsLoading}
 								projects={chat.projects}

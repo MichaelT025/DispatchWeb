@@ -1141,6 +1141,7 @@ export const en = {
 	skillFullTextShort: "Full",
 	/* Delegated workers (PiAstra `delegate` tool): card rows + Workers pane */
 	astraWorkers: "Workers",
+	astraBackground: "Background",
 	workersOpenPane: "Open workers",
 	workersOpenOne: "Open this worker's transcript",
 	workersPending: "Queued",

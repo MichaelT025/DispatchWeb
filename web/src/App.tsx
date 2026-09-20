@@ -13,7 +13,17 @@ import { LeftPanel } from "./components/LeftPanel";
 import { RightPanel } from "./components/RightPanel";
 import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
-import { FiFolder, FiGitBranch, FiMenu, FiSearch, FiSettings, FiTerminal, FiSidebar, FiUsers } from "react-icons/fi";
+import {
+	FiFolder,
+	FiGitBranch,
+	FiMenu,
+	FiSearch,
+	FiServer,
+	FiSettings,
+	FiTerminal,
+	FiSidebar,
+	FiUsers,
+} from "react-icons/fi";
 import { Dialog } from "./components/Dialog";
 import { QuestionDialog } from "./components/QuestionDialog";
 import { TodoPanel, TodoStrip } from "./components/TodoList";
@@ -21,6 +31,7 @@ import { TodoPanel, TodoStrip } from "./components/TodoList";
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) => ({ default: m.TerminalPanel })));
 import { ScmPanel } from "./components/SCMPanel";
 import { WorkersPanel } from "./components/WorkersPanel";
+import { BackgroundPanel } from "./components/BackgroundPanel";
 import { OPEN_WORKER_EVENT } from "./components/ToolCallBlock";
 import { registerAttachmentSink } from "./composer-bridge";
 import { appendDraftAttachments } from "./composer-draft";
@@ -211,7 +222,7 @@ function PanelRail({ side, onClick }: { side: PanelSide; onClick: () => void }) 
 const EMPTY_WORKERS: UiWorker[] = [];
 
 /** Right workspace pane: files / git review / delegated workers. The terminal is the bottom strip. */
-type WorkspaceTab = "files" | "git" | "workers";
+type WorkspaceTab = "files" | "git" | "workers" | "background";
 
 /** Compact conversation header: project name plus the workspace toggles. */
 function AstraHeader({
@@ -983,6 +994,21 @@ export function App() {
 											<span>{t("astraWorkers")}</span>
 											{activeWorkers > 0 && <span className="astra-workspace-badge">{activeWorkers}</span>}
 										</button>
+										{tabOn("tasks") && (
+											<button
+												type="button"
+												role="tab"
+												aria-selected={workspaceTab === "background"}
+												className={workspaceTab === "background" ? "active" : ""}
+												onClick={() => setWorkspaceTab("background")}
+											>
+												<FiServer />
+												<span>{t("astraBackground")}</span>
+												{chat.bgServers.length > 0 && (
+													<span className="astra-workspace-badge">{chat.bgServers.length}</span>
+												)}
+											</button>
+										)}
 										<button
 											type="button"
 											className="astra-workspace-close"
@@ -1028,6 +1054,17 @@ export function App() {
 													<span>{t("astraWorkers")}</span>
 													<kbd>Ctrl+Shift+L</kbd>
 												</button>
+												{tabOn("tasks") && (
+													<button
+														type="button"
+														role="menuitem"
+														className="astra-workspace-item"
+														onClick={() => setWorkspaceTab("background")}
+													>
+														<FiServer />
+														<span>{t("astraBackground")}</span>
+													</button>
+												)}
 												<button
 													type="button"
 													role="menuitem"
@@ -1069,6 +1106,11 @@ export function App() {
 													thinkingWrap={chat.settings?.thinkingWrap ?? true}
 													toolsWrap={chat.settings?.toolsWrap ?? false}
 												/>
+											</div>
+										)}
+										{workspaceTab === "background" && tabOn("tasks") && (
+											<div className="astra-workspace-pane">
+												<BackgroundPanel servers={chat.bgServers} send={send} />
 											</div>
 										)}
 										{workspaceTab === "files" && workspaceFile && (

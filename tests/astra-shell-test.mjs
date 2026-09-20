@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { startBrowserFixture, artifactDir, eventually, dismissSetup } from "./lib/browser-fixture.mjs";
+import { repoRoot, startBrowserFixture, artifactDir, eventually, dismissSetup } from "./lib/browser-fixture.mjs";
 
 const base = mkdtempSync(join(tmpdir(), "piastra-shell-"));
 const workdir = join(base, "work");
@@ -17,7 +17,19 @@ execFileSync("git", ["-c", "user.name=CI", "-c", "user.email=ci@example.invalid"
 	stdio: "ignore",
 });
 writeFileSync(join(workdir, "readme.md"), "# Astra sample file\nsome *markdown* body\nChanged in QA\n");
-const fixture = await startBrowserFixture({ cwd: workdir, agentDir: join(base, "agent"), dataDir: join(base, "data") });
+const previousTabs = process.env.PI_WEB_TABS;
+const previousPkgRoot = process.env.PI_WEB_PKG_ROOT;
+process.env.PI_WEB_TABS = "chat,terminal,git,search,tasks,settings,plugins";
+process.env.PI_WEB_PKG_ROOT = repoRoot;
+let fixture;
+try {
+	fixture = await startBrowserFixture({ cwd: workdir, agentDir: join(base, "agent"), dataDir: join(base, "data") });
+} finally {
+	if (previousTabs === undefined) delete process.env.PI_WEB_TABS;
+	else process.env.PI_WEB_TABS = previousTabs;
+	if (previousPkgRoot === undefined) delete process.env.PI_WEB_PKG_ROOT;
+	else process.env.PI_WEB_PKG_ROOT = previousPkgRoot;
+}
 let page;
 let checks = 0;
 const check = (name, ok) => {
@@ -64,7 +76,27 @@ try {
 	await page.locator(".modal-close").click();
 	await page.locator(".astra-workspace-toggle").click();
 	await page.locator(".astra-workspace-chooser").waitFor();
-	check("chooser has files/review/workers/terminal", (await page.locator(".astra-workspace-item").count()) === 4);
+	check(
+		"chooser has files/review/workers/background/terminal",
+		(await page.locator(".astra-workspace-item").count()) === 5,
+	);
+	check(
+		"chooser includes Background",
+		(await page.locator(".astra-workspace-item").filter({ hasText: "Background" }).count()) === 1,
+	);
+	await page.locator(".astra-workspace-item").filter({ hasText: "Background" }).click();
+	await page.locator(".background-panel").waitFor();
+	check("Background opens from chooser with empty state", (await page.locator(".background-empty").count()) === 1);
+	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	await page.locator(".background-empty").waitFor();
+	check("Background refresh preserves empty state", (await page.locator(".background-empty").count()) === 1);
+	await page.locator(".astra-workspace-back").click();
+	await page.locator(".astra-workspace-chooser").waitFor();
+	await page.getByRole("tab", { name: "Background", exact: true }).click();
+	await page.locator(".background-panel").waitFor();
+	check("Background tab opens the panel", (await page.locator(".background-empty").count()) === 1);
+	await page.locator(".astra-workspace-back").click();
+	await page.locator(".astra-workspace-chooser").waitFor();
 	await page.locator(".astra-workspace-item").filter({ hasText: "Files" }).click();
 	await page.locator("button.file-name").filter({ hasText: "readme.md" }).click();
 	await page.locator(".fp-inline").waitFor();
@@ -142,6 +174,8 @@ try {
 	);
 	check("sent prompt history survives reload", true);
 	await page.locator(".inputbar textarea").fill("first line\nsecond line");
+	await page.locator(".inputbar textarea").press("Control+Home");
+	await page.locator(".inputbar textarea").press("ArrowDown");
 	await page.locator(".inputbar textarea").press("ArrowUp");
 	check(
 		"multiline cursor movement preserves the draft",

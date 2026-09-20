@@ -1,8 +1,6 @@
 /* Delegated workers (PiAstra `delegate`): the Workers pane in the right
    workspace and the worker rows inside the delegate tool card. Loaded after
-   styles.css; tokens only, no literal colors, so themes keep working. The
-   role hue tints the role glyph and the row border; the label and status
-   text always carry the state too. */
+   styles.css; tokens only, no literal colors, so themes keep working. */
 
 /* ---- shared bits: role chip, status, elapsed ---- */
 .worker-role {
@@ -58,8 +56,8 @@
 .worker-spacer {
 	flex: 1;
 }
-/* the running label gets the same light sweep as a running tool summary */
-.worker-status.shimmer {
+/* Running delegate cards retain their light sweep; pane statuses stay static. */
+.delegate-worker .worker-status.shimmer {
 	color: transparent;
 	background-image: linear-gradient(
 		100deg,
@@ -76,41 +74,34 @@
 	animation: toolcall-shimmer 1.8s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-	.worker-status.shimmer {
+	.delegate-worker .worker-status.shimmer {
 		animation: none;
 		color: var(--text-dim);
 		background-image: none;
 	}
 }
 
-/* ---- role-tinted borders: the same mix the composer uses for the active
-   agent (~55% hue into the hairline at rest, a touch more on hover) ---- */
-.worker-row,
+/* Delegate cards retain their role-tinted treatment. The pane rows below
+   intentionally use neutral hairlines instead. */
 .delegate-worker {
 	--worker-hue: var(--border-soft);
 }
-.worker-row[data-role="orchestrator"],
 .delegate-worker[data-role="orchestrator"] {
 	--worker-hue: var(--agent-orchestrator);
 }
-.worker-row[data-role="general"],
 .delegate-worker[data-role="general"] {
 	--worker-hue: var(--agent-general);
 }
-.worker-row[data-role="fast"],
 .delegate-worker[data-role="fast"] {
 	--worker-hue: var(--agent-fast);
 }
-.worker-row[data-role="review"],
 .delegate-worker[data-role="review"] {
 	--worker-hue: var(--agent-review);
 }
-.worker-row[data-role],
 .delegate-worker[data-role] {
 	border-color: color-mix(in srgb, var(--worker-hue) 55%, var(--border-soft));
 	box-shadow: 0 0 0 1px color-mix(in srgb, var(--worker-hue) 12%, transparent);
 }
-.worker-row[data-role]:hover,
 .delegate-worker[data-role]:not(.pending):hover {
 	border-color: color-mix(in srgb, var(--worker-hue) 75%, var(--border-soft));
 }
@@ -137,7 +128,7 @@
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
-	padding: 12px 12px 24px;
+	padding: 10px 12px 24px;
 	display: flex;
 	flex-direction: column;
 	gap: 18px;
@@ -145,79 +136,132 @@
 .workers-section {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	min-width: 0;
 }
 .workers-section-head {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 0 4px;
+	padding: 0 4px 6px;
 	font-size: 11.5px;
 	font-weight: 600;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
 	color: var(--text-faint);
 }
+.workers-section > summary {
+	cursor: pointer;
+	list-style: none;
+}
+.workers-section > summary::-webkit-details-marker {
+	display: none;
+}
+.workers-section > summary::before {
+	content: "›";
+	font-size: 16px;
+	line-height: 1;
+	transform: rotate(0deg);
+}
+.workers-section[open] > summary::before {
+	transform: rotate(90deg);
+}
 .workers-section-count {
 	font-family: var(--mono);
 	font-weight: 500;
 	letter-spacing: 0;
+}
+.workers-section-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
 }
 .workers-section-empty {
 	padding: 6px 4px;
 	font-size: 13px;
 	color: var(--text-faint);
 }
+.worker-row-item {
+	margin: 0;
+	padding: 0;
+}
 .worker-row {
 	display: flex;
-	flex-direction: column;
-	gap: 4px;
+	align-items: center;
+	gap: 8px;
 	width: 100%;
-	padding: 10px 12px;
-	border: 1px solid var(--border-soft);
-	border-radius: var(--radius-md, 10px);
-	background: var(--card-bg);
+	min-width: 0;
+	padding: 9px 4px;
+	border: 0;
+	border-top: 1px solid var(--border-soft);
+	border-radius: 0;
+	background: transparent;
 	color: var(--text);
 	text-align: left;
 	font: inherit;
 	cursor: pointer;
 }
+.worker-row-item:first-child .worker-row {
+	border-top-color: transparent;
+}
 .worker-row:hover {
 	background: var(--bg-elev2);
-	border-color: var(--border);
 }
 .worker-row:focus-visible {
 	outline: none;
 	box-shadow: var(--ring);
 }
-.worker-row-head {
-	display: flex;
+.worker-row-status {
+	display: inline-flex;
 	align-items: center;
-	gap: 8px;
-	min-width: 0;
+	gap: 5px;
+	flex: none;
 }
-.worker-row-head .worker-elapsed {
-	margin-left: auto;
+.worker-row-status-icon {
+	width: 13px;
+	height: 13px;
+	flex: none;
+}
+.worker-status-failed {
+	font-size: 11.5px;
+	font-weight: 600;
 }
 .worker-task {
+	flex: 1 1 auto;
+	min-width: 0;
 	font-size: 13.5px;
-	line-height: 1.45;
+	line-height: 1.4;
 	color: var(--text);
-	overflow: hidden;
-	display: -webkit-box;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-}
-.worker-activity {
-	font-family: var(--mono);
-	font-size: 12px;
-	color: var(--text-faint);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.worker-row.tone-err .worker-activity {
-	color: var(--red-text, var(--red));
+.worker-row .worker-elapsed {
+	flex: none;
+	margin-left: auto;
+}
+.worker-status-dot {
+	width: 6px;
+	height: 6px;
+	flex: none;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.75;
+}
+.worker-detail-meta .worker-role {
+	gap: 4px;
+	font-size: 11.5px;
+	font-weight: 500;
+	color: var(--text-dim);
+}
+.worker-detail-meta .worker-role-icon {
+	width: 11px;
+	height: 11px;
+}
+.worker-detail-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	flex: none;
 }
 
 /* empty pane */
@@ -258,10 +302,22 @@
 .worker-detail-head {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	flex-wrap: wrap;
+	gap: 6px 8px;
 	min-height: 42px;
 	padding: 6px 10px;
 	border-bottom: 1px solid var(--border-soft);
+}
+.worker-detail-meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 5px 8px;
+	min-width: 0;
+	flex: 1 1 120px;
+}
+.worker-detail-meta .worker-model {
+	max-width: min(40%, 180px);
 }
 .worker-back {
 	width: 28px;
@@ -279,6 +335,11 @@
 	background: var(--bg-elev2);
 	color: var(--text);
 }
+.worker-back:focus-visible,
+.worker-cancel:focus-visible {
+	outline: none;
+	box-shadow: var(--ring);
+}
 .worker-model {
 	font-family: var(--mono);
 	font-size: 11.5px;
@@ -293,6 +354,8 @@
 	align-items: center;
 	gap: 5px;
 	height: 26px;
+	flex: none;
+	margin-left: auto;
 	padding: 0 9px;
 	border: 1px solid var(--border-soft);
 	border-radius: var(--radius-sm, 6px);
@@ -307,20 +370,52 @@
 	color: var(--red);
 }
 .worker-detail-task {
-	padding: 10px 14px;
+	padding: 8px 14px;
 	border-bottom: 1px solid var(--border-soft);
 	max-height: 30%;
 	overflow-y: auto;
 }
+.worker-detail-task summary {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+	cursor: pointer;
+	list-style: none;
+}
+.worker-detail-task summary::-webkit-details-marker {
+	display: none;
+}
+.worker-detail-task summary::before {
+	content: "›";
+	flex: none;
+	font-size: 16px;
+	line-height: 1;
+	color: var(--text-faint);
+	transform: rotate(0deg);
+}
+.worker-detail-task[open] summary::before {
+	transform: rotate(90deg);
+}
 .worker-detail-label {
+	flex: none;
 	font-size: 11.5px;
 	font-weight: 500;
 	letter-spacing: 0.05em;
 	text-transform: uppercase;
 	color: var(--text-faint);
-	margin-bottom: 4px;
+}
+.worker-detail-task-preview {
+	min-width: 0;
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--text-dim);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .worker-detail-task-text {
+	padding: 7px 0 2px 20px;
 	font-size: 13.5px;
 	line-height: 1.5;
 	color: var(--text);
@@ -351,10 +446,13 @@
 	border-top: 1px solid var(--border-soft);
 	font-family: var(--mono);
 	font-size: 12px;
+	line-height: 1.4;
 	color: var(--text-dim);
-	white-space: nowrap;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	max-height: calc(2.8em + 17px);
+	flex-shrink: 0;
 	overflow: hidden;
-	text-overflow: ellipsis;
 }
 .worker-detail-foot.tone-err {
 	color: var(--red-text, var(--red));

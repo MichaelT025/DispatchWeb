@@ -20,7 +20,7 @@
  *
  * Run: npm run build && node tests/astra-workers-test.mjs
  */
-import { startBrowserFixture, artifactDir, eventually } from "./lib/browser-fixture.mjs";
+import { repoRoot, startBrowserFixture, artifactDir, eventually } from "./lib/browser-fixture.mjs";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -283,7 +283,15 @@ const until = async (name, predicate, timeout = 10000) => {
 	}
 };
 
-const fixture = await startBrowserFixture({ cwd: proj, agentDir, dataDir, sessionRoot });
+const previousPkgRoot = process.env.PI_WEB_PKG_ROOT;
+process.env.PI_WEB_PKG_ROOT = repoRoot;
+let fixture;
+try {
+	fixture = await startBrowserFixture({ cwd: proj, agentDir, dataDir, sessionRoot });
+} finally {
+	if (previousPkgRoot === undefined) delete process.env.PI_WEB_PKG_ROOT;
+	else process.env.PI_WEB_PKG_ROOT = previousPkgRoot;
+}
 const browser = fixture.browser;
 try {
 	const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
@@ -311,11 +319,30 @@ try {
 		"live worker #3 listed under Active",
 		async () => (await page.locator(".workers-section").first().locator(".worker-row").count()) === 1,
 	);
+	const activeRow = page.locator(".workers-section").first().locator(".worker-row").first();
+	const activeDetails = await activeRow.evaluate((row) => ({
+		task: row.querySelector(".worker-task")?.textContent?.trim(),
+		statusLabel: row.querySelector(".worker-row-status")?.getAttribute("aria-label"),
+		statusTitle: row.querySelector(".worker-row-status")?.getAttribute("title"),
+		hasStatusIcon: row.querySelector(".worker-row-status svg") !== null,
+		elapsed: row.querySelector(".worker-elapsed")?.textContent?.trim() ?? "",
+		text: row.textContent ?? "",
+		metadataCount: row.querySelectorAll(".worker-role, .worker-model, .worker-id, .worker-activity").length,
+	}));
 	check(
-		"Active row carries role chip, id, status and elapsed",
-		(await page.locator(".worker-row .worker-role[data-role='fast']").count()) === 1 &&
-			(await page.locator(".worker-row .worker-id").first().innerText()) === "#3" &&
-			/Running|Starting/.test(await page.locator(".worker-row .worker-status").first().innerText()),
+		"Active row has compact task, status tooltip/icon and elapsed time",
+		activeDetails.task === "Live synthetic worker" &&
+			activeDetails.statusLabel === "Running" &&
+			activeDetails.statusTitle === "Running" &&
+			activeDetails.hasStatusIcon &&
+			/^\d+(?:s|m \d{2}s|h \d{2}m)$/.test(activeDetails.elapsed),
+	);
+	check(
+		"Active row omits role, model, id and activity dump",
+		activeDetails.metadataCount === 0 &&
+			!activeDetails.text.includes("fast") &&
+			!activeDetails.text.includes("Thinking") &&
+			!activeDetails.text.includes("Responding"),
 	);
 	check(
 		"Workers tab shows the running count badge",
@@ -368,12 +395,25 @@ try {
 		const sections = page.locator(".workers-section");
 		return (
 			(await sections.nth(0).locator(".worker-row").count()) === 1 &&
-			(await sections.nth(1).locator(".worker-row").count()) === 2
+			(await sections.nth(1).locator(".worker-row").count()) === 2 &&
+			(await sections.nth(1).evaluate((element) => element.tagName === "DETAILS" && !element.open))
 		);
 	});
+	const doneSection = page.locator(".workers-section").nth(1);
 	check(
-		"Done lists newest first (#2 interrupted before #1 completed)",
-		(await page.locator(".workers-section").nth(1).locator(".worker-id").allInnerTexts()).join(",") === "#2,#1",
+		"Done is collapsed initially",
+		(await doneSection.getAttribute("open")) === null &&
+			!(await doneSection.locator(".worker-row").first().isVisible()),
+	);
+	await doneSection.locator("summary").click();
+	await until(
+		"Done expands to show both workers",
+		async () => (await doneSection.locator(".worker-row:visible").count()) === 2,
+	);
+	check(
+		"Done is newest first by task",
+		(await doneSection.locator(".worker-task").allInnerTexts()).join("|") ===
+			"Implement the change|Review the diff against main",
 	);
 
 	// ---------- 5) live worker: streaming transcript, then Stop ----------

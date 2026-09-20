@@ -147,6 +147,31 @@ describe("ConversationTodos", () => {
 		expect(next.snapshot().runIds).toEqual([]);
 	});
 
+	it("keeps a forced-reset run idle with its task ids across rebind and reconnect", () => {
+		const t = new ConversationTodos();
+		t.startRun();
+		t.apply({ action: "create", params: {}, tasks: [task(1, "touched", "in_progress")], nextId: 2 });
+		// forceResetConversation refreshes the live state before taking ownership;
+		// replay keeps the in-flight membership while the runtime is still live.
+		t.replay([result([task(1, "touched", "in_progress")], 2, "list")]);
+
+		// It then ends tracking before disposal. The replacement bind intentionally
+		// retains this state instead of replaying over the ended run.
+		t.endRun();
+		const activeSnapshot = t.snapshot();
+		expect(activeSnapshot).toEqual({
+			tasks: [task(1, "touched", "in_progress")],
+			nextId: 2,
+			runIds: [1],
+			running: false,
+		});
+
+		// The replacement bind skips replay for this hand-off, so the retained
+		// snapshot remains the reconnect snapshot.
+		const reconnectSnapshot = t.snapshot();
+		expect(reconnectSnapshot).toEqual(activeSnapshot);
+	});
+
 	it("keeps live membership when a branch is replayed during a rebind", () => {
 		const t = new ConversationTodos();
 		t.startRun();

@@ -1491,7 +1491,7 @@ export class ClientSession {
 	}
 
 	/** (Re)attach event plumbing to the ACTIVE conversation's session. */
-	private async bindSession(): Promise<void> {
+	private async bindSession(skipTodoReplay = false): Promise<void> {
 		const conv = this.conv;
 		conv.unsubscribe?.();
 		conv.session = conv.runtime.session;
@@ -1499,8 +1499,9 @@ export class ClientSession {
 		// entries before session_start repopulates its confirmed statuses.
 		this.convStatuses.remove(conv.id);
 		// The session (and thus the branch) may have been replaced — re-read the
-		// todo list from it, keeping the in-flight run's ids.
-		this.replayTodos(conv, this.todosFor(conv));
+		// todo list from it, keeping the in-flight run's ids. A forced reset has
+		// already handed off an ended run and must retain that snapshot instead.
+		if (!skipTodoReplay) this.replayTodos(conv, this.todosFor(conv));
 		this.pushActiveStatuses();
 		await conv.session.bindExtensions({
 			mode: "rpc",
@@ -3155,6 +3156,15 @@ export class ClientSession {
 	 *  same cwd, same serialization caches), so the UI stays attached. */
 	private async forceResetConversation(conv: Conversation, reason: string): Promise<void> {
 		try {
+			// Refresh the in-memory todo state while the run is still live, so its
+			// membership survives the hand-off. Then end tracking before disposal
+			// (which cannot be allowed to emit a late agent_end). The replacement
+			// bind skips replay: replaying an ended run would replace these ids with
+			// the historical branch boundary and lose the useful last-run strip.
+			const todos = this.todosFor(conv);
+			this.replayTodos(conv, todos);
+			todos.endRun();
+			this.pushTodosIfActive(conv);
 			conv.unsubscribe?.();
 			conv.unsubscribe = undefined;
 			this.clearAllToolWatchdogs(conv);
@@ -3172,7 +3182,7 @@ export class ClientSession {
 				level: "warning",
 				text: `${reason} (forced reset: run did not terminate)`,
 			});
-			await this.bindSession();
+			await this.bindSession(true);
 			this.emitConversations();
 			void this.pushSlashCommands();
 		} catch (err) {

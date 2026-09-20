@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { shimmerPhase } from "../shimmer";
-import { FiArrowLeft, FiSquare, FiUsers } from "react-icons/fi";
+import { FiArrowLeft, FiCheck, FiClock, FiPause, FiPlay, FiSquare, FiUsers, FiX, FiAlertCircle } from "react-icons/fi";
 import type { ClientMessage, ToolStatus, UiMessage, UiWorker, UiWorkerTranscript } from "../types";
 import { useT } from "../i18n";
 import {
@@ -103,68 +102,117 @@ export const WorkersPanel = memo(function WorkersPanel({
 	}
 
 	return (
-		<div className="workers-list" role="list" aria-label={t("astraWorkers")}>
-			<WorkerSection title={t("workersActive")} count={active.length} workers={active} now={now} onSelect={onSelect} />
-			<WorkerSection title={t("workersDone")} count={done.length} workers={done} now={now} onSelect={onSelect} />
+		<div className="workers-list">
+			<WorkerSection
+				id="workers-active"
+				title={t("workersActive")}
+				count={active.length}
+				workers={active}
+				now={now}
+				onSelect={onSelect}
+			/>
+			<WorkerSection
+				id="workers-done"
+				title={t("workersDone")}
+				count={done.length}
+				workers={done}
+				now={now}
+				onSelect={onSelect}
+				collapsible
+			/>
 		</div>
 	);
 });
 
 function WorkerSection({
+	id,
 	title,
 	count,
 	workers,
 	now,
 	onSelect,
+	collapsible = false,
 }: {
 	title: string;
 	count: number;
+	id: string;
 	workers: UiWorker[];
 	now: number;
 	onSelect: (id: number) => void;
+	collapsible?: boolean;
 }) {
 	const t = useT();
-	return (
-		<section className="workers-section">
-			<div className="workers-section-head">
-				<span>{title}</span>
-				<span className="workers-section-count">{count}</span>
-			</div>
+	const headingId = `${id}-heading`;
+	const heading = (
+		<>
+			<span>{title}</span>
+			<span className="workers-section-count">{count}</span>
+		</>
+	);
+	const rows = (
+		<>
 			{workers.length === 0 && <div className="workers-section-empty">{t("workersNone")}</div>}
-			{workers.map((w) => (
-				<WorkerRow key={w.id} worker={w} now={now} onClick={() => onSelect(w.id)} />
-			))}
+			{workers.length > 0 && (
+				<ul className="workers-section-list" aria-labelledby={headingId}>
+					{workers.map((w) => (
+						<WorkerRow key={w.id} worker={w} now={now} onClick={() => onSelect(w.id)} />
+					))}
+				</ul>
+			)}
+		</>
+	);
+	if (collapsible) {
+		return (
+			<details className="workers-section" aria-labelledby={headingId}>
+				<summary className="workers-section-head" id={headingId}>
+					{heading}
+				</summary>
+				{rows}
+			</details>
+		);
+	}
+	return (
+		<section className="workers-section" aria-labelledby={headingId}>
+			<div className="workers-section-head" id={headingId}>
+				{heading}
+			</div>
+			{rows}
 		</section>
 	);
 }
 
-/** Role chip + status + elapsed + task; the activity line under it. */
+/** The first line/sentence is a conservative label; never invent a summary. */
+function workerListTaskPreview(task: string): string {
+	const firstLine = task.split(/\r?\n/, 1)[0]?.trim() ?? "";
+	return (firstLine.match(/^(.+?[.!?])(?:\s|$)/)?.[1] ?? firstLine).replace(/\s+/g, " ").trim();
+}
+
+/** A compact, keyboard-targetable work-log row. */
 function WorkerRow({ worker, now, onClick }: { worker: UiWorker; now: number; onClick: () => void }) {
-	const running = isWorkerActive(worker.status);
+	const tone = workerStatusTone(worker.status);
+	const status = workerStatusLabel(worker.status);
+	const task = workerListTaskPreview(worker.task);
+	const StatusIcon = {
+		starting: FiClock,
+		running: FiPlay,
+		completed: FiCheck,
+		failed: FiAlertCircle,
+		cancelled: FiX,
+		interrupted: FiPause,
+	}[worker.status];
 	return (
-		<button
-			type="button"
-			className={`worker-row tone-${workerStatusTone(worker.status)}`}
-			data-role={worker.role}
-			role="listitem"
-			onClick={onClick}
-		>
-			<div className="worker-row-head">
-				<RoleChip role={worker.role} />
-				<span className="worker-id">#{worker.id}</span>
-				<span
-					className={`worker-status${running ? " shimmer" : ""}`}
-					style={running ? shimmerPhase(worker.id) : undefined}
-				>
-					{workerStatusLabel(worker.status)}
+		<li className="worker-row-item">
+			<button type="button" className={`worker-row tone-${tone}`} onClick={onClick}>
+				<span className={`worker-row-status worker-status tone-${tone}`} role="img" aria-label={status} title={status}>
+					<StatusIcon className="worker-row-status-icon" aria-hidden="true" />
+					{worker.status === "failed" && <span className="worker-status-failed">Failed</span>}
+				</span>
+				<span className="worker-task" title={task}>
+					{task}
 				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
-			</div>
-			<div className="worker-task" title={worker.task}>
-				{taskPreview(worker.task)}
-			</div>
-			{worker.activity && <div className="worker-activity">{worker.activity}</div>}
-		</button>
+			</button>
+		</li>
 	);
 }
 
@@ -187,6 +235,7 @@ function WorkerDetail({
 }) {
 	const t = useT();
 	const running = isWorkerActive(worker.status);
+	const tone = workerStatusTone(worker.status);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickRef = useRef(true);
 	const messages = transcript?.messages ?? [];
@@ -222,34 +271,32 @@ function WorkerDetail({
 				>
 					<FiArrowLeft />
 				</button>
-				<RoleChip role={worker.role} />
-				<span className="worker-id">#{worker.id}</span>
-				<span
-					className={`worker-status tone-${workerStatusTone(worker.status)}${running ? " shimmer" : ""}`}
-					style={running ? shimmerPhase(worker.id) : undefined}
-				>
+				<div className="worker-detail-meta">
+					<RoleChip role={worker.role} />
+					<span className="worker-id">#{worker.id}</span>
+					<span className="worker-model" title={worker.model}>
+						{worker.model}
+					</span>
+				</div>
+				<span className={`worker-status worker-detail-status tone-${tone}`}>
+					<span className="worker-status-dot" aria-hidden="true" />
 					{workerStatusLabel(worker.status)}
 				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
-				<span className="worker-model" title={worker.model}>
-					{worker.model}
-				</span>
-				<span className="worker-spacer" />
 				{running && (
 					<button type="button" className="worker-cancel" title={t("workersStopTip")} onClick={onCancel}>
-						<FiSquare />
+						<FiSquare aria-hidden="true" />
 						<span>{t("workersStop")}</span>
 					</button>
 				)}
 			</div>
-			{/* The transcript's first user message IS the task; repeat it only
-			    while there is no transcript to read it from. */}
-			{all.length === 0 && (
-				<div className="worker-detail-task">
-					<div className="worker-detail-label">{t("workersTask")}</div>
-					<div className="worker-detail-task-text">{worker.task}</div>
-				</div>
-			)}
+			<details className="worker-detail-task">
+				<summary>
+					<span className="worker-detail-label">{t("workersTask")}</span>
+					<span className="worker-detail-task-preview">{taskPreview(worker.task)}</span>
+				</summary>
+				<div className="worker-detail-task-text">{worker.task}</div>
+			</details>
 			<div className="worker-transcript" ref={scrollRef} onScroll={onScroll}>
 				{transcript === undefined && <div className="worker-transcript-note">{t("workersLoading")}</div>}
 				{transcript !== undefined && all.length === 0 && (

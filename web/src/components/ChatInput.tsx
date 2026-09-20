@@ -11,6 +11,7 @@ import { isRasterImage } from "../image-paste";
 import { recordModelUsage } from "../model-usage";
 import { loadPromptHistory, pushPromptHistory } from "../prompt-history";
 import { detectTouchFirstDevice } from "../touch-device";
+import { scheduleDeferredCursor } from "../deferred-cursor";
 
 import { ModelThinking } from "./ModelThinking";
 import { ContextUsageIndicator } from "./ContextUsageIndicator";
@@ -132,6 +133,15 @@ export const ChatInput = memo(function ChatInput({
 	/** 全局 prompt 历史导航状态（issue #68）：-1 = 未在历史中，>=0 = 历史下标。 */
 	const historyIndexRef = useRef(-1);
 	const draftRef = useRef("");
+	const pendingHistoryCursorRef = useRef<(() => void) | null>(null);
+	const cancelHistoryCursor = () => {
+		pendingHistoryCursorRef.current?.();
+		pendingHistoryCursorRef.current = null;
+	};
+	const scheduleHistoryCursor = (expectedValue: string) => {
+		cancelHistoryCursor();
+		pendingHistoryCursorRef.current = scheduleDeferredCursor(taRef.current, expectedValue);
+	};
 
 	// 撤回的排队/插队消息 → 按序合并回输入框（空则填入、非空追加，见 composer-draft.ts）。
 	// 用 lastRecallSeqRef 去重：已消费的 seq 不再应用（StrictMode/重复渲染下不会重复追加）；
@@ -498,20 +508,14 @@ export const ChatInput = memo(function ChatInput({
 					const next = history[idx];
 					setText(next);
 					updateCompletions(next);
-					requestAnimationFrame(() => {
-						const el = taRef.current;
-						if (el) el.selectionStart = el.selectionEnd = next.length;
-					});
+					scheduleHistoryCursor(next);
 				} else if (historyIndexRef.current > 0) {
 					const idx = historyIndexRef.current - 1;
 					historyIndexRef.current = idx;
 					const next = history[idx];
 					setText(next);
 					updateCompletions(next);
-					requestAnimationFrame(() => {
-						const el = taRef.current;
-						if (el) el.selectionStart = el.selectionEnd = next.length;
-					});
+					scheduleHistoryCursor(next);
 				}
 				// 已在最旧一条：保持不动
 			} else {
@@ -522,20 +526,14 @@ export const ChatInput = memo(function ChatInput({
 					const next = history[idx];
 					setText(next);
 					updateCompletions(next);
-					requestAnimationFrame(() => {
-						const el = taRef.current;
-						if (el) el.selectionStart = el.selectionEnd = next.length;
-					});
+					scheduleHistoryCursor(next);
 				} else {
 					// 越过最新一条：回到草稿（通常是空）
 					historyIndexRef.current = -1;
 					const draft = draftRef.current;
 					setText(draft);
 					updateCompletions(draft);
-					requestAnimationFrame(() => {
-						const el = taRef.current;
-						if (el) el.selectionStart = el.selectionEnd = draft.length;
-					});
+					scheduleHistoryCursor(draft);
 				}
 			}
 			return;
@@ -547,10 +545,7 @@ export const ChatInput = memo(function ChatInput({
 			historyIndexRef.current = -1;
 			setText(draft);
 			updateCompletions(draft);
-			requestAnimationFrame(() => {
-				const el = taRef.current;
-				if (el) el.selectionStart = el.selectionEnd = draft.length;
-			});
+			scheduleHistoryCursor(draft);
 			return;
 		}
 		// Enter semantics: on touch-first devices (soft keyboard, no physical
@@ -777,6 +772,7 @@ export const ChatInput = memo(function ChatInput({
 					onChange={(e) => {
 						// 用户手动编辑则退出历史导航（下次 Up 从最新开始）
 						historyIndexRef.current = -1;
+						cancelHistoryCursor();
 						setText(e.target.value);
 						updateCompletions(e.target.value);
 					}}

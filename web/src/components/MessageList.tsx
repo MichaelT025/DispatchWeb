@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import type { CSSProperties } from "react";
 import { FiArrowDown } from "react-icons/fi";
 import type { PromptAttachment, ToolStatus, UiMessage, UiState } from "../types";
 import { Message, asText } from "./Message";
@@ -23,6 +22,7 @@ import {
 	type WinRect,
 } from "../lazy-window";
 import { SearchBar } from "./SearchBar";
+import { PromptMinimap } from "./PromptMinimap";
 import { Logo } from "./Logo";
 import { classifyScroll } from "./scroll-classify";
 import { useT } from "../i18n";
@@ -747,52 +747,6 @@ export function MessageList({
 		setTimeout(snap, 600);
 	}, []);
 
-	// The rail is a pointer-event target so it can expand on hover; forward
-	// wheel over it (collapsed strip or expanded panel) to the message list.
-	const railRef = useRef<HTMLDivElement>(null);
-	useEffect(() => {
-		const rail = railRef.current;
-		const el = scrollRef.current;
-		if (!rail || !el) return;
-		const onWheel = (e: WheelEvent) => {
-			e.preventDefault();
-			// In "many questions" mode the hover panel is a scrollable list —
-			// wheel over it scrolls the list itself (when it overflows),
-			// otherwise it falls through to the message list.
-			const list = rail.querySelector<HTMLElement>(".qn-list");
-			if (list && list.contains(e.target as Node) && list.scrollHeight > list.clientHeight) {
-				list.scrollTop += e.deltaY;
-				return;
-			}
-			el.scrollTop += e.deltaY;
-		};
-		rail.addEventListener("wheel", onWheel, { passive: false });
-		return () => rail.removeEventListener("wheel", onWheel);
-	}, []);
-
-	// Visible height of the scroll area — drives the adaptive row gap so the
-	// centered tick cluster always fits (no top/bottom clipping).
-	const [railH, setRailH] = useState(0);
-	useEffect(() => {
-		const update = () => {
-			setRailH(scrollRef.current?.clientHeight ?? 0);
-			scheduleSweep(); // 宽高变化后旧占位高度可能失准，重新评估窗口
-		};
-		update();
-		window.addEventListener("resize", update);
-		return () => window.removeEventListener("resize", update);
-		// `active`: a parked list measures 0 — re-measure when it is shown.
-	}, [scheduleSweep, active]);
-	const n = questions.length;
-	const railGap = useMemo(() => {
-		if (n === 0) return 27;
-		const h = railH || 600;
-		return Math.max(4, Math.min(27, Math.floor((h - 16) / n) - 3));
-	}, [n, railH]);
-	/** Many questions: per-tick chips would overlap (pitch < ~24px), so the
-	 *  hover panel becomes a scrollable list instead. */
-	const many = railGap < 20;
-
 	return (
 		<div className="messages-wrap">
 			<div
@@ -935,44 +889,7 @@ export function MessageList({
 				open={searchOpen}
 				onClose={() => setSearchOpen(false)}
 			/>
-			{questions.length > 0 && (
-				<div
-					className={`qn-rail ${many ? "many" : ""}`}
-					ref={railRef}
-					aria-label={t("questionNavTitle")}
-					style={{ "--rail-gap": `${railGap}px` } as CSSProperties}
-				>
-					{questions.map((q, i) => (
-						<button
-							type="button"
-							key={q.id}
-							className={`qn-bar ${i === activeIdx ? "active" : ""}`}
-							aria-label={`${i + 1}. ${q.text}`}
-							onClick={() => jumpTo(q.id)}
-						>
-							<span className="qn-bar-text">
-								{i + 1}. {q.text}
-							</span>
-						</button>
-					))}
-					{many && (
-						<div className="qn-list">
-							{questions.map((q, i) => (
-								<button
-									type="button"
-									key={q.id}
-									className={`qn-list-item ${i === activeIdx ? "active" : ""}`}
-									aria-label={`${i + 1}. ${q.text}`}
-									onClick={() => jumpTo(q.id)}
-								>
-									<span className="qn-list-idx">{i + 1}</span>
-									<span className="qn-list-text">{q.text}</span>
-								</button>
-							))}
-						</div>
-					)}
-				</div>
-			)}
+			<PromptMinimap questions={questions} activeIndex={activeIdx} onJump={jumpTo} />
 		</div>
 	);
 }

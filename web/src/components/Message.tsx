@@ -10,7 +10,6 @@ import {
 	FiCopy,
 	FiEdit3,
 	FiImage,
-	FiRefreshCw,
 	FiX,
 } from "react-icons/fi";
 import type {
@@ -203,6 +202,9 @@ export const Message = memo(function Message({
 	// Streaming bubble with no content yet (first token not arrived) — show a
 	// visible “thinking…” placeholder instead of an invisible empty bubble.
 	const isEmptyStreaming = streaming && isLast && message.content.length === 0;
+	// An explicit assistant stopReason is authoritative. The narrow legacy
+	// fallback keeps old transcripts readable without hiding real errors.
+	const isCanceledRun = isCanceledAssistantRun(message);
 
 	const canEdit = message.role === "user" && !streaming && !isEmptyStreaming && !!onEdit;
 	/** Paste/drop handler inside the edit composer — same downscale pipeline
@@ -440,14 +442,14 @@ export const Message = memo(function Message({
 					</div>
 				) : (
 					<>
-						{message.errorMessage && (
+						{message.errorMessage && !isCanceledRun && (
 							<div className="msg-error">
 								<span className="msg-error-text">{message.errorMessage}</span>
 								{/* 最后一轮报错且已停止：给一个手动重试入口
 									（自动重试次数用完，服务端 retry_last 续跑一轮） */}
 								{isLast && !streaming && onRetry && (
 									<button type="button" className="msg-retry-btn" title={t("retryLastTip")} onClick={onRetry}>
-										<FiRefreshCw /> {t("retryNow")}
+										{t("retryNow")}
 									</button>
 								)}
 							</div>
@@ -501,12 +503,18 @@ export const Message = memo(function Message({
 								/>
 							))
 						)}
-						{isEmptyStreaming && (
-							<div className="thinking-wait">
-								<span className="thinking-wait-label shimmer" style={shimmerPhase(message.id)}>
-									{t("thinkingWait")}
-								</span>
+						{isCanceledRun ? (
+							<div className="msg-run-status msg-run-status-canceled" role="status">
+								{t("canceledRun")}
 							</div>
+						) : (
+							isEmptyStreaming && (
+								<div className="thinking-wait">
+									<span className="thinking-wait-label shimmer" style={shimmerPhase(message.id)}>
+										{t("thinkingWait")}
+									</span>
+								</div>
+							)
 						)}
 					</>
 				)}
@@ -937,6 +945,17 @@ function Block({
 	}
 
 	return null;
+}
+
+/** True only for an assistant run canceled by the user/engine. Keep the
+ * legacy text match intentionally narrow: arbitrary error text must remain a
+ * real error, especially when the transcript explicitly says stopReason=error. */
+export function isCanceledAssistantRun(message: UiMessage): boolean {
+	if (message.role !== "assistant") return false;
+	if (message.stopReason === "aborted") return true;
+	if (message.stopReason) return false;
+	const error = message.errorMessage?.trim().toLowerCase();
+	return error === "request was aborted" || error === "request aborted";
 }
 
 export function roleLabel(role: string, t: Translate): string {

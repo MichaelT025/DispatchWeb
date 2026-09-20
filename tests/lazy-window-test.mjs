@@ -200,7 +200,9 @@ async function main() {
 	// 问题导航跳转：目标消息被 pin 成真实渲染并 flash
 	const qnCount = await page.locator(".qn-bar").count();
 	check("question nav rail rendered", qnCount > 0);
-	const qnText = ((await page.locator(".qn-bar").first().textContent()) ?? "").replace(/^\d+\.\s*/, "");
+	const qnLabel = (await page.locator(".qn-bar").first().getAttribute("aria-label")) ?? "";
+	const qnText = qnLabel.replace(/^\d+\.\s*/, "").trim();
+	check("question nav label is nonempty", qnText.length > 0);
 	await page.locator(".qn-bar").first().click();
 	await sleep(600);
 	const jumpedOk = await page.evaluate((text) => {

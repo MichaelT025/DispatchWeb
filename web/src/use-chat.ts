@@ -15,6 +15,7 @@ import type {
 	ProviderKeyInfo,
 	ProviderStatus,
 	ServerMessage,
+	TodosState,
 	SessionSearchResult,
 	SessionSummary,
 	SlashCommandInfo,
@@ -126,6 +127,8 @@ export interface ChatState {
 	widgets: { key: string; lines: string[] }[];
 	/** Extension footer statuses (setStatus bridge). */
 	statuses: { key: string; text: string | undefined }[];
+	/** Structured todo list of the active conversation (pi-todo bridge). */
+	todos: TodosState;
 	/** Active extension dialog (select/confirm/input) awaiting a response. */
 	dialog: {
 		id: number;
@@ -291,6 +294,7 @@ export type ChatAction =
 	  }
 	| { type: "widgets"; widgets: { key: string; lines: string[] }[] }
 	| { type: "statuses"; statuses: { key: string; text: string | undefined }[] }
+	| { type: "todos"; todos: TodosState }
 	| {
 			type: "dialog";
 			dialog: {
@@ -679,6 +683,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 			return { ...state, widgets: action.widgets };
 		case "statuses":
 			return { ...state, statuses: action.statuses };
+		case "todos":
+			return { ...state, todos: action.todos };
 		case "dialog":
 			return { ...state, dialog: action.dialog };
 		case "question":
@@ -834,6 +840,7 @@ export function initialChatState(): ChatState {
 		pathCompletions: [],
 		widgets: [],
 		statuses: [],
+		todos: { tasks: [], nextId: 1, runIds: [], running: false },
 		dialog: null,
 		question: null,
 		commands: [],
@@ -1246,6 +1253,11 @@ export function useChat() {
 				case "statuses":
 					dispatch({ type: "statuses", statuses: msg.statuses });
 					break;
+				case "todos": {
+					const { type: _t, ...todos } = msg;
+					dispatch({ type: "todos", todos });
+					break;
+				}
 				case "dialog":
 					dispatch({
 						type: "dialog",

@@ -9,6 +9,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // traffic to the backend server (which runs separately via `npm run dev:server`).
 // The dev backend is pinned to :8788 (see the dev:server script) so it never
 // collides with a globally-installed pi-web-ui running on the default :8787.
+// Override both with DISPATCH_DEV_PORT / PI_WEB_PORT to run a second checkout
+// (e.g. a worktree) side by side.
+const devPort = Number(process.env.DISPATCH_DEV_PORT) || 5173;
+const backendPort = Number(process.env.PI_WEB_PORT) || 8788;
+const backend = `http://localhost:${backendPort}`;
 export default defineConfig({
 	root: __dirname,
 	plugins: [react()],
@@ -43,13 +48,14 @@ export default defineConfig({
 		},
 	},
 	server: {
-		port: 5173,
+		port: devPort,
+		strictPort: true,
 		proxy: {
-			"/api": "http://localhost:8788",
-			"/themes": "http://localhost:8788",
-			"/plugins": "http://localhost:8788",
+			"/api": backend,
+			"/themes": backend,
+			"/plugins": backend,
 			"/ws": {
-				target: "ws://localhost:8788",
+				target: `ws://localhost:${backendPort}`,
 				ws: true,
 				// Don't leak sockets when the backend is down/restarting (avoids
 				// ERR_INSUFFICIENT_RESOURCES from accumulated dead proxy sockets).

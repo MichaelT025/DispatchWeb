@@ -327,7 +327,11 @@ try {
 		hasStatusIcon: row.querySelector(".worker-row-status svg") !== null,
 		elapsed: row.querySelector(".worker-elapsed")?.textContent?.trim() ?? "",
 		text: row.textContent ?? "",
-		metadataCount: row.querySelectorAll(".worker-role, .worker-model, .worker-id, .worker-activity").length,
+		role: row.querySelector(".worker-role")?.textContent?.trim(),
+		hasRoleIcon: row.querySelector(".worker-role svg") !== null,
+		id: row.querySelector(".worker-id")?.textContent?.trim(),
+		detail: row.querySelector(".worker-row-detail.live")?.textContent?.trim(),
+		hasModel: row.querySelector(".worker-model") !== null,
 	}));
 	check(
 		"Active row has compact task, status tooltip/icon and elapsed time",
@@ -338,11 +342,13 @@ try {
 			/^\d+(?:s|m \d{2}s|h \d{2}m)$/.test(activeDetails.elapsed),
 	);
 	check(
-		"Active row omits role, model, id and activity dump",
-		activeDetails.metadataCount === 0 &&
-			!activeDetails.text.includes("fast") &&
-			!activeDetails.text.includes("Thinking") &&
-			!activeDetails.text.includes("Responding"),
+		"Active row names the agent (role icon + role + id) and shows its live activity, not the model",
+		activeDetails.role === "fast" &&
+			activeDetails.hasRoleIcon &&
+			activeDetails.id === "#3" &&
+			typeof activeDetails.detail === "string" &&
+			activeDetails.detail.length > 0 &&
+			!activeDetails.hasModel,
 	);
 	check(
 		"Workers tab shows the running count badge",
@@ -396,18 +402,20 @@ try {
 		return (
 			(await sections.nth(0).locator(".worker-row").count()) === 1 &&
 			(await sections.nth(1).locator(".worker-row").count()) === 2 &&
-			(await sections.nth(1).evaluate((element) => element.tagName === "DETAILS" && !element.open))
+			(await sections.nth(1).evaluate((element) => element.tagName === "DETAILS" && element.open))
 		);
 	});
 	const doneSection = page.locator(".workers-section").nth(1);
 	check(
-		"Done is collapsed initially",
-		(await doneSection.getAttribute("open")) === null &&
-			!(await doneSection.locator(".worker-row").first().isVisible()),
+		"Done is open initially and collapsible",
+		(await doneSection.getAttribute("open")) !== null &&
+			(await doneSection.locator(".worker-row:visible").count()) === 2,
 	);
 	await doneSection.locator("summary").click();
+	await until("Done collapses on click", async () => (await doneSection.locator(".worker-row:visible").count()) === 0);
+	await doneSection.locator("summary").click();
 	await until(
-		"Done expands to show both workers",
+		"Done re-expands to show both workers",
 		async () => (await doneSection.locator(".worker-row:visible").count()) === 2,
 	);
 	check(

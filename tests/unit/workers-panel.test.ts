@@ -60,36 +60,51 @@ afterEach(() => {
 });
 
 describe("WorkersPanel list", () => {
-	it("keeps rows to status, a short task, and elapsed time", () => {
+	it("shows who did what: role, id, task, elapsed, and a detail line", () => {
 		const { container } = mount([
 			worker(1, {
+				role: "fast",
 				task: "Implement the compact worker list.\nImplementation details: do not expose this in the list.",
-				activity: "raw error output must stay in the detail view",
+				activity: "read src/models.ts",
 			}),
 			worker(2, {
+				role: "review",
 				task: "Investigate the failed build. Implementation details: noisy context.",
 				status: "failed",
-				activity: "SECRET RAW ERROR",
+				activity: "Unavailable model x/y; no fallback used.",
 				ended: 13_000,
+			}),
+			worker(3, {
+				role: "general",
+				task: "Count the r's in raspberry.",
+				status: "completed",
+				activity: "Finished",
+				text: "There are 3 r's.\n\nDetails below.",
+				ended: 20_000,
 			}),
 		]);
 
 		const rows = [...container.querySelectorAll<HTMLButtonElement>(".worker-row")];
-		expect(rows).toHaveLength(2);
-		expect(rows[0].textContent).toContain("Implement the compact worker list.");
+		expect(rows).toHaveLength(3);
+		// running
+		expect(rows[0].getAttribute("data-role")).toBe("fast");
+		expect(rows[0].querySelector(".worker-role")?.textContent).toBe("fast");
+		expect(rows[0].querySelector(".worker-role svg")).not.toBeNull();
+		expect(rows[0].querySelector(".worker-id")?.textContent).toBe("#1");
+		expect(rows[0].querySelector(".worker-task")?.textContent).toBe("Implement the compact worker list.");
 		expect(rows[0].textContent).not.toContain("Implementation details");
-		expect(rows[0].textContent).not.toContain("general");
 		expect(rows[0].textContent).not.toContain("provider/model");
-		expect(rows[0].textContent).not.toContain("#1");
-		expect(rows[0].textContent).not.toContain("raw error output");
-		expect(rows[0].textContent).not.toContain("Running");
 		expect(rows[0].querySelector(".worker-elapsed")?.textContent).toMatch(/\d+(?:s|m)/);
 		expect(rows[0].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Running");
-
-		expect(rows[1].textContent).toContain("Failed");
-		expect(rows[1].textContent).not.toContain("SECRET RAW ERROR");
-		expect(rows[1].textContent).not.toContain("provider/model");
-		expect(rows[1].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Failed");
+		expect(rows[0].querySelector(".worker-row-detail.live")?.textContent).toBe("read src/models.ts");
+		// finished rows are newest first: #3 then #2
+		// completed → first line of the result, not the activity
+		expect(rows[1].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Done");
+		expect(rows[1].querySelector(".worker-row-detail")?.textContent).toBe("There are 3 r's.");
+		// failed → the reason
+		expect(rows[2].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Failed");
+		expect(rows[2].querySelector(".worker-row-detail")?.textContent).toBe("Unavailable model x/y; no fallback used.");
+		expect(rows[2].querySelector(".worker-row-detail.live")).toBeNull();
 	});
 
 	it("distinguishes every status with a unique glyph and tooltip", () => {
@@ -114,15 +129,17 @@ describe("WorkersPanel list", () => {
 		expect(onSelect).toHaveBeenCalledWith(7);
 	});
 
-	it("hides completed rows behind a closed native disclosure", () => {
+	it("lists finished rows under an open, collapsible Finished disclosure", () => {
 		const { container } = mount([worker(1), worker(2, { status: "completed", ended: 13_000 })]);
-		const completed = container.querySelector("details.workers-section") as HTMLDetailsElement;
-		expect(completed).not.toBeNull();
-		expect(completed.open).toBe(false);
-		expect(completed.querySelector("summary")?.textContent).toContain("Done");
-		expect(completed.querySelectorAll(".worker-row")).toHaveLength(1);
+		const sections = [...container.querySelectorAll<HTMLElement>(".workers-section")];
+		expect(sections[0].querySelector(".workers-section-head")?.textContent).toContain("Running");
+		const finished = container.querySelector("details.workers-section") as HTMLDetailsElement;
+		expect(finished).not.toBeNull();
+		expect(finished.open).toBe(true);
+		expect(finished.querySelector("summary")?.textContent).toContain("Finished");
+		expect(finished.querySelectorAll(".worker-row")).toHaveLength(1);
 
-		act(() => (completed.querySelector("summary") as HTMLElement).click());
-		expect(completed.open).toBe(true);
+		act(() => (finished.querySelector("summary") as HTMLElement).click());
+		expect(finished.open).toBe(false);
 	});
 });

@@ -119,6 +119,7 @@ export const WorkersPanel = memo(function WorkersPanel({
 				now={now}
 				onSelect={onSelect}
 				collapsible
+				defaultOpen
 			/>
 		</div>
 	);
@@ -132,6 +133,7 @@ function WorkerSection({
 	now,
 	onSelect,
 	collapsible = false,
+	defaultOpen = false,
 }: {
 	title: string;
 	count: number;
@@ -140,6 +142,7 @@ function WorkerSection({
 	now: number;
 	onSelect: (id: number) => void;
 	collapsible?: boolean;
+	defaultOpen?: boolean;
 }) {
 	const t = useT();
 	const headingId = `${id}-heading`;
@@ -163,7 +166,7 @@ function WorkerSection({
 	);
 	if (collapsible) {
 		return (
-			<details className="workers-section" aria-labelledby={headingId}>
+			<details className="workers-section" aria-labelledby={headingId} open={defaultOpen}>
 				<summary className="workers-section-head" id={headingId}>
 					{heading}
 				</summary>
@@ -187,11 +190,29 @@ function workerListTaskPreview(task: string): string {
 	return (firstLine.match(/^(.+?[.!?])(?:\s|$)/)?.[1] ?? firstLine).replace(/\s+/g, " ").trim();
 }
 
-/** A compact, keyboard-targetable work-log row. */
+/** Second line of a row: what the worker is doing now, or what it came
+ *  back with. Running → the extension's activity line; completed → the first
+ *  line of its result; failed / cancelled / interrupted → the activity, which
+ *  the extension sets to the reason. Never invented: empty when unknown. */
+export function workerListDetail(worker: Pick<UiWorker, "status" | "activity" | "text">): string {
+	const firstLine = (s: string) =>
+		s
+			.split(/\r?\n/)
+			.find((l) => l.trim())
+			?.replace(/\s+/g, " ")
+			.trim() ?? "";
+	if (worker.status === "completed") return firstLine(worker.text) || firstLine(worker.activity);
+	return firstLine(worker.activity);
+}
+
+/** One worker: who (role glyph + role + id), what (task), how long, and
+ *  underneath, what it is doing or what it returned. */
 function WorkerRow({ worker, now, onClick }: { worker: UiWorker; now: number; onClick: () => void }) {
 	const tone = workerStatusTone(worker.status);
+	const running = isWorkerActive(worker.status);
 	const status = workerStatusLabel(worker.status);
 	const task = workerListTaskPreview(worker.task);
+	const detail = workerListDetail(worker);
 	const StatusIcon = {
 		starting: FiClock,
 		running: FiPlay,
@@ -202,15 +223,21 @@ function WorkerRow({ worker, now, onClick }: { worker: UiWorker; now: number; on
 	}[worker.status];
 	return (
 		<li className="worker-row-item">
-			<button type="button" className={`worker-row tone-${tone}`} onClick={onClick}>
+			<button type="button" className={`worker-row tone-${tone}`} data-role={worker.role} onClick={onClick}>
 				<span className={`worker-row-status worker-status tone-${tone}`} role="img" aria-label={status} title={status}>
 					<StatusIcon className="worker-row-status-icon" aria-hidden="true" />
-					{worker.status === "failed" && <span className="worker-status-failed">Failed</span>}
 				</span>
+				<RoleChip role={worker.role} />
+				<span className="worker-id">#{worker.id}</span>
 				<span className="worker-task" title={task}>
 					{task}
 				</span>
 				<span className="worker-elapsed">{formatElapsed(workerElapsedSec(worker, now))}</span>
+				{detail && (
+					<span className={`worker-row-detail${running ? " live" : ""}`} title={detail}>
+						{detail}
+					</span>
+				)}
 			</button>
 		</li>
 	);

@@ -13,5 +13,11 @@
 		"allowJs": true,
 		"types": ["node", "vitest/globals", "vite/client"]
 	},
-	"include": ["tests/unit/**/*.ts", "server/**/*.ts", "web/src/skill-block.ts", "web/src/components/scroll-classify.ts"]
+	"include": [
+		"tests/unit/**/*.ts",
+		"tests/unit/**/*.tsx",
+		"server/**/*.ts",
+		"web/src/skill-block.ts",
+		"web/src/components/scroll-classify.ts"
+	]
 }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { ClientSession } from "../../server/agent-service.js";
 import { ConversationTodos } from "../../server/todo-state.js";
+import { NotificationLifecycle } from "../../server/notification-lifecycle.js";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
@@ -14,6 +15,7 @@ const createRuntime = vi.mocked(createAgentSessionRuntime);
 
 type ConversationHarness = {
 	id: string;
+	notificationLifecycle: NotificationLifecycle;
 	runtime: AgentSessionRuntime;
 	session: AgentSession;
 	cwd: string;
@@ -79,6 +81,7 @@ describe("forced reset todo handoff", () => {
 
 		const conv = {
 			id: "conversation-1",
+			notificationLifecycle: new NotificationLifecycle(),
 			runtime: currentRuntime,
 			session: currentSession,
 			cwd: "C:/forced-reset-test",

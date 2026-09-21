@@ -1293,6 +1293,16 @@ export type ServerMessage =
 			deadline?: number;
 			questions: UiQuestion[];
 	  }
+	/** A live authoritative lifecycle signal. It is never included in a
+	 * snapshot and carries no prompt/question/error detail. */
+	| {
+			type: "notification_event";
+			eventId: string;
+			conversationId: string;
+			kind: "run-completed" | "input-required" | "run-failed";
+			projectName: string;
+			sessionName?: string;
+	  }
 	// -- background tasks ---------------------------------------------------
 	/** The background-server list (servers the agent left running, detected via
 	 *  listening-port diffs around bash tool runs). Per CLIENT, not per

@@ -115,6 +115,7 @@ import {
 	type SerializeCache,
 } from "./session-preview.js";
 import { isBridgeEvent, WORKER_CHANNEL, WorkerHub } from "./workers.js";
+import { makeInputRequiredNotification, NotificationLifecycle } from "./notification-lifecycle.js";
 
 const SNAPSHOT_INTERVAL_MS = 60;
 /** While assistant deltas are flowing, live rendering is carried by
@@ -457,6 +458,8 @@ interface Conversation {
 	 *  renders them as pending bubbles in the real message list. */
 	queueSteering: string[];
 	queueFollowUp: string[];
+	/** Authoritative run lifecycle used for live notification events. */
+	notificationLifecycle: NotificationLifecycle;
 	/** tool_execution_start timestamps keyed by toolCallId — lets tool_status
 	 *  report how long a tool actually ran (vs. waiting on the model). */
 	toolStartTimes: Map<string, number>;
@@ -978,7 +981,10 @@ export class ClientSession {
 	}
 
 	/** Web-facing extension UI context (widgets, notifications). */
-	private webUi = new WebUIContext((msg) => this.emit(msg));
+	private webUi = new WebUIContext(
+		(msg) => this.emit(msg),
+		(conversationId) => this.emitInputRequired(conversationId),
+	);
 	/** Per-conversation footer statuses (setStatus bridge). Active conversation
 	 *  resolved lazily so switches don't have to re-register anything. */
 	private readonly convStatuses = new ConversationStatuses(() => this.activeId);
@@ -1329,6 +1335,7 @@ export class ClientSession {
 			lastMessagesArray: [],
 			queueSteering: [],
 			queueFollowUp: [],
+			notificationLifecycle: new NotificationLifecycle(),
 			toolStartTimes: new Map(),
 			toolWatchdogs: new Map(),
 		};
@@ -1491,6 +1498,33 @@ export class ClientSession {
 		for (const sink of [...this.sinks]) sink(msg);
 	}
 
+	private notificationContext(conv: Conversation): {
+		conversationId: string;
+		projectName: string;
+		sessionName?: string;
+	} {
+		let sessionName: string | undefined;
+		try {
+			const name = conv.session.sessionManager.getSessionName();
+			if (name?.trim()) sessionName = name.trim();
+		} catch {
+			// Session names are optional metadata; a damaged transcript must not
+			// suppress a lifecycle event.
+		}
+		return {
+			conversationId: conv.id,
+			projectName: basename(conv.cwd) || conv.cwd,
+			sessionName,
+		};
+	}
+
+	/** A new blocking question/dialog is live-only; it is never replayed. */
+	private emitInputRequired(conversationId: string): void {
+		const conv = this.convs.get(conversationId);
+		if (!conv || this.disposed) return;
+		this.emit(makeInputRequiredNotification(this.notificationContext(conv)));
+	}
+
 	/** (Re)attach event plumbing to the ACTIVE conversation's session. */
 	private async bindSession(skipTodoReplay = false): Promise<void> {
 		const conv = this.conv;
@@ -1540,6 +1574,18 @@ export class ClientSession {
 			get(target, prop) {
 				if (prop === "setStatus") {
 					return (key: string, text: string | undefined): void => self.setConvStatus(convId, key, text);
+				}
+				// Extension dialogs are shared by the client, but their lifecycle
+				// notification must name the conversation that opened them.
+				if (prop === "select") {
+					return (title: string, options: string[]) => base.openDialogForOwner(convId, "select", title, [options]);
+				}
+				if (prop === "confirm") {
+					return (title: string, message: string) => base.openDialogForOwner(convId, "confirm", title, [message]);
+				}
+				if (prop === "input") {
+					return (title: string, placeholder?: string) =>
+						base.openDialogForOwner(convId, "input", title, [placeholder ?? ""]);
 				}
 				const value = target[prop];
 				return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(base) : value;
@@ -1713,6 +1759,7 @@ export class ClientSession {
 				break;
 			}
 			case "agent_start": {
+				conv.notificationLifecycle.agentStart();
 				this.todosFor(conv).startRun();
 				this.pushTodosIfActive(conv);
 				break;
@@ -1844,6 +1891,7 @@ export class ClientSession {
 			// A run finished or a new entry was persisted — keep the session list fresh
 			// (new chat + first message, completed turns, compaction, etc.).
 			case "agent_end": {
+				conv.notificationLifecycle.agentEnd(event.messages);
 				this.todosFor(conv).endRun();
 				this.pushTodosIfActive(conv);
 				// 可重试错误：SDK 随后发 auto_retry_start 并把末尾 error 消息从
@@ -1881,6 +1929,25 @@ export class ClientSession {
 					this.settingsSvc.consumePendingReload();
 					void this.applySettingsReload();
 				}
+				break;
+			}
+			case "agent_settled": {
+				let retrying = !!conv.retryState;
+				try {
+					retrying ||= conv.session.retryAttempt > 0;
+				} catch {
+					// Older SDKs do not expose retryAttempt; retryState remains the
+					// defensive fallback.
+				}
+				const notification = conv.notificationLifecycle.settled({
+					...this.notificationContext(conv),
+					isIdle: conv.session.isIdle,
+					queuedSteering: conv.queueSteering,
+					queuedFollowUp: conv.queueFollowUp,
+					retrying,
+					workers: this.workerHub(conv.id).list(),
+				});
+				if (notification) this.emit(notification);
 				break;
 			}
 			case "entry_appended": {
@@ -2184,6 +2251,7 @@ export class ClientSession {
 			}
 			const id = `q-${++this.questionSeq}`;
 			this.pendingQuestions.set(id, { resolve, questions, conversationId });
+			if (conversationId) this.emitInputRequired(conversationId);
 			this.emit({
 				type: "question_pending",
 				id,
@@ -3115,6 +3183,8 @@ export class ClientSession {
 
 	/** Interrupt a run: abort, with a force-reset fallback on timeout. */
 	private async interruptRun(conv: Conversation, reason: string): Promise<void> {
+		// Abort is a user/host interruption, never a completed or failed run.
+		conv.notificationLifecycle.abort();
 		// The run is only truly stopped when its agent_end event arrives:
 		// session.abort() can return without stopping anything when the run is
 		// stuck before the agent even started (e.g. a model stream that never
@@ -3175,6 +3245,7 @@ export class ClientSession {
 			this.pushTodosIfActive(conv);
 			conv.unsubscribe?.();
 			conv.unsubscribe = undefined;
+			conv.notificationLifecycle.reset();
 			this.clearAllToolWatchdogs(conv);
 			conv.toolStartTimes.clear();
 			await conv.runtime.dispose();
@@ -3446,6 +3517,7 @@ export class ClientSession {
 		this.convTodos.delete(id);
 		this.dropWorkerState(id);
 		this.clearAllToolWatchdogs(conv);
+		conv.notificationLifecycle.reset();
 		conv.terminals.killAll();
 		conv.unsubscribe?.();
 		conv.unsubscribe = undefined;
@@ -4816,6 +4888,7 @@ export class ClientSession {
 		this.bg.stop();
 		for (const conv of this.convs.values()) {
 			this.clearAllToolWatchdogs(conv);
+			conv.notificationLifecycle.reset();
 			conv.unsubscribe?.();
 			try {
 				await conv.runtime.dispose();

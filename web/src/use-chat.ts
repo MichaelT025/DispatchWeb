@@ -38,6 +38,8 @@ import { resolvePendingQuestion, type QuestionSource } from "./pending-question"
 import { cwdKey } from "./components/left-panel-nav";
 import { setAppGlobals, setAppSend } from "./app-globals";
 import { setWorkers } from "./workers-store";
+import { formatNotificationEvent, isNotificationEvent, notificationEventKey } from "./notification-events";
+import { notify } from "./notify";
 import { PROTOCOL_VERSION } from "./protocol-version";
 import {
 	OPTIMISTIC_TIMEOUT_MS,
@@ -1054,6 +1056,19 @@ export function useChat() {
 				return;
 			}
 			switch (msg.type) {
+				case "notification_event": {
+					// This is an edge-triggered live event. It intentionally does not
+					// derive notifications from snapshots, so reconnects cannot replay it.
+					const event = msg;
+					if (isNotificationEvent(event)) {
+						const copy = formatNotificationEvent(event);
+						void notify(copy.title, copy.body, {
+							eventKey: notificationEventKey(event),
+							conversationId: event.conversationId,
+						});
+					}
+					break;
+				}
 				case "ready":
 					// Global runtime facts (managed / tabs / versions) land here once,
 					// synchronously before dispatch, so components reading the globals

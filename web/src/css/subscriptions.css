@@ -269,8 +269,10 @@
 }
 
 .subscription-percent {
-	width: 64px;
-	flex: 0 0 64px;
+	/* Font metrics vary by OS: let the label size itself instead of wrapping. */
+	min-width: 64px;
+	flex: 0 0 auto;
+	white-space: nowrap;
 	color: var(--text-dim);
 	font-size: 12px;
 	font-variant-numeric: tabular-nums;

@@ -52,7 +52,7 @@ const response = {
 			windows: [
 				{ label: "5-hour", windowSeconds: 18000, usedPercent: 25, resetsAt: at(2) },
 				{ label: "Weekly", windowSeconds: 604800, usedPercent: 42, resetsAt: at(80) },
-				{ label: "Monthly", windowSeconds: 2592000, usedPercent: 60, resetsAt: at(200) },
+				{ label: "Monthly", windowSeconds: 2592000, usedPercent: 100, resetsAt: at(200) },
 			],
 			credits: [
 				{ label: "Included", remaining: 40, unit: "credits" },
@@ -207,6 +207,36 @@ try {
 		"Command Code fits without scrolling on desktop",
 	);
 	await page.screenshot({ path: join(artifactDir, "subscriptions-command-desktop.png"), fullPage: true });
+	// Wider font metrics reproduced the Linux CI regression: a fixed 64px
+	// label wrapped "% used" and made all three quota rows too tall.
+	await page.addStyleTag({
+		content: ".subscription-percent { font-family: monospace !important; font-size: 14px !important; }",
+	});
+	for (const viewport of [
+		{ width: 390, height: 844 },
+		{ width: 1440, height: 900 },
+	]) {
+		await page.setViewportSize(viewport);
+		assert(
+			await popover.locator(".subscription-percent").evaluateAll((labels) =>
+				labels.every((label) => {
+					const range = document.createRange();
+					range.selectNodeContents(label);
+					const rects = [...range.getClientRects()];
+					return (
+						rects.length > 0 &&
+						rects.every((rect) => Math.abs(rect.top - rects[0].top) < 1) &&
+						label.scrollWidth <= label.clientWidth + 1
+					);
+				}),
+			),
+			"percentages stay on one line with wider fonts",
+		);
+		assert(
+			await popover.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1),
+			"Command Code fits with wider fonts",
+		);
+	}
 	await context.close();
 	console.log("subscription footer checks passed");
 } catch (error) {

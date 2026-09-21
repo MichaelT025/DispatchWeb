@@ -184,15 +184,21 @@
 	margin: 0;
 	padding: 0;
 }
+/* Row: status · role · #id · task · elapsed, and a detail line underneath
+   (live activity while running, the result's first line when finished).
+   The role hue sits on the left edge and the role label, never on the text. */
 .worker-row {
-	display: flex;
+	display: grid;
+	grid-template-columns: auto auto auto minmax(0, 1fr) auto;
 	align-items: center;
-	gap: 8px;
+	column-gap: 8px;
+	row-gap: 3px;
 	width: 100%;
 	min-width: 0;
-	padding: 9px 4px;
+	padding: 8px 6px 8px 8px;
 	border: 0;
 	border-top: 1px solid var(--border-soft);
+	border-left: 2px solid var(--worker-hue, var(--border-soft));
 	border-radius: 0;
 	background: transparent;
 	color: var(--text);
@@ -200,11 +206,59 @@
 	font: inherit;
 	cursor: pointer;
 }
+.worker-row[data-role="orchestrator"] {
+	--worker-hue: var(--agent-orchestrator);
+}
+.worker-row[data-role="general"] {
+	--worker-hue: var(--agent-general);
+}
+.worker-row[data-role="fast"] {
+	--worker-hue: var(--agent-fast);
+}
+.worker-row[data-role="review"] {
+	--worker-hue: var(--agent-review);
+}
 .worker-row-item:first-child .worker-row {
 	border-top-color: transparent;
 }
 .worker-row:hover {
 	background: var(--bg-elev2);
+}
+.worker-row .worker-role {
+	flex: none;
+	gap: 4px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--worker-hue, var(--text-dim));
+}
+.worker-row .worker-role-icon {
+	width: 12px;
+	height: 12px;
+}
+.worker-row .worker-id {
+	font-size: 11.5px;
+}
+.worker-row-detail {
+	grid-column: 4 / 6;
+	min-width: 0;
+	font-size: 12.5px;
+	line-height: 1.4;
+	color: var(--text-dim);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.worker-row-detail.live {
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--text-faint);
+}
+.worker-row-detail.live::before {
+	content: "▸ ";
+	color: var(--worker-hue, var(--text-dim));
+}
+.worker-row.tone-err .worker-row-detail {
+	color: var(--red-text, var(--red));
 }
 .worker-row:focus-visible {
 	outline: none;
@@ -220,10 +274,6 @@
 	width: 13px;
 	height: 13px;
 	flex: none;
-}
-.worker-status-failed {
-	font-size: 11.5px;
-	font-weight: 600;
 }
 .worker-task {
 	flex: 1 1 auto;
@@ -531,4 +581,72 @@
 }
 .delegate-worker.tone-err .delegate-worker-activity {
 	color: var(--red-text, var(--red));
+}
+
+/* ---- chat: worker result message (dispatch-worker-result) ----
+   One collapsed line per finished worker; the body is that worker's result. */
+.workerresults {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 2px 0;
+}
+.workerresult {
+	border: 1px solid var(--border-soft);
+	border-left: 2px solid var(--worker-hue, var(--border-soft));
+	border-radius: var(--radius-sm, 6px);
+	background: var(--card-bg, var(--bg));
+	overflow: hidden;
+}
+.workerresult[data-role="orchestrator"] {
+	--worker-hue: var(--agent-orchestrator);
+}
+.workerresult[data-role="general"] {
+	--worker-hue: var(--agent-general);
+}
+.workerresult[data-role="fast"] {
+	--worker-hue: var(--agent-fast);
+}
+.workerresult[data-role="review"] {
+	--worker-hue: var(--agent-review);
+}
+.workerresult-head {
+	min-height: 30px;
+	border-radius: 0;
+}
+.workerresult-head .worker-role {
+	gap: 4px;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--worker-hue, var(--text-dim));
+}
+.workerresult-head .worker-role-icon {
+	width: 12px;
+	height: 12px;
+}
+.workerresult-verb {
+	font-size: 12.5px;
+	color: var(--text-dim);
+}
+.workerresult.tone-ok .workerresult-verb {
+	color: var(--green);
+}
+.workerresult.tone-err .workerresult-verb {
+	color: var(--red);
+}
+.workerresult-open {
+	opacity: 0.55;
+}
+.workerresult-head:hover .workerresult-open {
+	opacity: 1;
+}
+.workerresult-body {
+	padding: 4px 12px 10px 34px;
+	border-top: 1px solid var(--border-soft);
+	font-size: 13.5px;
+	line-height: 1.55;
+}
+.workerresult-empty {
+	color: var(--text-faint);
+	font-size: 13px;
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { thinkingPreviewLine } from "../thinking-preview";
 import { shimmerPhase } from "../shimmer";
 import { FiCheckCircle, FiChevronDown, FiChevronRight, FiCopy, FiCpu } from "react-icons/fi";
 import { useT } from "../i18n";
@@ -27,7 +28,7 @@ export function ThinkingBlock({ thinking, streaming, wrap = true, forceOpen = fa
 	// 搜索期间 forceOpen 只是“视口展开”，用户 open 状态不受影响
 	const shown = expanded || forceOpen;
 	// 折叠预览：结束后取开头一行（流式中标签只显示“Thinking”）。
-	const preview = thinking.split("\n")[0].slice(0, 80);
+	const preview = thinkingPreviewLine(thinking);
 	const [copied, setCopied] = useState(false);
 	const copyThinking = () => {
 		void navigator.clipboard.writeText(thinking);

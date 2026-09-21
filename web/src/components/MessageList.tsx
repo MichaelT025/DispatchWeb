@@ -20,6 +20,8 @@ import {
 	planWindow,
 	type HeightEntry,
 	type WinRect,
+	COLLAPSE_MIN,
+	recentStartIndex,
 } from "../lazy-window";
 import { SearchBar } from "./SearchBar";
 import { PromptMinimap } from "./PromptMinimap";
@@ -31,13 +33,6 @@ import { useT } from "../i18n";
  *  React.memo skip messages that have no live tool output to show. */
 const EMPTY_LIVE = new Map<string, { toolName: string; text: string }>();
 
-/**
- * Messages beyond the most recent KEEP_RECENT are rendered as cheap collapsed
- * summary rows (no Markdown / thinking / tool output) until clicked. Only kicks
- * in once the chat grows past COLLAPSE_MIN, so short conversations are untouched.
- */
-const KEEP_RECENT = 15;
-const COLLAPSE_MIN = 30;
 /** Grace window after a programmatic scroll during which onScroll ignores
  *  negative scrollTop jumps from our own snap() re-asserts.
  *
@@ -231,7 +226,9 @@ export function MessageList({
 	const lastId = messages.length > 0 ? messages[messages.length - 1].id : null;
 	// Only the last KEEP_RECENT persisted messages are fully rendered; older
 	// ones collapse to summary rows (unless the user expanded them).
-	const recentStart = state.messages.length > COLLAPSE_MIN ? Math.max(0, state.messages.length - KEEP_RECENT) : 0;
+	// (recentStartIndex in lazy-window.ts: counts visible messages, not
+	// toolResult records, so tool-heavy turns don't eat the window twice as fast.)
+	const recentStart = useMemo(() => recentStartIndex(state.messages), [state.messages]);
 
 	/** 当前渲染为折叠摘要行的消息 id（SearchBar 的折叠层搜索索引用它；
 	 *  toolResult 无独立折叠行——其结果文本已并入宿主 toolCall 卡）。

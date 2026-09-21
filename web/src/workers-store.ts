@@ -47,6 +47,34 @@ export function useWorkers(): UiWorker[] {
 	return useSyncExternalStore(subscribe, get, get);
 }
 
+/** Live state of ONE delegate call's workers: "running" while any of them
+ *  is still attached, "done" once every one finished, "unknown" when the
+ *  store has no worker for that call (nothing reported yet, or an old
+ *  session whose roster only lives in the tool result). The snapshot is a
+ *  primitive, so a card re-renders only when its own state flips — the
+ *  hundreds of non-delegate tool cards subscribing with null never do. */
+export function useDelegateLiveState(toolCallId: string | null): "running" | "done" | "unknown" {
+	return useSyncExternalStore(
+		subscribe,
+		() => delegateLiveState(cached, toolCallId),
+		() => delegateLiveState(cached, toolCallId),
+	);
+}
+
+export function delegateLiveState(
+	workers: readonly UiWorker[],
+	toolCallId: string | null,
+): "running" | "done" | "unknown" {
+	if (!toolCallId) return "unknown";
+	let seen = false;
+	for (const w of workers) {
+		if (w.toolCallId !== toolCallId) continue;
+		if (w.status === "starting" || w.status === "running") return "running";
+		seen = true;
+	}
+	return seen ? "done" : "unknown";
+}
+
 /** Test hook: back to empty without notifying. */
 export function resetWorkers(): void {
 	cached = [];

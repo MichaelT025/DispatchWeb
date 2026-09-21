@@ -157,3 +157,34 @@ export function getPlaceholderHeight(
 	const e = cache.get(id);
 	return e && e.len === fingerprint ? e.h : estimate;
 }
+
+/**
+ * Messages beyond the most recent KEEP_RECENT are rendered as cheap collapsed
+ * summary rows (no Markdown / thinking / tool output) until clicked. Only kicks
+ * in once the chat grows past COLLAPSE_MIN, so short conversations are untouched.
+ * Both count VISIBLE messages: toolResult records render inside their tool
+ * card, so a tool-heavy turn (assistant + result per call) must not eat the
+ * window twice as fast as a prose turn.
+ */
+export const KEEP_RECENT = 15;
+export const COLLAPSE_MIN = 30;
+
+/** Index of the first fully rendered message: the one that leaves the last
+ *  KEEP_RECENT visible (non-toolResult) messages, or 0 while the chat is
+ *  shorter than COLLAPSE_MIN visible messages. */
+export function recentStartIndex(
+	messages: readonly { role: string }[],
+	keep = KEEP_RECENT,
+	min = COLLAPSE_MIN,
+): number {
+	let visible = 0;
+	for (const m of messages) if (m.role !== "toolResult") visible++;
+	if (visible <= min) return 0;
+	let remaining = keep;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].role === "toolResult") continue;
+		remaining--;
+		if (remaining === 0) return i;
+	}
+	return 0;
+}

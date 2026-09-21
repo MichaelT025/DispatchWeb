@@ -17,6 +17,8 @@ try {
 	if (previousPkgRoot === undefined) delete process.env.PI_WEB_PKG_ROOT;
 	else process.env.PI_WEB_PKG_ROOT = previousPkgRoot;
 }
+const now = Date.now();
+const at = (hours) => new Date(now + hours * 3_600_000).toISOString();
 const response = {
 	status: "ready",
 	refreshAfterMs: 180000,
@@ -26,17 +28,21 @@ const response = {
 			displayName: "Codex",
 			state: "ok",
 			plan: "Pro",
-			windows: [{ label: "5 hour limit", windowSeconds: 18000, usedPercent: 42, resetsAt: "2099-01-01T00:00:00Z" }],
-			fetchedAt: "2098-12-31T00:00:00Z",
-			checkedAt: "2098-12-31T00:00:00Z",
+			windows: [
+				{ label: "5-hour", windowSeconds: 18000, usedPercent: 42, resetsAt: at(2.25) },
+				{ label: "Weekly", windowSeconds: 604800, usedPercent: 68, resetsAt: at(80) },
+			],
+			fetchedAt: at(-0.02),
+			checkedAt: at(-0.02),
 		},
 		{
 			providerId: "opencode-go",
 			displayName: "OpenCode Go",
 			state: "ok",
-			windows: [{ label: "Daily", windowSeconds: 86400, usedPercent: 87, resetsAt: "2099-01-01T00:00:00Z" }],
-			fetchedAt: "2098-12-31T00:00:00Z",
-			checkedAt: "2098-12-31T00:00:00Z",
+			plan: "Go",
+			windows: [{ label: "5-hour", windowSeconds: 18000, usedPercent: 87, resetsAt: at(1.5) }],
+			fetchedAt: at(-0.02),
+			checkedAt: at(-0.02),
 		},
 		{
 			providerId: "command-code",
@@ -80,14 +86,24 @@ try {
 		"provider buttons",
 	);
 	assert.equal(await footer.getByRole("button", { name: /Anthropic/ }).count(), 0);
-	const buttons = footer.locator(".subscription-provider-button");
-	await buttons.filter({ hasText: "Codex" }).click();
+	const codexButton = footer.getByRole("button", { name: "Codex", exact: true });
+	const goButton = footer.getByRole("button", { name: "OpenCode Go", exact: true });
+	for (const name of ["Codex", "OpenCode Go", "Command Code"]) {
+		const button = footer.getByRole("button", { name, exact: true });
+		assert.equal(await button.getAttribute("title"), name, "provider name appears on hover");
+		assert.equal((await button.innerText()).trim(), "", "provider buttons are icon-only");
+		assert(await button.locator("img,svg").count(), "provider has a brand icon");
+	}
+	await codexButton.click();
 	const popover = page.locator('[role="dialog"].subscription-popover');
 	await popover.waitFor();
 	assert.match(await popover.innerText(), /42% used/);
-	assert.equal(await popover.locator('[role="progressbar"]').getAttribute("aria-valuenow"), "42");
+	assert.equal(await popover.locator('[role="progressbar"]').first().getAttribute("aria-valuenow"), "42");
+	const refreshButton = popover.getByRole("button", { name: "Refresh Codex usage", exact: true });
+	assert.equal(await refreshButton.getAttribute("title"), "Refresh");
+	assert.equal((await refreshButton.innerText()).trim(), "", "refresh is icon-only");
 	assert.match(await popover.innerText(), /Resets/);
-	await buttons.filter({ hasText: "Go" }).click();
+	await goButton.click();
 	assert.equal(
 		await page.locator('[role="dialog"].subscription-popover').count(),
 		1,
@@ -103,14 +119,7 @@ try {
 	assert.deepEqual(posts, [{ providerId: "opencode-go" }]);
 	await page.keyboard.press("Escape");
 	await eventually(() => popover.count().then((count) => count === 0), "popover dismissal");
-	await eventually(
-		() =>
-			page
-				.locator(".subscription-provider-button")
-				.filter({ hasText: "Go" })
-				.evaluate((el) => document.activeElement === el),
-		"focus restoration",
-	);
+	await eventually(() => goButton.evaluate((el) => document.activeElement === el), "focus restoration");
 	// Exercise an isolated light-token context; this app has no downloadable
 	// theme endpoint. A CSS URL returning the SPA shell is not a light-theme test.
 	const applyTheme = async (theme) =>
@@ -136,7 +145,7 @@ try {
 			for (const [key, value] of Object.entries(tokens)) footer.style.setProperty(key, value);
 		}, theme);
 	await applyTheme("white");
-	await buttons.filter({ hasText: "Codex" }).click();
+	await codexButton.click();
 	await popover.waitFor();
 	assert.equal(await popover.evaluate((el) => getComputedStyle(el).backgroundColor), "rgb(250, 250, 250)");
 	const desktopBox = await popover.boundingBox();

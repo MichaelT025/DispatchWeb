@@ -48,8 +48,8 @@ is scraped from tool output. Without the extension the tab is simply empty.
 
 ## Subscription usage
 
-The right workspace footer shows a button for each configured subscription provider
-(Codex, OpenCode Go, and Command Code). Each opens a small popover with quota bars,
+The right workspace footer shows a provider-logo button for each configured subscription
+(Codex, OpenCode Go, and Command Code); hover or focus for its name. Each opens a small popover with quota bars,
 percent used, reset countdowns, plan/credits, freshness, and a provider-specific
 refresh action. These are account limits, not session token costs.
 

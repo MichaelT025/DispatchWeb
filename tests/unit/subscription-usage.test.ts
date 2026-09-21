@@ -18,7 +18,7 @@ const response = {
 	refreshAfterMs: 180000,
 	providers: [
 		{
-			providerId: "codex",
+			providerId: "openai-codex",
 			displayName: "Codex",
 			state: "ok",
 			windows: [{ label: "5 hours", windowSeconds: 18000, usedPercent: 120, resetsAt: null }],
@@ -157,6 +157,22 @@ describe("subscription polling lifecycle", () => {
 		});
 		expect(signal.aborted).toBe(true);
 	});
+	it("uses named icon buttons and an icon-only refresh control", async () => {
+		await render();
+		const button = container.querySelector<HTMLButtonElement>(".subscription-provider-button")!;
+		expect(button.title).toBe("Codex");
+		expect(button.getAttribute("aria-label")).toBe("Codex");
+		expect(button.textContent).toBe("");
+		expect(button.querySelector("img, svg")).not.toBeNull();
+		await act(async () => {
+			button.click();
+		});
+		const refresh = container.querySelector<HTMLButtonElement>(".subscription-refresh")!;
+		expect(refresh.title).toBe("Refresh");
+		expect(refresh.getAttribute("aria-label")).toBe("Refresh Codex usage");
+		expect(refresh.textContent).toBe("");
+	});
+
 	it("manual provider refresh resets the poll deadline without overlap", async () => {
 		await render();
 		await act(async () => {
@@ -170,7 +186,7 @@ describe("subscription polling lifecycle", () => {
 		});
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(fetchMock.mock.calls[1][1].method).toBe("POST");
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ providerId: "codex" });
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ providerId: "openai-codex" });
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(80_000);
 		});

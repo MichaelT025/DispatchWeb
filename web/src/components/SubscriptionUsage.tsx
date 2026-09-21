@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FiAlertCircle, FiRefreshCw } from "react-icons/fi";
+import { ProviderBrandIcon } from "./ProviderBrandIcon";
 import { withToken } from "../auth-token";
 import { appUrl } from "../base-url";
 import {
@@ -6,7 +8,6 @@ import {
 	formatFreshness,
 	formatResetCountdown,
 	parseSubscriptionResponse,
-	providerShortName,
 	safePercent,
 	type SubscriptionProvider,
 	type SubscriptionResponse,
@@ -246,7 +247,6 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 	}, [openProviderId]);
 
 	const status = renderedData?.status ?? (ready ? "loading" : "disabled");
-	const buttonLabel = (provider: SubscriptionProvider) => providerShortName(provider);
 	const retrySeconds = retryRemaining(openProvider?.retryAt, now);
 
 	return (
@@ -256,30 +256,33 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 					id={`subscription-popover-${openProvider.providerId}`}
 					className="subscription-popover"
 					role="dialog"
-					aria-labelledby="subscription-provider-name subscription-popover-title"
+					aria-labelledby="subscription-provider-name"
 				>
 					<div className="subscription-popover-head">
-						<div>
-							<span id="subscription-provider-name" className="subscription-provider-name">
-								{openProvider.displayName}
+						<div className="subscription-provider-heading">
+							<span className="subscription-provider-mark" aria-hidden="true">
+								<ProviderBrandIcon providerId={openProvider.providerId} className="subscription-provider-icon" />
 							</span>
-							<h2 id="subscription-popover-title">{openProvider.plan || "Usage"}</h2>
+							<div className="subscription-provider-heading-copy">
+								<h2 id="subscription-provider-name">{openProvider.displayName}</h2>
+								{openProvider.plan && <span className="subscription-plan">{openProvider.plan}</span>}
+							</div>
 						</div>
 						<button
 							type="button"
 							className="subscription-refresh"
 							onClick={() => requestRef.current(openProvider.providerId)}
 							disabled={requesting || retrySeconds > 0}
+							title={retrySeconds > 0 ? `Refresh (retry in ${retryText(retrySeconds)})` : "Refresh"}
 							aria-label={`Refresh ${openProvider.displayName} usage`}
 							aria-busy={refreshing}
 						>
-							{refreshing && <span className="subscription-spinner" aria-hidden="true" />}
-							{refreshing ? "Refreshing…" : retrySeconds > 0 ? `Retry in ${retryText(retrySeconds)}` : "Refresh"}
+							<FiRefreshCw
+								className={refreshing ? "subscription-refresh-icon is-refreshing" : "subscription-refresh-icon"}
+								aria-hidden="true"
+							/>
 						</button>
 					</div>
-					<p className="subscription-freshness">
-						{formatFreshness(openProvider.fetchedAt, openProvider.checkedAt, now)}
-					</p>
 					{openProvider.stale && <p className="subscription-stale">Showing last known usage; refresh failed.</p>}
 					{openProvider.state === "unavailable" && (
 						<p className="subscription-message">This provider is configured but currently unavailable.</p>
@@ -291,19 +294,22 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 							<div className="subscription-window" key={`${window.label}-${window.windowSeconds}`}>
 								<div className="subscription-window-label">
 									<span>{window.label}</span>
-									<strong className={`subscription-percent ${level}`}>
-										{percent}% used{level !== "ok" ? ` · ${level}` : ""}
-									</strong>
 								</div>
-								<div
-									className={`subscription-progress ${level}`}
-									role="progressbar"
-									aria-label={`${window.label}: ${percent}% used`}
-									aria-valuemin={0}
-									aria-valuemax={100}
-									aria-valuenow={percent}
-								>
-									<span style={{ width: `${percent}%` }} />
+								<div className="subscription-progress-row">
+									<div
+										className={`subscription-progress ${level}`}
+										role="progressbar"
+										aria-label={`${window.label}: ${percent}% used`}
+										aria-valuetext={`${percent}% used`}
+										aria-valuemin={0}
+										aria-valuemax={100}
+										aria-valuenow={percent}
+									>
+										<span style={{ width: `${percent}%` }} />
+									</div>
+									<strong className={`subscription-percent ${level}`} aria-hidden="true">
+										{percent}% used
+									</strong>
 								</div>
 								<div className="subscription-reset">{formatResetCountdown(window.resetsAt, now)}</div>
 							</div>
@@ -324,6 +330,9 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 					{!providerHasUsage(openProvider) && openProvider.state === "ok" && (
 						<p className="subscription-message">No usage details are available yet.</p>
 					)}
+					<p className="subscription-freshness">
+						{formatFreshness(openProvider.fetchedAt, openProvider.checkedAt, now)}
+					</p>
 				</section>
 			)}
 			<footer className="subscription-footer" aria-label="Subscription usage">
@@ -344,11 +353,26 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 									data-state={provider.state}
 									aria-expanded={isOpen}
 									aria-controls={`subscription-popover-${provider.providerId}`}
-									aria-label={`${provider.displayName}${provider.state === "unavailable" ? ", unavailable" : ""}`}
+									title={provider.displayName}
+									aria-label={provider.displayName}
+									aria-describedby={
+										provider.state === "unavailable"
+											? `subscription-provider-unavailable-${provider.providerId}`
+											: undefined
+									}
 									onClick={() => setOpenProviderId(isOpen ? null : provider.providerId)}
 								>
-									<span>{buttonLabel(provider)}</span>
-									{provider.state === "unavailable" && <span className="subscription-button-state">unavailable</span>}
+									<ProviderBrandIcon providerId={provider.providerId} className="subscription-provider-icon" />
+									{provider.state === "unavailable" && (
+										<span
+											id={`subscription-provider-unavailable-${provider.providerId}`}
+											className="subscription-button-state"
+											role="img"
+											aria-label="Unavailable"
+										>
+											<FiAlertCircle aria-hidden="true" />
+										</span>
+									)}
 								</button>
 							);
 						})}

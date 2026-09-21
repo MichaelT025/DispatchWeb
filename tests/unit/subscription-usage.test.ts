@@ -10,6 +10,7 @@ import {
 	parseSubscriptionResponse,
 	providerShortName,
 	safePercent,
+	totalCommandCredits,
 	usageLevel,
 } from "../../web/src/subscription-usage.js";
 
@@ -62,6 +63,28 @@ describe("subscription usage helpers", () => {
 		expect(parsed?.providers).toHaveLength(1);
 		expect(parsed?.providers[0].windows[0].usedPercent).toBe(100);
 		expect(parsed?.providers[0].windows[0].resetsAt).toBeNull();
+	});
+
+	it("totals Command Code credit pools without mixing currencies or changing other providers", () => {
+		const provider = parseSubscriptionResponse(response)!.providers[0];
+		expect(totalCommandCredits(provider)).toBeNull();
+		expect(totalCommandCredits({ ...provider, providerId: "command-code" })).toEqual({
+			label: "Total credits",
+			remaining: 12,
+			unit: "credits",
+		});
+		expect(
+			totalCommandCredits({
+				...provider,
+				providerId: "command-code",
+				credits: [
+					{ label: "Included", remaining: 20, unit: "credits" },
+					{ label: "Purchased", remaining: 5, unit: "credits" },
+					{ label: "Free", remaining: 0, unit: "credits" },
+				],
+			})?.remaining,
+		).toBe(25);
+		expect(totalCommandCredits({ ...provider, providerId: "command-code", credits: [] })).toBeNull();
 	});
 
 	it("provides compact provider labels", () => {

@@ -120,6 +120,18 @@ function numberText(value: number): string {
 	return Number.isInteger(value) ? String(value) : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+/** Command Code exposes disjoint Included/Purchased/Free pools, all in credits. */
+export function totalCommandCredits(provider: SubscriptionProvider): SubscriptionCredit | null {
+	if (provider.providerId !== "command-code") return null;
+	const pools = provider.credits?.filter((credit) => credit.unit === "credits");
+	if (!pools?.length) return null;
+	return {
+		label: "Total credits",
+		remaining: pools.reduce((sum, credit) => sum + credit.remaining, 0),
+		unit: "credits",
+	};
+}
+
 /** Format a credit using its API unit, never silently treating USD as credits. */
 export function formatCredit(credit: Pick<SubscriptionCredit, "remaining" | "unit">): string {
 	if (credit.unit === "USD") {

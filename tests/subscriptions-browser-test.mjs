@@ -48,9 +48,19 @@ const response = {
 			providerId: "command-code",
 			displayName: "Command Code",
 			state: "ok",
-			windows: [],
-			fetchedAt: null,
-			checkedAt: "",
+			plan: "Pro",
+			windows: [
+				{ label: "5-hour", windowSeconds: 18000, usedPercent: 25, resetsAt: at(2) },
+				{ label: "Weekly", windowSeconds: 604800, usedPercent: 42, resetsAt: at(80) },
+				{ label: "Monthly", windowSeconds: 2592000, usedPercent: 60, resetsAt: at(200) },
+			],
+			credits: [
+				{ label: "Included", remaining: 40, unit: "credits" },
+				{ label: "Purchased", remaining: 10, unit: "credits" },
+				{ label: "Free", remaining: 5, unit: "credits" },
+			],
+			fetchedAt: at(-0.02),
+			checkedAt: at(-0.02),
 		},
 		{
 			providerId: "anthropic",
@@ -182,6 +192,21 @@ try {
 	);
 	assert.equal(await page.locator("body").evaluate((el) => el.scrollWidth <= window.innerWidth), true);
 	await page.screenshot({ path: join(artifactDir, "subscriptions-mobile.png"), fullPage: true });
+	await footer.getByRole("button", { name: "Command Code", exact: true }).click();
+	assert.match(await popover.innerText(), /Total credits\s+55 credits/);
+	assert.doesNotMatch(await popover.innerText(), /Included|Purchased|Free/);
+	assert.equal(await popover.locator('[role="progressbar"]').count(), 3, "Command Code quota windows stay unchanged");
+	assert(
+		await popover.evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
+		"Command Code fits without scrolling on mobile",
+	);
+	await page.screenshot({ path: join(artifactDir, "subscriptions-command-mobile.png"), fullPage: true });
+	await page.setViewportSize({ width: 1440, height: 900 });
+	assert(
+		await popover.evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
+		"Command Code fits without scrolling on desktop",
+	);
+	await page.screenshot({ path: join(artifactDir, "subscriptions-command-desktop.png"), fullPage: true });
 	await context.close();
 	console.log("subscription footer checks passed");
 } catch (error) {

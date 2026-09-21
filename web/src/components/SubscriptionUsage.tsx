@@ -9,6 +9,7 @@ import {
 	formatResetCountdown,
 	parseSubscriptionResponse,
 	safePercent,
+	totalCommandCredits,
 	type SubscriptionProvider,
 	type SubscriptionResponse,
 	usageLevel,
@@ -248,6 +249,7 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 
 	const status = renderedData?.status ?? (ready ? "loading" : "disabled");
 	const retrySeconds = retryRemaining(openProvider?.retryAt, now);
+	const totalCredits = openProvider ? totalCommandCredits(openProvider) : null;
 
 	return (
 		<div className="subscription-usage" ref={rootRef}>
@@ -315,16 +317,24 @@ export function SubscriptionUsage({ clientId, ready }: SubscriptionUsageProps) {
 							</div>
 						);
 					})}
-					{openProvider.credits && openProvider.credits.length > 0 && (
-						<div className="subscription-credits">
-							<h3>Credits</h3>
-							{openProvider.credits.map((credit) => (
-								<div className="subscription-credit" key={`${credit.label}-${credit.unit}`}>
-									<span>{credit.label}</span>
-									<strong>{formatCredit(credit)}</strong>
-								</div>
-							))}
+					{totalCredits ? (
+						<div className="subscription-credits subscription-credit">
+							<span>Total credits</span>
+							<strong>{formatCredit(totalCredits)}</strong>
 						</div>
+					) : (
+						openProvider.credits &&
+						openProvider.credits.length > 0 && (
+							<div className="subscription-credits">
+								<h3>Credits</h3>
+								{openProvider.credits.map((credit) => (
+									<div className="subscription-credit" key={`${credit.label}-${credit.unit}`}>
+										<span>{credit.label}</span>
+										<strong>{formatCredit(credit)}</strong>
+									</div>
+								))}
+							</div>
+						)
 					)}
 					{openProvider.error && <p className="subscription-message">{openProvider.error}</p>}
 					{!providerHasUsage(openProvider) && openProvider.state === "ok" && (

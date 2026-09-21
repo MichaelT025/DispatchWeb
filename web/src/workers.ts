@@ -1,6 +1,6 @@
 /**
  * Pure helpers for delegated workers (PiAstra `delegate` tool): grouping for
- * the Workers pane (Active / Done, Codex-style), per-card lookup for the
+ * the Workers pane (Running / Finished / Failed), per-card lookup for the
  * delegate tool card, elapsed-time and status labels. No DOM, no React —
  * unit-tested in tests/unit/workers-view.test.ts.
  */
@@ -11,11 +11,16 @@ export function isWorkerActive(status: UiWorkerStatus): boolean {
 	return status === "starting" || status === "running";
 }
 
-/** Active first (start order), then finished ones newest first. */
-export function splitWorkers(workers: readonly UiWorker[]): { active: UiWorker[]; done: UiWorker[] } {
+/** Running in start order; finished and failed workers independently newest first. */
+export function splitWorkers(workers: readonly UiWorker[]): {
+	active: UiWorker[];
+	done: UiWorker[];
+	failed: UiWorker[];
+} {
 	const active = workers.filter((w) => isWorkerActive(w.status)).sort((a, b) => a.id - b.id);
-	const done = workers.filter((w) => !isWorkerActive(w.status)).sort((a, b) => b.id - a.id);
-	return { active, done };
+	const done = workers.filter((w) => !isWorkerActive(w.status) && w.status !== "failed").sort((a, b) => b.id - a.id);
+	const failed = workers.filter((w) => w.status === "failed").sort((a, b) => b.id - a.id);
+	return { active, done, failed };
 }
 
 /**

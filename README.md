@@ -25,10 +25,13 @@ Delegated workers (Dispatch's `delegate` tool) show up in two places:
   elapsed time and the extension's current activity line. A row opens that
   worker in the pane; "Open workers" opens the lists.
 - **Workers pane** in the right workspace (Ctrl+Shift+L, or the Workers item
-  in the workspace chooser): **Running** / **Finished** lists for the current
+  in the workspace chooser): **Running**, **Finished**, and **Failed** lists for the current
   conversation — each row names the agent (role glyph, role, id), its task and
   elapsed time, with the live activity line while it runs and the first line
-  of its result once done — and one worker's transcript rendered with the
+  of its result once done. Provider/model errors and other failures appear in the
+  collapsible **Failed** section below **Finished**, not mixed with finished rows.
+  Cancelled and interrupted workers retain their existing **Finished** placement.
+  One worker's transcript is rendered with the
   chat's own message and tool components. Running workers stream in live and
   can be stopped individually; finished ones come from the extension's
   in-memory session, or from the saved JSONL under `<agent dir>/piastra/runs`

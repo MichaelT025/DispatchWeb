@@ -229,6 +229,9 @@ export default function (pi) {
 				workers.set(w.id, w);
 			}
 		}
+		// A provider/model failure must have its own section, not count as Finished.
+		workers.set(4, { id: 4, toolCallId: "call-failed", role: "fast", model: "p/unavailable-model", task: "Worker with provider error", status: "failed", activity: "Unavailable model; no fallback used.", started: 1000, ended: 2000, recent: [], text: "" });
+		live.set(4, { messages: [asst("FAILED WORKER TRANSCRIPT", 2000)], streaming: null });
 		// One synthetic LIVE worker: streams three assistant messages, then completes.
 		const id = 3;
 		workers.set(id, { id, toolCallId: "call-live", role: "fast", model: "p/fast-model", task: "Live synthetic worker", status: "running", activity: "Thinking…", started: Date.now(), recent: [], text: "" });
@@ -454,6 +457,34 @@ try {
 	);
 	check("badge disappears when nothing runs", (await page.locator(".astra-workspace-badge").count()) === 0);
 	await shot(`${String(++shotN).padStart(2, "0")}-done-list`);
+
+	const failedSection = page.locator('.workers-section[aria-labelledby="workers-failed-heading"]');
+	check(
+		"three worker sections are ordered Running, Finished, Failed",
+		(
+			await page
+				.locator(".workers-section")
+				.evaluateAll((sections) => sections.map((section) => section.getAttribute("aria-labelledby")))
+		).join("|") === "workers-active-heading|workers-done-heading|workers-failed-heading",
+	);
+	check(
+		"provider errors are exclusively in Failed",
+		(await failedSection.locator(".worker-id").allInnerTexts()).join() === "#4" &&
+			!(await doneSection.innerText()).includes("Worker with provider error"),
+	);
+	await failedSection.locator("summary").click();
+	check("Failed is independently collapsible", (await failedSection.locator(".worker-row:visible").count()) === 0);
+	await failedSection.locator("summary").click();
+	await shot(`${String(++shotN).padStart(2, "0")}-failed-list`);
+	await failedSection.locator(".worker-row").click();
+	await until("failed worker transcript still opens", async () =>
+		(await page.locator(".worker-transcript").innerText()).includes("FAILED WORKER TRANSCRIPT"),
+	);
+	check(
+		"failed worker preserves reason and has no Stop action",
+		(await page.locator(".worker-detail-foot").innerText()).includes("Unavailable model") &&
+			(await page.locator(".worker-cancel").count()) === 0,
+	);
 
 	check("no page errors", errors.length === 0, errors.join(" | "));
 } finally {

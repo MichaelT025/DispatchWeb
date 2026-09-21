@@ -15,7 +15,7 @@ import { Message } from "./Message";
 import { RoleChip } from "./RoleChip";
 
 /**
- * Right-workspace Workers pane (Codex-style): read-only Active / Done lists of
+ * Right-workspace Workers pane: read-only Running / Finished / Failed lists of
  * the ACTIVE conversation's delegated workers, and one worker's transcript
  * rendered with the chat's own message components. Following a worker is a
  * server subscription (open_worker → worker_transcript pushes → close_worker).
@@ -58,7 +58,7 @@ export const WorkersPanel = memo(function WorkersPanel({
 	toolsWrap,
 }: WorkersPanelProps) {
 	const t = useT();
-	const { active, done } = useMemo(() => splitWorkers(workers), [workers]);
+	const { active, done, failed } = useMemo(() => splitWorkers(workers), [workers]);
 	const now = useTick(active.length > 0);
 	const current = selected === null ? undefined : workers.find((w) => w.id === selected);
 
@@ -116,6 +116,16 @@ export const WorkersPanel = memo(function WorkersPanel({
 				title={t("workersDone")}
 				count={done.length}
 				workers={done}
+				now={now}
+				onSelect={onSelect}
+				collapsible
+				defaultOpen
+			/>
+			<WorkerSection
+				id="workers-failed"
+				title={t("workersFailed")}
+				count={failed.length}
+				workers={failed}
 				now={now}
 				onSelect={onSelect}
 				collapsible

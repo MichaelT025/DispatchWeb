@@ -97,7 +97,7 @@ describe("WorkersPanel list", () => {
 		expect(rows[0].querySelector(".worker-elapsed")?.textContent).toMatch(/\d+(?:s|m)/);
 		expect(rows[0].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Running");
 		expect(rows[0].querySelector(".worker-row-detail.live")?.textContent).toBe("read src/models.ts");
-		// finished rows are newest first: #3 then #2
+		// Finished precedes Failed: #3 then #2
 		// completed → first line of the result, not the activity
 		expect(rows[1].querySelector(".worker-row-status")?.getAttribute("aria-label")).toBe("Done");
 		expect(rows[1].querySelector(".worker-row-detail")?.textContent).toBe("There are 3 r's.");
@@ -127,6 +127,33 @@ describe("WorkersPanel list", () => {
 		const { container, onSelect } = mount([worker(7)]);
 		act(() => (container.querySelector(".worker-row") as HTMLButtonElement).click());
 		expect(onSelect).toHaveBeenCalledWith(7);
+	});
+
+	it("lists failures only in a collapsible Failed section below Finished and preserves selection", () => {
+		const { container, onSelect } = mount([
+			worker(1, { status: "completed" }),
+			worker(2, { status: "failed", activity: "Provider request errored." }),
+			worker(3, { status: "failed", activity: "Unavailable model; no fallback used." }),
+		]);
+		const headings = [...container.querySelectorAll(".workers-section-head")].map((el) => el.textContent);
+		expect(headings).toEqual(["Running0", "Finished1", "Failed2"]);
+		const failed = container.querySelector('[aria-labelledby="workers-failed-heading"]') as HTMLDetailsElement;
+		const finished = container.querySelector('[aria-labelledby="workers-done-heading"]')!;
+		expect(failed.open).toBe(true);
+		expect([...failed.querySelectorAll(".worker-id")].map((el) => el.textContent)).toEqual(["#3", "#2"]);
+		expect([...finished.querySelectorAll(".worker-id")].map((el) => el.textContent)).toEqual(["#1"]);
+		expect(failed.textContent).toContain("Provider request errored.");
+		act(() => failed.querySelector<HTMLButtonElement>(".worker-row")!.click());
+		expect(onSelect).toHaveBeenCalledWith(3);
+		act(() => failed.querySelector("summary")!.click());
+		expect(failed.open).toBe(false);
+	});
+
+	it("keeps a failed worker's detail available without a Stop action", () => {
+		const { container } = mount([worker(2, { status: "failed", activity: "Provider error" })], 2);
+		expect(container.querySelector(".worker-detail-status")?.textContent).toContain("Failed");
+		expect(container.querySelector(".worker-detail-foot")?.textContent).toBe("Provider error");
+		expect(container.querySelector(".worker-cancel")).toBeNull();
 	});
 
 	it("lists finished rows under an open, collapsible Finished disclosure", () => {

@@ -28,15 +28,22 @@ function worker(id: number, over: Partial<UiWorker> = {}): UiWorker {
 }
 
 describe("splitWorkers", () => {
-	it("active in start order, done newest first", () => {
-		const { active, done } = splitWorkers([
+	it("keeps failures separate and sorts each terminal group newest first without mutating input", () => {
+		const workers = [
 			worker(3, { status: "completed" }),
 			worker(1),
 			worker(4, { status: "failed" }),
 			worker(2, { status: "starting" }),
-		]);
+			worker(5, { status: "cancelled" }),
+			worker(6, { status: "interrupted" }),
+			worker(7, { status: "failed" }),
+		];
+		const { active, done, failed } = splitWorkers(workers);
 		expect(active.map((w) => w.id)).toEqual([1, 2]);
-		expect(done.map((w) => w.id)).toEqual([4, 3]);
+		expect(done.map((w) => w.id)).toEqual([6, 5, 3]);
+		expect(failed.map((w) => w.id)).toEqual([7, 4]);
+		expect(workers.map((w) => w.id)).toEqual([3, 1, 4, 2, 5, 6, 7]);
+		expect(splitWorkers([])).toEqual({ active: [], done: [], failed: [] });
 	});
 });
 

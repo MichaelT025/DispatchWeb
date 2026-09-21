@@ -27,6 +27,7 @@ import { Markdown } from "./Markdown";
 import { StreamMarkdown } from "./StreamMarkdown";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolCallBlock, type ToolView } from "./ToolCallBlock";
+import { WORKER_RESULT_TYPE, WorkerResultCard, workerResultsFromDetails } from "./WorkerResultCard";
 import { useT, type Translate } from "../i18n";
 import { parseSkillBlock, type SkillBlock } from "../skill-block";
 import { isRasterImage, fileToProcessedImage } from "../image-paste";
@@ -187,6 +188,12 @@ export const Message = memo(function Message({
 	// Attached files are rendered as their own collapsible card, separate from
 	// the user message text.
 	const isFileAttachment = message.role === "custom" && message.customType === "file";
+	// Dispatch worker results (async delegation): structured details render as
+	// collapsed per-worker lines; malformed details fall back to the text.
+	const isWorkerResult =
+		message.role === "custom" &&
+		message.customType === WORKER_RESULT_TYPE &&
+		workerResultsFromDetails(message.details).length > 0;
 	// Question text for the per-question tag's tooltip.
 	const userText = message.content
 		.map((b) => asText(b)?.text ?? "")
@@ -313,7 +320,9 @@ export const Message = memo(function Message({
 								? t("goalBarTitle")
 								: message.customType === "file"
 									? t("attachment")
-									: `${t("plugin")} · ${message.customType ?? t("unknown")}`
+									: isWorkerResult
+										? t("workerResultsLabel")
+										: `${t("plugin")} · ${message.customType ?? t("unknown")}`
 						: roleLabel(message.role, t)}
 				</span>
 				{message.model && <span className="msg-model">{message.model}</span>}
@@ -456,6 +465,8 @@ export const Message = memo(function Message({
 						)}
 						{isFileAttachment ? (
 							<AttachmentCard message={message} forceOpen={searchActive} />
+						) : isWorkerResult ? (
+							<WorkerResultCard message={message} forceOpen={searchActive} />
 						) : skillBlock ? (
 							<>
 								<SkillCard block={skillBlock} forceOpen={searchActive} />

@@ -30,7 +30,7 @@ import {
 	workerStatusLabel,
 	workerStatusTone,
 } from "../workers";
-import { useWorkers } from "../workers-store";
+import { useDelegateLiveState, useWorkers } from "../workers-store";
 import { RoleChip } from "./RoleChip";
 import { shimmerPhase } from "../shimmer";
 
@@ -70,7 +70,7 @@ const TOOL_ICONS: Record<string, ComponentType> = {
 	web_search: FiGlobe,
 };
 
-function ToolIcon({ name }: { name: string }) {
+export function ToolIcon({ name }: { name: string }) {
 	const Icon = TOOL_ICONS[name] ?? FiTool;
 	return <Icon />;
 }
@@ -104,9 +104,13 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 	const shown = expanded || forceOpen;
 	const [copied, setCopied] = useState(false);
 
-	const running = !view.result && view.streaming && !view.status;
+	// PiAstra delegate returns as soon as its workers START (async
+	// delegation); the card stays "running" until the last worker lands.
+	const isDelegate = block.name === "delegate";
+	const workersRunning = useDelegateLiveState(isDelegate ? block.id : null) === "running";
+	const running = (!view.result && view.streaming && !view.status) || workersRunning;
 	const isBashRunning = block.name === "bash" && running;
-	const done = view.result !== undefined;
+	const done = view.result !== undefined && !workersRunning;
 	/** Command finished (tool_status fired) but the authoritative toolResult
 	 *  message hasn't landed in a snapshot yet — the model is still chewing on
 	 *  the result. */
@@ -119,7 +123,6 @@ export const ToolCallBlock = memo(function ToolCallBlock({
 	// PiAstra delegate: the card body is the live worker roster (workers-store),
 	// not the raw arguments; the result text is a status dump, so hide it
 	// unless the call itself failed.
-	const isDelegate = block.name === "delegate";
 
 	const statusClass = isError ? "err" : done ? "ok" : running || waitingModel ? "run" : "idle";
 	let statusLabel = isError

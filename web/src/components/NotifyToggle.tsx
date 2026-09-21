@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FiBell } from "react-icons/fi";
 import { useT } from "../i18n";
 import {
@@ -13,134 +13,169 @@ import {
 	type NotifySettings,
 } from "../notify";
 
-/** 设置里的「发送测试通知」诊断面板开关。默认关：一条不听话的通知，是浏览器/系统丢的
- *  还是被我们的抑制条件吞的？排障时改成 true 即可（实现与文案都在，别删）。 */
-const SHOW_NOTIFY_TEST_PANEL = false;
+const TEST_DELAY_MS = 5000;
 
-/**
- * Desktop / OS (PWA) notification toggle. Rendered at the bottom of the sound
- * dropdown in the top bar. Self-contained: it owns its (persisted) enabled
- * state and requests the browser permission from the user-gesture change
- * handler. When permission is denied the switch flips back so the UI never
- * claims notifications are on.
- *
- * Unavailable cases are reported precisely (`notifyBlockReason`): a missing
- * Notification API because of an insecure address (plain http on a LAN
- * IP/hostname — the typical Windows "open it from my other machine" setup) is
- * NOT the same as an unsupported browser, and the switch is disabled instead of
- * pretending it can be turned on. On Windows an extra hint points at the
- * OS-level gate (Settings → System → Notifications, Focus assist), which is the
- * remaining reason toasts stay silent even with permission granted.
- *
- * 默认界面里**不**摆「发送测试通知」按钮（见上）：平时用不到，但排障时它是唯一能区分
- * 「Edge/Windows 把通知丢了」（`path=none` + 错误）与「我们自己吞了」（`suppressed=true`）
- * 的东西，所以实现（`sendTestNotification` + notifyTest* 文案 + `.notify-test-result`
- * 样式）全部留着。回归：Windows 上最小化后一条通知都收不到、以及同 tag 通知被静默替换。
- */
 export function NotifyToggle() {
 	const t = useT();
 	const [settings, setSettings] = useState<NotifySettings>(loadNotifySettings);
 	const [perm, setPerm] = useState<NotificationPermission>(() => notificationPermission());
 	const [test, setTest] = useState<NotifyDiagnostics | null>(null);
-
-	// Cheap, side-effect free: re-read on every render so the panel reflects a
-	// permission change made in browser settings while the page stayed open.
+	const [pending, setPending] = useState(false);
+	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const mounted = useRef(true);
+	const settingsRef = useRef(settings);
+	const intentVersion = useRef(0);
+	const testRun = useRef(0);
+	settingsRef.current = settings;
 	const block = notifyBlockReason();
-	const blocked = block !== null;
-	const windows = isWindowsPlatform();
-
-	// Permission can also change outside the page (browser settings, the native
-	// prompt answered elsewhere): re-sync whenever the user comes back to us.
 	useEffect(() => {
-		const sync = () => setPerm(notificationPermission());
+		mounted.current = true;
+		const sync = () => {
+			setPerm(notificationPermission());
+			const next = loadNotifySettings();
+			settingsRef.current = next;
+			setSettings(next);
+		};
+		const storage = (e: StorageEvent) => {
+			if (e.key !== "pi-web-notify") return;
+			intentVersion.current += 1;
+			testRun.current += 1;
+			if (timer.current) {
+				clearTimeout(timer.current);
+				timer.current = null;
+			}
+			setPending(false);
+			sync();
+		};
 		window.addEventListener("focus", sync);
 		document.addEventListener("visibilitychange", sync);
+		window.addEventListener("storage", storage);
 		return () => {
+			mounted.current = false;
+			intentVersion.current += 1;
+			testRun.current += 1;
+			if (timer.current) {
+				clearTimeout(timer.current);
+				timer.current = null;
+			}
 			window.removeEventListener("focus", sync);
 			document.removeEventListener("visibilitychange", sync);
+			window.removeEventListener("storage", storage);
 		};
 	}, []);
-
 	const toggle = async (enabled: boolean) => {
-		const next: NotifySettings = { ...settings, enabled };
+		const version = ++intentVersion.current;
+		testRun.current += 1;
+		if (timer.current) {
+			clearTimeout(timer.current);
+			timer.current = null;
+		}
+		setPending(false);
+		const next = { ...settingsRef.current, enabled };
+		settingsRef.current = next;
 		setSettings(next);
-		saveNotifySettings(next);
-		if (enabled) {
+		if (!enabled) {
+			saveNotifySettings(next);
+			return;
+		}
+		try {
 			const p = await requestNotificationPermission();
+			if (!mounted.current || version !== intentVersion.current) return;
 			setPerm(p);
-			if (p !== "granted") {
-				// Reflect reality: notifications can't be shown, keep the switch off.
-				const off: NotifySettings = { ...next, enabled: false };
+			if (p === "granted") {
+				settingsRef.current = next;
+				setSettings(next);
+				saveNotifySettings(next);
+			} else {
+				const off = { ...next, enabled: false };
+				settingsRef.current = off;
 				setSettings(off);
 				saveNotifySettings(off);
 			}
+		} catch {
+			if (!mounted.current || version !== intentVersion.current) return;
+			setPerm("denied");
+			const off = { ...next, enabled: false };
+			settingsRef.current = off;
+			setSettings(off);
+			saveNotifySettings(off);
 		}
 	};
-
 	const runTest = async () => {
-		// Always say something, even if the toast worked: which route carried it
-		// (service worker vs a page notification) is the first thing to check when
-		// clicks on the toast do nothing.
+		if (pending || block) return;
+		const run = ++testRun.current;
+		const version = intentVersion.current;
 		setTest(null);
-		const result = await sendTestNotification(t("notifyDoneTitle"), t("notifyTestBody"));
-		setTest(result);
+		setPending(true);
+		try {
+			let p = perm;
+			if (p !== "granted") p = await requestNotificationPermission();
+			if (!mounted.current || run !== testRun.current || version !== intentVersion.current) return;
+			setPerm(p);
+			if (p !== "granted") {
+				setPending(false);
+				return;
+			}
+			if (!settingsRef.current.enabled) {
+				const next = { ...settingsRef.current, enabled: true };
+				settingsRef.current = next;
+				setSettings(next);
+				saveNotifySettings(next);
+			}
+			timer.current = setTimeout(async () => {
+				timer.current = null;
+				try {
+					const result = await sendTestNotification(t("notifyDoneTitle"), t("notifyTestBody"));
+					if (mounted.current && run === testRun.current) {
+						setTest(result);
+						setPending(false);
+					}
+				} catch {
+					if (mounted.current && run === testRun.current) setPending(false);
+				}
+			}, TEST_DELAY_MS);
+		} catch {
+			if (mounted.current && run === testRun.current) setPending(false);
+		}
 	};
-
 	return (
 		<div className="sound-menu notify-menu">
 			<div className="dd-header">{t("notifyHeader")}</div>
-
-			<label className={`sound-row sound-master${blocked ? " disabled" : ""}`}>
+			<label className={`sound-row sound-master${block ? " disabled" : ""}`}>
 				<span className="sound-label">
 					<FiBell className="sound-icon" />
 					<span>{t("notifyEnable")}</span>
 				</span>
 				<input
 					type="checkbox"
-					checked={settings.enabled && !blocked}
-					disabled={blocked}
-					onChange={(e) => toggle(e.target.checked)}
+					checked={settings.enabled && !block}
+					disabled={!!block}
+					onChange={(e) => void toggle(e.target.checked)}
 				/>
 			</label>
-
 			<div className="sound-hint">{t("notifyEnableDesc")}</div>
-
 			{block === "insecure" && <div className="sound-hint">{t("notifyInsecure")}</div>}
 			{block === "unsupported" && <div className="sound-hint">{t("notifyUnsupported")}</div>}
-			{!blocked && perm === "denied" && <div className="sound-hint">{t("notifyDenied")}</div>}
-			{!blocked && windows && <div className="sound-hint">{t("notifyWindowsHint")}</div>}
-
-			{/* 诊断入口（默认关闭，见 SHOW_NOTIFY_TEST_PANEL）：一条不听话的通知，
-			    是系统丢的还是我们吞的？ */}
-			{SHOW_NOTIFY_TEST_PANEL && !blocked && (
+			{!block && perm === "denied" && <div className="sound-hint">{t("notifyDenied")}</div>}
+			{!block && isWindowsPlatform() && <div className="sound-hint">{t("notifyWindowsHint")}</div>}
+			{!block && (
 				<>
 					<div className="notify-actions">
-						<button type="button" className="sound-preview" onClick={() => void runTest()}>
-							{t("notifyTest")}
+						<button type="button" className="sound-preview" disabled={pending} onClick={() => void runTest()}>
+							{pending ? t("notifyTestPending") : t("notifyTest")}
 						</button>
 					</div>
-					{test && (
-						<div className="sound-hint notify-test-result">
-							<div>
-								{test.path === "none"
-									? t("notifyTestFailed", { error: test.error ?? "?" })
-									: t("notifyTestSent", { path: test.path })}
-							</div>
-							<div>
-								{t("notifyTestState", {
-									focus: String(test.presence.hasFocus),
-									visibility: test.presence.visibility || "?",
-									minimized: String(test.presence.minimized),
-									idle: String(Math.round(test.presence.idleMs / 1000)),
-								})}
-							</div>
-							<div>{test.suppressed ? t("notifyTestGateSuppressed") : t("notifyTestGateOpen")}</div>
-							{test.path === "sw" && test.held !== null && (
-								<div>{test.held > 0 ? t("notifyTestHeld", { count: String(test.held) }) : t("notifyTestDropped")}</div>
-							)}
-						</div>
-					)}
+					<div className="sound-hint">{t("notifyTestInstruction")}</div>
 				</>
+			)}
+			{test && (
+				<div className="sound-hint notify-test-result">
+					{test.suppressed
+						? t("notifyTestGateSuppressed")
+						: test.path === "none"
+							? t("notifyTestFailed", { error: test.error ?? "?" })
+							: t("notifyTestSent", { path: test.path })}
+				</div>
 			)}
 		</div>
 	);

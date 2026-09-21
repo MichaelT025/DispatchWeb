@@ -124,9 +124,11 @@ export class WebUIContext {
 	private widgets = new Map<string, WidgetEntry>();
 	private lastLines = new Map<string, string[]>();
 	private emit: (msg: ServerMessage) => void;
+	private readonly onBlockingDialog?: (conversationId: string) => void;
 
-	constructor(emit: (msg: ServerMessage) => void) {
+	constructor(emit: (msg: ServerMessage) => void, onBlockingDialog?: (conversationId: string) => void) {
 		this.emit = emit;
+		this.onBlockingDialog = onBlockingDialog;
 	}
 
 	// -- widgets -------------------------------------------------------------
@@ -265,12 +267,24 @@ export class WebUIContext {
 		kind: "select" | "confirm" | "input",
 		title: string,
 		args: unknown[],
+		conversationId?: string,
 	): Promise<string | boolean | null> {
 		return new Promise((resolve) => {
+			if (conversationId) this.onBlockingDialog?.(conversationId);
 			const id = ++this.dialogSeq;
 			this.pendingDialogs.set(id, resolve);
 			this.emit({ type: "dialog", id, kind, title, args });
 		});
+	}
+
+	/** Open a blocking extension dialog while retaining its owning conversation. */
+	openDialogForOwner(
+		conversationId: string,
+		kind: "select" | "confirm" | "input",
+		title: string,
+		args: unknown[],
+	): Promise<string | boolean | null> {
+		return this.openDialog(kind, title, args, conversationId);
 	}
 
 	/** Resolve a pending dialog with the user's choice (called from the client). */

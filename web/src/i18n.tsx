@@ -394,7 +394,7 @@ export const en = {
 	notifyHeader: "Desktop notifications",
 	notifyEnable: "Enable desktop notifications",
 	notifyEnableDesc:
-		"Ping you when a session finishes or needs your input. Requires permission; fires only while the page is out of sight (another app, a minimised window or a background tab). On Windows it also fires once you have been idle on the page for two minutes — the platform's presence signals are wrong there, and a redundant toast beats a silent one.",
+		"Ping you when a session finishes or needs your input. Requires permission and works only while this page is out of sight (another app or a background tab). Notifications are not supported after the tab or browser is closed; keep this page open.",
 	notifyDenied:
 		"Notification permission was blocked — allow notifications for this site in browser settings (on Windows also allow the browser/app under Settings → System → Notifications and turn Focus assist off).",
 	notifyUnsupported: "Notifications are not supported by this browser.",
@@ -403,11 +403,14 @@ export const en = {
 	notifyWindowsHint:
 		"Windows adds an OS-level gate: allow the browser (or the installed pi-web-ui app) under Settings → System → Notifications and turn off Focus assist, otherwise toasts stay silent; closing the window also ends the process, so nothing can be delivered after that.",
 	notifyTest: "Send test notification",
+	notifyTestPending: "Switching to background…",
+	notifyTestInstruction:
+		"Click to request permission if needed, then switch to another tab or window within 5 seconds. The test is skipped while this page is focused.",
 	notifyTestBody:
 		"If you can see this OS notification, both the browser and Windows are letting notifications through.",
 	notifyTestSent: "Sent (path: {path})",
 	notifyTestFailed: "Delivery failed: {error}",
-	notifyTestState: "Platform state: focus {focus} · visibility {visibility} · minimised {minimized} · idle {idle}s",
+	notifyTestState: "Platform state: focus {focus} · visibility {visibility} · minimised {minimized}",
 	notifyTestHeld:
 		"The browser accepted it ({count} in your notification centre): if no banner popped up, Windows/Edge banner or quiet-notification settings are suppressing it.",
 	notifyTestDropped: "The browser did not keep this notification → Edge dropped it (site notifications muted/blocked).",

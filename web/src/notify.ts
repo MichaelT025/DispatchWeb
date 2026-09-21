@@ -8,41 +8,15 @@
  * another app" case from issue #13. No server-side web push (that would need a
  * subscription + VAPID + push endpoint; out of scope).
  *
- * Notifications only fire while the user is NOT watching the page, so they
- * never spam someone who is actively looking at the chat — that case is
- * covered by the in-app sound cues.
- *
- * Windows notes (why this file is not just "focus ? skip : show")
- * ---------------------------------------------------------------
- * On Windows (measured on Win11 with Edge 2026-09, same on Chrome) a
- * *minimised* browser window keeps lying about every standard presence signal:
- *
- *     focused+visible : hasFocus=true  visibilityState="visible"  screenX=10      outerHeight=808
- *     minimised       : hasFocus=true  visibilityState="visible"  screenX=-21334  outerHeight=20   (Edge)
- *     minimised       : hasFocus=true  visibilityState="visible"  screenX=-32000  outerHeight=28   (Chrome)
- *
- * No `blur`, no `visibilitychange` — a minimised window is completely
- * invisible to `hasFocus()`/Page Visibility, which is why "focus alone" (v0.75)
- * and "focus and visible" (v0.75.0) both silently ate every notification in
- * exactly the "I minimised the app and went away" case this feature exists for.
- * The two signals that DO change are the native window rectangle ones:
- * `screenX`/`screenY` jump to the Win32 "minimised" coordinates (off-screen by
- * 20000+ px) and `outerWidth`/`outerHeight` collapse to the title-bar size. See
- * `isCollapsedWindow()`.
- *
- * Even with that, `hasFocus()` is the only thing that can tell "another app has
- * the foreground" from "I am looking at the chat" — and if it lies again we
- * would silently swallow the notification (worse than one redundant toast), so
- * on Windows the suppression additionally requires recent real interaction with
- * the page (`NOTIFY_IDLE_GRACE_MS`): no pointer/keyboard/touch/wheel activity
- * for that long means we are not confident the user is watching, and a toast
- * costs nothing compared to a missed reminder. Non-Windows platforms keep the
- * strict focus+visibility rule (their signals are trustworthy).
+ * Delivery is deliberately strict: a notification is allowed only when the
+ * document is hidden OR the document has lost focus.  Window geometry, platform
+ * detection, and idle time are diagnostic-only; they never create an exception
+ * to that gate.
  *
  * `new Notification()` is a valid fallback in Chrome/Edge on Windows when no
  * service worker is registered / active yet (dev mode, first load after an
- * update), but such a toast has no click handling at all; through the SW path a
- * click focuses / reopens the app window (`notificationclick` in `sw.js`).
+ * update). Both routes focus and select an existing conversation in place,
+ * preserving any pending input dialog.
  *
  * There is a second Windows trap that cost a round of debugging: notifications
  * must NOT carry a `tag`. Windows replaces an existing toast that has the same
@@ -59,12 +33,12 @@
  * Focus assist must be off. Nothing in the page can override that, so the
  * settings UI shows a hint (`notifyWindowsHint`). For the hard cases there is a
  * diagnostic (`sendTestNotification`: route, error, whether the browser really
- * kept the notification, presence snapshot) whose UI lives behind the
- * `SHOW_NOTIFY_TEST_PANEL` flag in `components/NotifyToggle.tsx` — normally off,
- * flip it on to tell "the OS dropped it" apart from "our gate swallowed it".
+ * kept the notification, presence snapshot). Its settings button waits five
+ * seconds so the user can switch away; it never bypasses the focus gate.
  */
 
 import { appUrl } from "./base-url";
+import { NOTIFICATION_CLICK_EVENT } from "./notification-events";
 
 export interface NotifySettings {
 	/** Master switch — kills every OS notification. */
@@ -124,8 +98,8 @@ export function notifyBlockReason(): NotifyBlockReason | null {
 /* Presence: is the user actually watching this page?                  */
 /* ------------------------------------------------------------------ */
 
-/** Native window rectangle as seen from the page (the only Windows-minimise
- *  signal that survives contact with reality, see the file header). */
+/** Native window rectangle retained for diagnostics only. It is never used to
+ * widen the strict notification delivery gate. */
 export interface WindowRect {
 	screenX: number;
 	screenY: number;
@@ -133,19 +107,20 @@ export interface WindowRect {
 	outerHeight: number;
 }
 
-/** How long a platform may be without user interaction before we stop believing
- *  it is being watched (Windows only — its presence signals are the buggy ones). */
+/** Legacy diagnostic threshold. It is intentionally not consulted by the
+ * notification policy; idle/minimized heuristics never permit delivery. */
 export const NOTIFY_IDLE_GRACE_MS = 120_000;
 
-/** Everything the suppression decision needs. Plain data → unit testable. */
+/** Presence snapshot. Only `hasFocus` and `visibility` are policy inputs;
+ * the remaining fields are retained for diagnostics/backward compatibility. */
 export interface PresenceSignals {
 	hasFocus: boolean;
 	visibility: string;
-	/** Window is minimised to the taskbar (native geometry says so). */
+	/** Diagnostic: window is minimised to the taskbar (native geometry says so). */
 	minimized: boolean;
-	/** Milliseconds since the last real user interaction with this page. */
+	/** Diagnostic milliseconds since the last real user interaction. */
 	idleMs: number;
-	/** Windows: `hasFocus()` is not trustworthy, apply the idle escape hatch. */
+	/** Diagnostic platform flag; never an exception to the focus gate. */
 	windows: boolean;
 }
 
@@ -175,24 +150,24 @@ function offScreen(coordinate: number): boolean {
 }
 
 /**
- * Swallow the notification because the user is already looking at it?
+ * Whether the strict foreground gate suppresses a notification.
  *
- * Requires a visible page, a window that is neither minimised nor collapsed,
- * window focus, and — on Windows, where focus/visibility are known to lie —
- * recent interaction with the page. Anything less than "confident" notifies:
- * a redundant toast is cheap, a missed reminder is the bug this exists for.
- * Pure function → unit tested.
+ * The only allowed delivery states are `visibilityState === "hidden"` or
+ * `hasFocus() === false`.  In particular, minimizing/idle timers are not
+ * exceptions: if both standard signals say the page is foreground, we do not
+ * show a toast.
  */
 export function shouldSuppressNotify(presence: PresenceSignals): boolean {
-	if (presence.visibility !== "visible") return false;
-	if (presence.minimized) return false;
-	if (!presence.hasFocus) return false;
-	if (presence.windows && presence.idleMs > NOTIFY_IDLE_GRACE_MS) return false;
-	return true;
+	return presence.visibility !== "hidden" && presence.hasFocus;
+}
+
+/** The inverse of the strict foreground gate. */
+export function shouldDeliverNotify(presence: PresenceSignals): boolean {
+	return !shouldSuppressNotify(presence);
 }
 
 /* ------------------------------------------------------------------ */
-/* User-activity tracking (feeds `idleMs`)                             */
+/* User-activity tracking (diagnostics only; never a delivery exception)   */
 /* ------------------------------------------------------------------ */
 
 let lastActivityMs = Date.now();
@@ -210,18 +185,18 @@ export function idleSinceLastActivityMs(): number {
 
 /** One-time (cheap, passive) listeners; safe to call repeatedly. */
 function bindActivityTracking(): void {
-	if (activityBound || typeof window === "undefined") return;
+	if (activityBound || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
 	activityBound = true;
 	const options: AddEventListenerOptions = { passive: true, capture: true };
 	for (const event of ["pointerdown", "pointermove", "keydown", "wheel", "touchstart", "focus", "scroll"]) {
 		window.addEventListener(event, markActivity, options);
 	}
-	if (typeof document !== "undefined") {
+	if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
 		document.addEventListener("visibilitychange", markActivity, options);
 	}
 }
 
-/** True on Windows (the platform whose presence signals need the extra work). */
+/** True on Windows (used only in the diagnostic presence snapshot). */
 export function isWindowsPlatform(): boolean {
 	if (typeof navigator === "undefined") return false;
 	return /windows/i.test(navigator.userAgent ?? "");
@@ -281,9 +256,36 @@ function describeError(err: unknown): string {
 	return String(err);
 }
 
-function notificationOptions(body?: string, sticky = false): NotificationOptions {
+/** Optional metadata for a notification event.
+ *
+ * `eventKey` is an application-stable identity (not a generated per-call id).
+ * Keyed events are delivered at most once across tabs when Web Locks and
+ * localStorage are available. `targetConversationId` is carried to the service
+ * worker click handler; the current worker can focus the originating URL, while
+ * conversation routing remains an app-level concern.
+ */
+export interface NotifyOptions {
+	eventKey?: string;
+	targetConversationId?: string;
+	/** Alias accepted for callers that use the app's usual conversation naming. */
+	conversationId?: string;
+}
+
+/** localStorage key used by the cross-tab consumed-event ledger. */
+export const NOTIFY_CONSUMED_EVENTS_KEY = "pi-web-notify-consumed-events-v1";
+/** One lock protects the whole ledger read/modify/write transaction. */
+export const NOTIFY_EVENT_LOCK_NAME = "pi-web-notify-events-v1";
+/** Event IDs are only a reconnect-deduplication cache, not permanent history. */
+export const NOTIFY_EVENT_LEDGER_TTL_MS = 24 * 60 * 60 * 1000;
+export const NOTIFY_EVENT_LEDGER_MAX_ENTRIES = 256;
+
+function notificationOptions(body?: string, sticky = false, options?: NotifyOptions): NotificationOptions {
+	const targetConversationId = options?.targetConversationId ?? options?.conversationId;
 	return {
 		body,
+		// In-app sound cues handle the foreground case; OS notifications are
+		// silent by default so they do not create a second audible channel.
+		silent: true,
 		// 测试通知用 sticky（requireInteraction）：横幅一出就不会自己滑走，人为
 		// 点一下才消失 —— 一条「一秒就没了」的测试通知等于没测。
 		requireInteraction: sticky,
@@ -300,8 +302,128 @@ function notificationOptions(body?: string, sticky = false): NotificationOptions
 		// Click target for the service worker's `notificationclick` handler
 		// (brings the window back on Windows/Linux, where a toast click would
 		// otherwise do nothing). `location.href` keeps PI_WEB_TOKEN intact.
-		data: { url: typeof location !== "undefined" ? location.href : appUrl("/") },
+		// App's notification-events helper consumes this query parameter after a
+		// click and validates it against the loaded conversation roster.
+		data: {
+			url: typeof location !== "undefined" ? location.href : appUrl("/"),
+			...(targetConversationId ? { notificationConversationId: targetConversationId } : {}),
+		},
 	};
+}
+
+/** Focus and select in place: reloading would discard a pending input dialog. */
+function bindPageNotificationClick(notification: Notification, options: NotificationOptions): void {
+	notification.onclick = () => {
+		try {
+			notification.close();
+		} catch {
+			// Best effort: some test/browser implementations omit close().
+		}
+		try {
+			const win = typeof window !== "undefined" ? window : undefined;
+			win?.focus();
+			const conversationId = options.data?.notificationConversationId;
+			if (typeof conversationId !== "string" || !conversationId) return;
+			win?.dispatchEvent(
+				new CustomEvent(NOTIFICATION_CLICK_EVENT, {
+					detail: { type: "notification-click", conversationId },
+				}),
+			);
+		} catch {
+			// Notification clicks must never surface an unhandled navigation error.
+		}
+	};
+}
+
+/** A deliberately small structural type keeps the coordination code testable
+ * without depending on a concrete browser implementation. */
+type NotifyLocks = {
+	request: (name: string, callback: () => Promise<unknown>) => Promise<unknown>;
+};
+
+function availableLocks(): NotifyLocks | null {
+	try {
+		const navigatorLike = (globalThis as unknown as { navigator?: { locks?: NotifyLocks } }).navigator;
+		const locks = navigatorLike?.locks;
+		return locks && typeof locks.request === "function" ? locks : null;
+	} catch {
+		return null;
+	}
+}
+
+function availableStorage(): Storage | null {
+	try {
+		const storage = (globalThis as unknown as { localStorage?: Storage }).localStorage;
+		return storage && typeof storage.getItem === "function" && typeof storage.setItem === "function" ? storage : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Read and compact the bounded timestamp ledger. A malformed/unreadable
+ * ledger is an unsafe coordination state, so keyed delivery fails closed. */
+interface ConsumedEventsRead {
+	entries: Record<string, number>;
+	changed: boolean;
+}
+
+function readConsumedEvents(storage: Storage, now = Date.now()): ConsumedEventsRead | null {
+	try {
+		const raw = storage.getItem(NOTIFY_CONSUMED_EVENTS_KEY);
+		if (!raw) return { entries: Object.create(null) as Record<string, number>, changed: false };
+		const parsed: unknown = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		const all: Record<string, number> = Object.create(null) as Record<string, number>;
+		let changed = false;
+		for (const [key, value] of Object.entries(parsed)) {
+			// `true` is accepted once to migrate the pre-timestamp ledger format.
+			const timestamp = value === true ? now : value;
+			if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp < 0) return null;
+			if (timestamp < now - NOTIFY_EVENT_LEDGER_TTL_MS) {
+				changed = true;
+				continue;
+			}
+			all[key] = timestamp;
+			if (value === true) changed = true;
+		}
+		const newest = Object.entries(all).sort((a, b) => b[1] - a[1]);
+		if (newest.length > NOTIFY_EVENT_LEDGER_MAX_ENTRIES) changed = true;
+		const entries: Record<string, number> = Object.create(null) as Record<string, number>;
+		for (const [key, timestamp] of newest.slice(0, NOTIFY_EVENT_LEDGER_MAX_ENTRIES)) entries[key] = timestamp;
+		return { entries, changed };
+	} catch {
+		return null;
+	}
+}
+
+function writeConsumedEvents(storage: Storage, entries: Record<string, number>): boolean {
+	try {
+		storage.setItem(NOTIFY_CONSUMED_EVENTS_KEY, JSON.stringify(entries));
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Mark one key consumed and verify the write. The single global Web Lock held
+ * by the caller makes the entire shared-ledger transaction atomic between tabs. */
+function consumeEvent(storage: Storage, eventKey: string): "consumed" | "already" | "unavailable" {
+	const read = readConsumedEvents(storage);
+	if (!read) return "unavailable";
+	if (read.entries[eventKey] !== undefined) {
+		if (read.changed && !writeConsumedEvents(storage, read.entries)) return "unavailable";
+		return "already";
+	}
+	read.entries[eventKey] = Date.now();
+	const boundedEntries: Record<string, number> = Object.create(null) as Record<string, number>;
+	for (const [key, timestamp] of Object.entries(read.entries)
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, NOTIFY_EVENT_LEDGER_MAX_ENTRIES)) {
+		boundedEntries[key] = timestamp;
+	}
+	if (!writeConsumedEvents(storage, boundedEntries)) return "unavailable";
+	const written = readConsumedEvents(storage);
+	return written?.entries[eventKey] !== undefined ? "consumed" : "unavailable";
 }
 
 /**
@@ -312,40 +434,91 @@ function notificationOptions(body?: string, sticky = false): NotificationOptions
  * not active yet: first load / right after an update), which used to swallow
  * the notification entirely. Never throws.
  */
-async function showNow(title: string, body?: string, sticky = false): Promise<NotifyAttempt> {
+async function showNow(
+	title: string,
+	body?: string,
+	sticky = false,
+	options?: NotifyOptions,
+	/** Rechecked after every asynchronous step and immediately before showing. */
+	mayDeliver: () => boolean = () => shouldDeliverNotify(currentPresence()),
+): Promise<NotifyAttempt> {
 	if (!notificationsSupported()) return { path: "none", error: "unsupported" };
+	if (!loadNotifySettings().enabled) return { path: "none", error: "notifications disabled" };
 	if (Notification.permission !== "granted") return { path: "none", error: `permission: ${Notification.permission}` };
+	// This check is intentionally also inside showNow: keyed delivery may have
+	// waited for another tab's lock, during which focus can change.
+	if (!mayDeliver())
+		return { path: "none", error: "foreground: switch away from this page to test notification delivery" };
 
-	const options = notificationOptions(body, sticky);
+	const notification = notificationOptions(body, sticky, options);
 	let swError: string | undefined;
 	try {
 		const reg = await navigator.serviceWorker?.getRegistration();
+		if (!loadNotifySettings().enabled || Notification.permission !== "granted")
+			return { path: "none", error: "notifications disabled or permission revoked before delivery" };
+		if (!mayDeliver()) return { path: "none", error: "foreground: page regained focus before delivery" };
 		if (reg?.active && typeof reg.showNotification === "function") {
-			await reg.showNotification(title, options);
+			await reg.showNotification(title, notification);
 			return { path: "sw" };
 		}
 		swError = reg ? "service worker not active" : "no service worker registration";
 	} catch (err) {
 		swError = describeError(err);
 	}
+	// A failed SW attempt can fall back, but must not bypass the strict gate or
+	// a setting/permission change that happened while the SW was being awaited.
+	if (!loadNotifySettings().enabled || Notification.permission !== "granted")
+		return { path: "none", error: "notifications disabled or permission revoked before fallback delivery" };
+	if (!mayDeliver()) return { path: "none", error: "foreground: page regained focus before fallback delivery" };
 	try {
-		new Notification(title, options);
+		const pageNotification = new Notification(title, notification);
+		bindPageNotificationClick(pageNotification, notification);
 		return { path: "page", error: swError };
 	} catch (err) {
-		return { path: "none", error: `${swError}; page: ${describeError(err)}` };
+		return { path: "none", error: `${swError ?? "service worker unavailable"}; page: ${describeError(err)}` };
+	}
+}
+
+/** Deliver a keyed event while holding its cross-tab lock. The event is
+ * consumed before the focus decision, so a focused-tab skip cannot replay when
+ * another tab later receives the same event. Missing/unsafe coordination fails
+ * closed rather than risking duplicate delivery. */
+async function notifyKeyed(title: string, body: string | undefined, options: NotifyOptions): Promise<void> {
+	if (typeof options.eventKey !== "string" || options.eventKey.length === 0) return;
+	const locks = availableLocks();
+	const storage = availableStorage();
+	if (!locks || !storage) return;
+	try {
+		await locks.request(NOTIFY_EVENT_LOCK_NAME, async () => {
+			// The lock may have been queued while settings or permission changed.
+			// Do not consume an event that was never eligible for delivery.
+			if (!loadNotifySettings().enabled || Notification.permission !== "granted") return;
+			const state = consumeEvent(storage, options.eventKey as string);
+			if (state !== "consumed")
+				return { path: "none", error: state === "already" ? "event already consumed" : "event ledger unavailable" };
+			if (!shouldDeliverNotify(currentPresence()))
+				return { path: "none", error: "foreground: event consumed without delivery" };
+			await showNow(title, body, false, options);
+			return { path: "none" };
+		});
+	} catch {
+		// Lock implementation errors (including a denied/unsupported manager)
+		// must never turn a best-effort notification into an unsafe duplicate.
 	}
 }
 
 /** Show an OS notification when enabled + granted AND the user is not watching
- *  this page. Otherwise it is a safe no-op — including when the browser
- *  withholds the API (insecure context / old browser), where the settings UI
- *  explains the reason instead. Never throws. */
-export async function notify(title: string, body?: string): Promise<void> {
+ * this page. Existing two-argument calls remain valid. Keyed calls require
+ * safe Web Locks + localStorage coordination and otherwise fail closed. */
+export async function notify(title: string, body?: string, options?: NotifyOptions): Promise<void> {
 	if (!notificationsSupported()) return;
-	// User is watching — don't spam; sound covers it.
-	if (shouldSuppressNotify(currentPresence())) return;
 	if (!loadNotifySettings().enabled) return;
-	await showNow(title, body);
+	if (options?.eventKey !== undefined) {
+		await notifyKeyed(title, body, options);
+		return;
+	}
+	if (!shouldDeliverNotify(currentPresence())) return;
+	await showNow(title, body, false, options);
 }
 
 /** Handle for the settings-panel diagnostics: with no `tag` on our
@@ -372,11 +545,11 @@ export interface NotifyDiagnostics extends NotifyAttempt {
 }
 
 /**
- * Fire one notification immediately, bypassing the "user is watching" gate, and
- * report how it went. This is the settings panel's "send a test notification"
- * button: a toast that never arrives is either dropped by the OS/browser
- * (`path: "none"` + error) or was suppressed by us (`suppressed: true`) — and
- * the presence snapshot shows which lie the platform is telling.
+ * Fire one diagnostic notification, but never bypass the strict focus gate.
+ * The settings UI schedules this test and tells the user to switch away; if it
+ * is called while focused, it returns a useful no-op result instead of a
+ * foreground toast. This remains an unkeyed diagnostic and therefore does not
+ * participate in the event ledger.
  */
 export async function sendTestNotification(title: string, body?: string): Promise<NotifyDiagnostics> {
 	const presence = currentPresence();
@@ -390,6 +563,14 @@ export async function sendTestNotification(title: string, body?: string): Promis
 		held: null as number | null,
 	};
 	if (!base.supported) return { ...base, path: "none", error: "unsupported" };
+	if (!loadNotifySettings().enabled) return { ...base, path: "none", error: "notifications disabled" };
+	if (!shouldDeliverNotify(presence)) {
+		return {
+			...base,
+			path: "none",
+			error: "foreground: switch away from this page to test notification delivery",
+		};
+	}
 	let reg: ServiceWorkerRegistration | undefined;
 	try {
 		reg = await navigator.serviceWorker?.getRegistration();
@@ -397,7 +578,7 @@ export async function sendTestNotification(title: string, body?: string): Promis
 	} catch {
 		// ignore — only used as a hint in the UI
 	}
-	const attempt = await showNow(title, body, true);
+	const attempt = await showNow(title, body, true, undefined, () => shouldDeliverNotify(currentPresence()));
 	// Ask the browser whether it really kept the notification: this is what
 	// separates "the OS/browser never took it" from "it is sitting in the
 	// notification centre but the banner was suppressed".

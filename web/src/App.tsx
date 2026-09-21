@@ -60,9 +60,15 @@ import type { Notice } from "./use-chat";
 import { fileToProcessedImage, isRasterImage, type ProcessedImage } from "./image-paste";
 import { randomUuid } from "./uuid";
 import { recordModelUsage } from "./model-usage";
+import {
+	NOTIFICATION_CLICK_EVENT,
+	notificationConversationIdFromUrl,
+	parseNotificationClickMessage,
+	resolveNotificationConversation,
+	withoutNotificationConversationId,
+} from "./notification-events";
 import { useWideChat } from "./chat-width-settings";
 import { projectNameFromCwd, useProjectTitle } from "./title-settings";
-import { notify } from "./notify";
 import { workspaceMaxPx } from "./panel-sash";
 
 export interface PendingAttachment {
@@ -414,10 +420,6 @@ export function App() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	const prevStreaming = useRef<boolean | null>(null);
-	const prevDialogId = useRef<number | null>(null);
-	const prevQuestionId = useRef<string | null>(null);
-	const lastErrorNotice = useRef(0);
 	// Remembers a terminal-view click made before the WebSocket is ready.
 	const terminalOpenRequested = useRef(false);
 	// Previous terminal list — drives the uninstall-finished watcher below.
@@ -438,40 +440,56 @@ export function App() {
 		}
 	}, [chat.terminals, send]);
 
-	// Run end cue: OS/PWA notification for when the user stepped away.
-	useEffect(() => {
-		const streaming = chat.state?.isStreaming ?? false;
-		const prev = prevStreaming.current;
-		prevStreaming.current = streaming;
-		if (prev === null) return; // first observation — don't cue
-		if (prev && !streaming) void notify(t("notifyDoneTitle"), t("notifyDoneBody"));
-	}, [chat.state?.isStreaming]);
+	/** Switch an already-open page in place from a trusted click message. The
+	 * message carries no URL and is accepted only for a conversation currently
+	 * present in the server's roster, so an OS toast cannot trigger a fetch. */
+	const pendingNotificationClickRef = useRef<string | null>(null);
+	const processNotificationClick = useCallback(() => {
+		const id = pendingNotificationClickRef.current;
+		if (!id || !chat.conversations.some((conversation) => conversation.id === id)) return;
+		if (id !== chat.activeConversationId && !send({ type: "switch_conversation", id })) return;
+		pendingNotificationClickRef.current = null;
+	}, [chat.activeConversationId, chat.conversations, send]);
+	const handleNotificationClick = useCallback(
+		(value: unknown) => {
+			const id = parseNotificationClickMessage(value);
+			if (!id) return;
+			pendingNotificationClickRef.current = id;
+			processNotificationClick();
+		},
+		[processNotificationClick],
+	);
 
-	// Questionnaire cue — each new dialog id + each new question id.
+	// A click can race the initial roster push; retry the same validated message
+	// when conversations arrive, without ever issuing a URL navigation/fetch.
 	useEffect(() => {
-		const id = chat.dialog?.id ?? null;
-		if (id !== null && id !== prevDialogId.current) {
-			void notify(t("notifyQuestionTitle"), t("notifyQuestionBody"));
-		}
-		prevDialogId.current = id;
-	}, [chat.dialog]);
+		processNotificationClick();
+	}, [processNotificationClick]);
 
+	// Existing clients receive a postMessage/custom event and never reload. The
+	// URL query path below is only for a newly opened client with no page to send.
 	useEffect(() => {
-		const qid = chat.question?.id ?? null;
-		if (qid !== null && qid !== prevQuestionId.current) {
-			void notify(t("notifyQuestionTitle"), t("notifyQuestionBody"));
-		}
-		prevQuestionId.current = qid;
-	}, [chat.question]);
+		const onServiceWorkerMessage = (event: MessageEvent<unknown>) => handleNotificationClick(event.data);
+		const onWindowNotificationClick = (event: Event) => handleNotificationClick((event as CustomEvent<unknown>).detail);
+		navigator.serviceWorker?.addEventListener("message", onServiceWorkerMessage);
+		window.addEventListener(NOTIFICATION_CLICK_EVENT, onWindowNotificationClick);
+		return () => {
+			navigator.serviceWorker?.removeEventListener("message", onServiceWorkerMessage);
+			window.removeEventListener(NOTIFICATION_CLICK_EVENT, onWindowNotificationClick);
+		};
+	}, [handleNotificationClick]);
 
-	// Error cue — new error notices only.
+	// Notification clicks carry only a conversation ID in the app URL. Wait for
+	// the roster before validating it; never fetch or navigate to an unknown ID.
 	useEffect(() => {
-		const err = [...chat.notices].reverse().find((n) => n.level === "error");
-		if (err && err.id !== lastErrorNotice.current) {
-			lastErrorNotice.current = err.id;
-			void notify(t("notifyErrorTitle"), t("notifyErrorBody"));
-		}
-	}, [chat.notices]);
+		const rawId = notificationConversationIdFromUrl(window.location.href);
+		if (!rawId || !chat.ready) return;
+		const availableIds = chat.conversations.map((conversation) => conversation.id);
+		const id = resolveNotificationConversation(window.location.href, availableIds);
+		if (id && id !== chat.activeConversationId && !send({ type: "switch_conversation", id })) return;
+		const cleanedUrl = withoutNotificationConversationId(window.location.href);
+		window.history.replaceState(window.history.state, "", cleanedUrl);
+	}, [chat.activeConversationId, chat.conversations, chat.ready, chat.status, send]);
 
 	const attach = (
 		path: string,

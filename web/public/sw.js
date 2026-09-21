@@ -161,19 +161,48 @@ self.addEventListener("fetch", (event) => {
 // the session that raised the notification is the one that comes forward.
 self.addEventListener("notificationclick", (event) => {
 	event.notification.close();
-	const target = (event.notification.data && event.notification.data.url) || new URL(SCOPE, self.location.origin).href;
+	const data = event.notification.data || {};
+	let target;
+	try {
+		// Keep the originating app URL (including its auth token), but never trust
+		// an arbitrary origin/path supplied by notification data.
+		const candidate = typeof data.url === "string" ? new URL(data.url, self.location.origin) : null;
+		const inScope = candidate && candidate.origin === self.location.origin && appPath(candidate.pathname) !== null;
+		target = inScope ? candidate : new URL(SCOPE, self.location.origin);
+	} catch {
+		target = new URL(SCOPE, self.location.origin);
+	}
+	// The click contract is deliberately a query parameter. The app validates
+	// this ID against its currently available conversations before switching.
+	const conversationId =
+		typeof data.notificationConversationId === "string"
+			? data.notificationConversationId
+			: typeof data.conversationId === "string"
+				? data.conversationId
+				: null;
+	if (conversationId && conversationId.length > 0) {
+		target.searchParams.set("notificationConversationId", conversationId);
+	}
 
 	event.waitUntil(
 		self.clients
 			.matchAll({ type: "window", includeUncontrolled: true })
 			.then((clients) => {
+				const targetUrl = target.href;
 				const inScope = clients.filter((client) => appPath(new URL(client.url).pathname) !== null);
-				const match = inScope.find((client) => client.url === target) || inScope[0];
-				// focus() rejects when the browser refuses to raise the window
-				// (rare); fall back to just returning the client so the click
-				// never logs an unhandled rejection.
-				if (match) return match.focus ? match.focus().catch(() => match) : match;
-				return self.clients.openWindow(target);
+				const match = inScope[0];
+				if (match) {
+					// Never navigate an existing client: a reload would discard blocking
+					// extension dialogs and make their answer impossible. The page owns
+					// strict roster validation before switching conversations.
+					if (conversationId && conversationId.length > 0) {
+						match.postMessage({ type: "notification-click", conversationId });
+					}
+					return match.focus ? match.focus().catch(() => match) : match;
+				}
+				// With no existing page, retain the validated query so App can consume
+				// it after the new page connects and receives its conversation roster.
+				return self.clients.openWindow(targetUrl);
 			})
 			.catch(() => undefined),
 	);

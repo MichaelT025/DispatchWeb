@@ -6,4 +6,5 @@ await runSuite("browser", [
 	"astra-workers-test",
 	"logo-test",
 	"subscriptions-browser-test",
+	"notifications-test",
 ]);

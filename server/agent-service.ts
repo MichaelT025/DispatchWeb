@@ -55,6 +55,7 @@ import { removeFirstOccurrence } from "./queue-utils.js";
 import { SettingsService } from "./settings-service.js";
 import { SlashCommandsService, parseSlash } from "./slash-commands.js";
 import { ModelAdminService } from "./model-admin.js";
+import { subscriptionUsage } from "./subscriptions.js";
 import { FilesService, MACHINE_ROOT, workspacePath } from "./files-service.js";
 import {
 	isExtensionDisabled,
@@ -2463,6 +2464,13 @@ export class ClientSession {
 
 	/** 模型/服务商配置管理 —— 自包含模块，见 model-admin.ts。 */
 	private readonly modelAdmin!: ModelAdminService;
+
+	/** Account-level quotas use the same native auth/runtime as this client's chats. */
+	getSubscriptions(providerId?: string) {
+		return providerId
+			? subscriptionUsage.refresh(this.sharedModelRuntime!, providerId)
+			: subscriptionUsage.read(this.sharedModelRuntime!);
+	}
 
 	/** Persist an api-key credential for a provider (auth.json). */
 	setProviderApiKey(provider: string, apiKey: string): Promise<void> {

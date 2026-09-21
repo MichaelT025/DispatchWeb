@@ -1155,6 +1155,7 @@ export const en = {
 	workersPending: "Queued",
 	workersActive: "Running",
 	workersDone: "Finished",
+	workersFailed: "Failed",
 	workersNone: "None",
 	workersEmptyTitle: "No workers yet",
 	workersEmptyHint: "When the orchestrator delegates, each worker shows up here with its live transcript.",

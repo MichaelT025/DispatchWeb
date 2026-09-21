@@ -83,12 +83,19 @@ class Client {
 		for (const m of this.received) if (m.type === "provider_keys") keys = m.keys;
 		return keys;
 	}
-	// Poll until provider_keys for `provider` has `n` entries (or timeout).
-	async waitProviderKeys(provider, n, timeout = 25000) {
+	// A key switch leaves the count unchanged: optionally wait for the active
+	// name too, rather than accepting a snapshot sent before the switch notice.
+	async waitProviderKeys(provider, n, timeout = 25000, activeName) {
 		const start = Date.now();
 		while (Date.now() - start < timeout) {
 			const keys = this.lastProviderKeys();
-			if (keys && Array.isArray(keys[provider]) && keys[provider].length === n) return keys[provider];
+			if (
+				keys &&
+				Array.isArray(keys[provider]) &&
+				keys[provider].length === n &&
+				(activeName === undefined || keys[provider].some((key) => key.name === activeName && key.active))
+			)
+				return keys[provider];
 			await sleep(50);
 		}
 		throw new Error(`timeout waiting for provider_keys[${provider}] length ${n}`);
@@ -200,7 +207,7 @@ try {
 	c.send({ type: "activate_provider_key", provider: "deepseek", keyName: keyBName });
 	await c.waitForNotice("Switched to", 30000);
 	check("auth.json now sk-B", readAuth().deepseek?.key === "sk-B");
-	ks = await c.waitProviderKeys("deepseek", 2);
+	ks = await c.waitProviderKeys("deepseek", 2, 25000, keyBName);
 	check("key B active now", ks.find((k) => k.name === keyBName)?.active === true);
 
 	// 4) remove the ACTIVE key by name → falls back to the remaining (sk-A)

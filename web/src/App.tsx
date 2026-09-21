@@ -32,6 +32,7 @@ const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((m) =
 import { ScmPanel } from "./components/SCMPanel";
 import { WorkersPanel } from "./components/WorkersPanel";
 import { BackgroundPanel } from "./components/BackgroundPanel";
+import { SubscriptionUsage } from "./components/SubscriptionUsage";
 import { OPEN_WORKER_EVENT } from "./components/ToolCallBlock";
 import { registerAttachmentSink } from "./composer-bridge";
 import { appendDraftAttachments } from "./composer-draft";
@@ -41,7 +42,7 @@ import { ModelConfigModal } from "./components/ModelConfigModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { GlobalSearchModal } from "./components/GlobalSearchModal";
 import { FilePreview, type PreviewFile } from "./components/FilePreview";
-import { useChat } from "./use-chat";
+import { getClientId, useChat } from "./use-chat";
 import { recentConversationIds } from "./conversation-view";
 import { parseAgentRole, hasDispatchExtension } from "./agents";
 import type { ClientMessage, PromptAttachment, ToolStatus, UiMessage, UiWorker } from "./types";
@@ -1124,6 +1125,7 @@ export function App() {
 											/>
 										)}
 									</div>
+									<SubscriptionUsage clientId={getClientId()} ready={chat.ready && chat.status === "open"} />
 								</aside>
 							</>
 						)}

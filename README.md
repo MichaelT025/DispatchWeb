@@ -25,10 +25,13 @@ Delegated workers (Dispatch's `delegate` tool) show up in two places:
   elapsed time and the extension's current activity line. A row opens that
   worker in the pane; "Open workers" opens the lists.
 - **Workers pane** in the right workspace (Ctrl+Shift+L, or the Workers item
-  in the workspace chooser): **Running** / **Finished** lists for the current
+  in the workspace chooser): **Running**, **Finished**, and **Failed** lists for the current
   conversation — each row names the agent (role glyph, role, id), its task and
   elapsed time, with the live activity line while it runs and the first line
-  of its result once done — and one worker's transcript rendered with the
+  of its result once done. Provider/model errors and other failures appear in the
+  collapsible **Failed** section below **Finished**, not mixed with finished rows.
+  Cancelled and interrupted workers retain their existing **Finished** placement.
+  One worker's transcript is rendered with the
   chat's own message and tool components. Running workers stream in live and
   can be stopped individually; finished ones come from the extension's
   in-memory session, or from the saved JSONL under `<agent dir>/piastra/runs`
@@ -45,6 +48,29 @@ inline `pi-webui-workers` extension subscribes on each conversation's runtime,
 mirrors the worker list into `UiState.workers`, serves transcripts on
 `open_worker`, and relays `cancel_worker`. Nothing polls, and no worker text
 is scraped from tool output. Without the extension the tab is simply empty.
+
+## Subscription usage
+
+The right workspace footer shows a provider-logo button for each configured subscription
+(Codex, OpenCode Go, and Command Code); hover or focus for its name. Each opens a small popover with quota bars,
+percent used, reset countdowns, plan/credits, freshness, and a provider-specific
+refresh action. These are account limits, not session token costs.
+
+Opening the workspace fetches usage; while it and the browser tab remain visible,
+usage refreshes every three minutes. Closing the workspace or hiding the browser
+tab stops polling. Returning rechecks the server cache. Requests share an in-memory,
+credential-scoped cache across chats and browser tabs; transient failures retain
+valid data marked stale, and provider rate-limit cooldowns are respected. Manual
+refreshes have a shared ten-second cooldown to prevent repeated-click requests.
+
+Provider/auth/parser/cache logic is loaded directly from Dispatch's existing
+`extensions/pi-usage/*.mjs` modules, not copied into this repository. The bundled
+Dispatch layout is discovered automatically. For a standalone development checkout,
+set `DISPATCH_PI_USAGE_ROOT` to the `extensions/pi-usage` directory (or an entry file)
+in your Dispatch installation/checkout. Without those modules, the footer reports
+usage unavailable and the rest of the WebUI works normally. `DISPATCH_USAGE_DISABLED=1`
+disables collection. Credentials and internal account fingerprints never leave the
+server; no usage history is written to disk.
 
 ## Worktrees
 

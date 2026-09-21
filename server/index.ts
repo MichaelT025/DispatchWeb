@@ -40,6 +40,8 @@ import { isManaged, managedRefusal } from "./managed.js";
 import { launchOrigin, toServiceInfo } from "./launch-origin.js";
 import { parseTabs, tabsRefusal } from "./tabs.js";
 import type { ClientMessage, ServerMessage } from "./protocol.js";
+import { registerSubscriptionRoutes } from "./subscriptions-http.js";
+import { subscriptionUsage } from "./subscriptions.js";
 
 /** 从 CLI 参数中取 flag 值：支持 --flag value 与 --flag=value 两种写法。
  *  让 `node dist/server/index.js --host 0.0.0.0 --port 9000` 这类直接启动也能生效，
@@ -206,6 +208,8 @@ const TABS = parseTabs();
 app.get("/api/health", (_req, res) => {
 	res.json({ ok: true, piVersion: VERSION, cwd: CWD, pid: process.pid });
 });
+
+registerSubscriptionRoutes(app, (clientId) => service.get(clientId), originAllowed);
 
 /**
  * Stream a workspace file over HTTP.
@@ -1068,6 +1072,7 @@ async function shutdown(): Promise<void> {
 	shuttingDown = true;
 	console.log("\nshutting down…");
 	clearInterval(heartbeatTimer);
+	subscriptionUsage.dispose();
 	stopControl();
 	await service.disposeAll();
 	wss.close();

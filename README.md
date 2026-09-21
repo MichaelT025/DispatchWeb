@@ -29,15 +29,15 @@ Delegated workers (Dispatch's `delegate` tool) show up in two places:
   conversation — each row names the agent (role glyph, role, id), its task and
   elapsed time, with the live activity line while it runs and the first line
   of its result once done — and one worker's transcript rendered with the
-  chat's own message and tool components.
+  chat's own message and tool components. Running workers stream in live and
+  can be stopped individually; finished ones come from the extension's
+  in-memory session, or from the saved JSONL under `<agent dir>/piastra/runs`
+  after a restart. Workers are scoped to the conversation, not the project.
 - **Worker results** message in the chat: the extension's
   `dispatch-worker-result` message (asynchronous delegation) renders as one
   collapsed `<role> #<id> finished` line per worker; expanding shows that
   worker's result, and the arrow opens its transcript in the pane. The
-  delegate card stays "running" until the last worker of that call lands. Running workers stream in live and can be
-  stopped individually; finished ones come from the extension's in-memory
-  session, or from the saved JSONL under `<agent dir>/piastra/runs` after a
-  restart. Workers are scoped to the conversation, not the project.
+  delegate card stays "running" until the last worker of that call lands.
 
 The data comes from the extension's `piastra:workers` event channel
 (Dispatch `extensions/piastra/worker-bridge.mjs`, version 1): the server's

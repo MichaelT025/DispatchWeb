@@ -20,6 +20,8 @@ import {
 	planWindow,
 	type HeightEntry,
 	type WinRect,
+	COLLAPSE_MIN,
+	recentStartIndex,
 } from "../lazy-window";
 import { SearchBar } from "./SearchBar";
 import { PromptMinimap } from "./PromptMinimap";
@@ -31,36 +33,6 @@ import { useT } from "../i18n";
  *  React.memo skip messages that have no live tool output to show. */
 const EMPTY_LIVE = new Map<string, { toolName: string; text: string }>();
 
-/**
- * Messages beyond the most recent KEEP_RECENT are rendered as cheap collapsed
- * summary rows (no Markdown / thinking / tool output) until clicked. Only kicks
- * in once the chat grows past COLLAPSE_MIN, so short conversations are untouched.
- * Both count VISIBLE messages: toolResult records render inside their tool
- * card, so a tool-heavy turn (assistant + result per call) must not eat the
- * window twice as fast as a prose turn.
- */
-const KEEP_RECENT = 15;
-const COLLAPSE_MIN = 30;
-
-/** Index of the first fully rendered message: the one that leaves the last
- *  KEEP_RECENT visible (non-toolResult) messages, or 0 while the chat is
- *  shorter than COLLAPSE_MIN visible messages. */
-export function recentStartIndex(
-	messages: readonly { role: string }[],
-	keep = KEEP_RECENT,
-	min = COLLAPSE_MIN,
-): number {
-	let visible = 0;
-	for (const m of messages) if (m.role !== "toolResult") visible++;
-	if (visible <= min) return 0;
-	let remaining = keep;
-	for (let i = messages.length - 1; i >= 0; i--) {
-		if (messages[i].role === "toolResult") continue;
-		remaining--;
-		if (remaining === 0) return i;
-	}
-	return 0;
-}
 /** Grace window after a programmatic scroll during which onScroll ignores
  *  negative scrollTop jumps from our own snap() re-asserts.
  *
@@ -254,6 +226,8 @@ export function MessageList({
 	const lastId = messages.length > 0 ? messages[messages.length - 1].id : null;
 	// Only the last KEEP_RECENT persisted messages are fully rendered; older
 	// ones collapse to summary rows (unless the user expanded them).
+	// (recentStartIndex in lazy-window.ts: counts visible messages, not
+	// toolResult records, so tool-heavy turns don't eat the window twice as fast.)
 	const recentStart = useMemo(() => recentStartIndex(state.messages), [state.messages]);
 
 	/** 当前渲染为折叠摘要行的消息 id（SearchBar 的折叠层搜索索引用它；

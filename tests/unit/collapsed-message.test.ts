@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { LanguageProvider } from "../../web/src/i18n.js";
 import { CollapsedMessage } from "../../web/src/components/CollapsedMessage.js";
-import { recentStartIndex } from "../../web/src/components/MessageList.js";
+import { recentStartIndex } from "../../web/src/lazy-window.js";
 import type { UiMessage } from "../../web/src/types.js";
 
 let root: Root | null = null;

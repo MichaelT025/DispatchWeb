@@ -182,14 +182,17 @@ try {
 				.then((count) => count === 1),
 		"mobile popover remains open",
 	);
-	const mobileBox = await popover.boundingBox();
-	assert(
-		mobileBox &&
+	// The popover repositions after the viewport change; measure once layout settles.
+	await eventually(async () => {
+		const mobileBox = await popover.boundingBox();
+		return (
+			mobileBox &&
 			mobileBox.x >= -2 &&
 			mobileBox.y >= -2 &&
 			mobileBox.x + mobileBox.width <= 392 &&
-			mobileBox.y + mobileBox.height <= 846,
-	);
+			mobileBox.y + mobileBox.height <= 846
+		);
+	}, "mobile popover fits the viewport");
 	assert.equal(await page.locator("body").evaluate((el) => el.scrollWidth <= window.innerWidth), true);
 	await page.screenshot({ path: join(artifactDir, "subscriptions-mobile.png"), fullPage: true });
 	await footer.getByRole("button", { name: "Command Code", exact: true }).click();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UiMessage } from "../../server/protocol.js";
-import { stripTransientRetryErrors } from "../../server/serialize.js";
+import { serializeMessage, stripTransientRetryErrors, type AgentMessage } from "../../server/serialize.js";
 
 function assistantError(id: string): UiMessage {
 	return { id, role: "assistant", content: [], stopReason: "error", errorMessage: "500 overloaded" };
@@ -46,5 +46,17 @@ describe("stripTransientRetryErrors", () => {
 
 	it("空数组安全", () => {
 		expect(stripTransientRetryErrors([], true)).toEqual([]);
+	});
+});
+
+describe("serializeMessage", () => {
+	it("hides Pi transcript system messages from the UI", () => {
+		const system = {
+			role: "system",
+			content: "You are a coding assistant.",
+			toolsAdded: [],
+			timestamp: 1,
+		} as unknown as AgentMessage;
+		expect(serializeMessage(system, 0)).toBeNull();
 	});
 });

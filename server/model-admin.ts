@@ -321,8 +321,11 @@ export class ModelAdminService {
 	 *  auth.json credentials so legacy single-key setups show up immediately. */
 	listProviderKeys(): void {
 		const data = this.readProviderKeys();
+		const before = Object.keys(data).length;
 		for (const pid of this.builtinProviderIds()) this.seedProviderKeysFromAuth(pid, data);
-		this.writeProviderKeys(data);
+		// Only rewrite when seeding added a provider: an unconditional rewrite
+		// truncates the file under concurrent readers for no reason.
+		if (Object.keys(data).length !== before) this.writeProviderKeys(data);
 		this.host.emit({ type: "provider_keys", ...this.providerKeysInfo(data) });
 		this.host.flushSnapshot();
 	}

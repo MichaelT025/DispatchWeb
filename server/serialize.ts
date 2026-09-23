@@ -105,6 +105,12 @@ export function stripTransientRetryErrors(messages: UiMessage[], retryActive: bo
 
 export function serializeMessage(m: AgentMessage, seq: number): UiMessage | null {
 	switch (m.role) {
+		// Pi >= 0.87 keeps the system prompt and tool declarations in the
+		// transcript: state.messages always leads with one, and prompt/tool
+		// changes append more. They are model context, never UI bubbles.
+		case "system":
+			return null;
+
 		case "user":
 			return {
 				id: `u-${m.timestamp}-${seq}`,
